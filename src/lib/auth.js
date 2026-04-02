@@ -1,0 +1,94 @@
+import CredentialsProvider from "next-auth/providers/credentials";
+import bcrypt from "bcryptjs";
+import dbConnect from "@/lib/mongodb";
+import Club from "@/models/Club";
+
+export const authOptions = {
+  providers: [
+    CredentialsProvider({
+      name: "Credentials",
+      credentials: {
+        username: { label: "Username", type: "text" },
+        password: { label: "Password", type: "password" },
+      },
+      async authorize(credentials) {
+        const { username, password } = credentials;
+
+        // Check admin credentials first
+        if (
+          username === process.env.ADMIN_USERNAME &&
+          password === process.env.ADMIN_PASSWORD
+        ) {
+          return {
+            id: "admin",
+            name: "Admin",
+            role: "admin",
+          };
+        }
+
+        // Check club credentials
+        await dbConnect();
+        const club = await Club.findOne({ username: username.toLowerCase() });
+
+        if (!club) return null;
+
+        const isValid = await bcrypt.compare(password, club.password);
+        if (!isValid) return null;
+
+        return {
+          id: club._id.toString(),
+          name: club.name,
+          username: club.username,
+          role: "club",
+          stripeAccountId: club.stripeAccountId,
+          onboardingComplete: club.onboardingComplete,
+          hasDirectStripeAccess: club.hasDirectStripeAccess,
+        };
+      },
+    }),
+  ],
+  callbacks: {
+    async jwt({ token, user }) {
+      if (user) {
+        token.role = user.role;
+        token.userId = user.id;
+        if (user.role === "club") {
+          token.username = user.username;
+          token.stripeAccountId = user.stripeAccountId;
+          token.onboardingComplete = user.onboardingComplete;
+          token.hasDirectStripeAccess = user.hasDirectStripeAccess;
+        }
+      }
+
+      if (token.role === "club" && !token.onboardingComplete) {
+        await dbConnect();
+        const club = await Club.findById(token.userId).select("onboardingComplete stripeAccountId hasDirectStripeAccess");
+        if (club) {
+          token.onboardingComplete = club.onboardingComplete;
+          token.stripeAccountId = club.stripeAccountId;
+          token.hasDirectStripeAccess = club.hasDirectStripeAccess;
+        }
+      }
+
+      return token;
+    },
+    async session({ session, token }) {
+      session.user.role = token.role;
+      session.user.id = token.userId;
+      if (token.role === "club") {
+        session.user.username = token.username;
+        session.user.stripeAccountId = token.stripeAccountId;
+        session.user.onboardingComplete = token.onboardingComplete;
+        session.user.hasDirectStripeAccess = token.hasDirectStripeAccess;
+      }
+      return session;
+    },
+  },
+  pages: {
+    signIn: "/",
+  },
+  session: {
+    strategy: "jwt",
+  },
+  secret: process.env.NEXTAUTH_SECRET,
+};
