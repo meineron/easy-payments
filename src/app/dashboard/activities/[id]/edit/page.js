@@ -561,16 +561,18 @@ function TabForm({ activity, onSave, saving }) {
   );
 }
 
-/* ============== TAB 4: Payment (Per-Team Pricing) ============== */
+/* ============== TAB 4: Payment ============== */
 function TabPayment({ activity, onSave, saving }) {
   const [subscriptions, setSubscriptions] = useState([]);
   const [coupons, setCoupons] = useState([]);
   const [expandedSub, setExpandedSub] = useState(null);
-  const [bulkPrice, setBulkPrice] = useState({});
+  const [teamSearch, setTeamSearch] = useState("");
 
   const activityTeams = (activity?.teams || []).map((t) => ({
     teamId: t.teamId?._id || t.teamId, name: t.teamId?.name || "Unknown", season: t.teamId?.season || "",
   }));
+
+  const activityStartDate = activity?.startDate ? new Date(activity.startDate) : null;
 
   useEffect(() => {
     if (activity) {
@@ -580,10 +582,12 @@ function TabPayment({ activity, onSave, saving }) {
   }, [activity]);
 
   function addSubscription() {
-    const teamPricing = activityTeams.map((t) => ({ teamId: t.teamId, priceCents: 0 }));
+    const allTeamIds = activityTeams.map((t) => t.teamId);
     setSubscriptions((prev) => [...prev, {
-      title: "", description: "", months: 10, hasMonthlyReduction: false, monthlyPricing: [],
-      teamPricing, items: [],
+      title: "", description: "", priceCents: 0, dueDateAmountCents: 0,
+      maxInstallments: 1, firstInstallmentDate: null, months: 10,
+      hasReduction: false, reductionSchedule: [],
+      includedTeamIds: allTeamIds, items: [],
       paymentTypes: { card: true, bankTransfer: false, cash: false, check: false },
       paymentMessages: { card: "", bankTransfer: "Payment will not be completed until confirmed by the office", cash: "Please turn into the office and complete payment", check: "Please turn into the office and complete payment" },
     }]);
@@ -592,40 +596,73 @@ function TabPayment({ activity, onSave, saving }) {
   function updateSub(idx, field, value) { setSubscriptions((prev) => prev.map((s, i) => (i === idx ? { ...s, [field]: value } : s))); }
   function removeSub(idx) { setSubscriptions((prev) => prev.filter((_, i) => i !== idx)); if (expandedSub === idx) setExpandedSub(null); }
 
-  function generateMonthlyPricing(idx) {
-    const sub = subscriptions[idx]; const m = sub.months || 10; const pricing = []; const today = new Date();
+  function generateReductionSchedule(idx) {
+    const sub = subscriptions[idx];
+    const m = sub.months || 10;
+    const fullPrice = sub.priceCents || 0;
+    const perMonth = m > 0 ? Math.round(fullPrice / m) : 0;
+    const schedule = [];
+    const start = activityStartDate || new Date();
     for (let i = 0; i < m; i++) {
-      const start = new Date(today.getFullYear(), today.getMonth() + i, 1);
-      pricing.push({ month: i + 1, startDate: start.toISOString(), priceCents: 0, maxInstallments: m - i });
+      const date = new Date(start.getFullYear(), start.getMonth() + i, start.getDate());
+      const price = fullPrice - (perMonth * i);
+      schedule.push({ date: date.toISOString(), priceCents: Math.max(price, 0), maxInstallments: m - i });
     }
-    updateSub(idx, "monthlyPricing", pricing);
+    updateSub(idx, "reductionSchedule", schedule);
   }
-  function updateMonthlyRow(subIdx, rowIdx, field, value) {
-    setSubscriptions((prev) => { const ns = JSON.parse(JSON.stringify(prev)); ns[subIdx].monthlyPricing[rowIdx][field] = field === "startDate" ? value : Number(value); return ns; });
+
+  function updateReductionRow(subIdx, rowIdx, field, value) {
+    setSubscriptions((prev) => {
+      const ns = JSON.parse(JSON.stringify(prev));
+      if (field === "date") ns[subIdx].reductionSchedule[rowIdx].date = value;
+      else ns[subIdx].reductionSchedule[rowIdx][field] = Number(value);
+      return ns;
+    });
   }
-  function updateTeamPrice(subIdx, teamId, priceCents) {
-    setSubscriptions((prev) => { const ns = JSON.parse(JSON.stringify(prev));
-      const tp = ns[subIdx].teamPricing || []; const existing = tp.find((t) => t.teamId === teamId);
-      if (existing) existing.priceCents = priceCents; else tp.push({ teamId, priceCents });
-      ns[subIdx].teamPricing = tp; return ns; });
+
+  function addReductionRow(subIdx) {
+    setSubscriptions((prev) => {
+      const ns = JSON.parse(JSON.stringify(prev));
+      const schedule = ns[subIdx].reductionSchedule;
+      const lastRow = schedule[schedule.length - 1];
+      let newDate = new Date();
+      if (lastRow?.date) {
+        newDate = new Date(lastRow.date);
+        newDate.setMonth(newDate.getMonth() + 1);
+      }
+      schedule.push({ date: newDate.toISOString(), priceCents: 0, maxInstallments: 1 });
+      return ns;
+    });
   }
+
+  function removeReductionRow(subIdx, rowIdx) {
+    setSubscriptions((prev) => {
+      const ns = JSON.parse(JSON.stringify(prev));
+      ns[subIdx].reductionSchedule.splice(rowIdx, 1);
+      return ns;
+    });
+  }
+
   function toggleTeamInSub(subIdx, teamId) {
-    setSubscriptions((prev) => { const ns = JSON.parse(JSON.stringify(prev));
-      const tp = ns[subIdx].teamPricing || []; const idx = tp.findIndex((t) => t.teamId === teamId);
-      if (idx >= 0) tp.splice(idx, 1); else tp.push({ teamId, priceCents: 0 });
-      ns[subIdx].teamPricing = tp; return ns; });
+    setSubscriptions((prev) => {
+      const ns = JSON.parse(JSON.stringify(prev));
+      const ids = ns[subIdx].includedTeamIds || [];
+      const idx = ids.indexOf(teamId);
+      if (idx >= 0) ids.splice(idx, 1); else ids.push(teamId);
+      ns[subIdx].includedTeamIds = ids;
+      return ns;
+    });
   }
+
   function toggleAllTeamsInSub(subIdx, check) {
-    setSubscriptions((prev) => { const ns = JSON.parse(JSON.stringify(prev));
-      if (check) { const existing = new Set((ns[subIdx].teamPricing || []).map((t) => t.teamId)); const merged = [...(ns[subIdx].teamPricing || [])];
-        activityTeams.forEach((t) => { if (!existing.has(t.teamId)) merged.push({ teamId: t.teamId, priceCents: 0 }); }); ns[subIdx].teamPricing = merged;
-      } else { ns[subIdx].teamPricing = []; } return ns; });
+    setSubscriptions((prev) => {
+      const ns = JSON.parse(JSON.stringify(prev));
+      ns[subIdx].includedTeamIds = check ? activityTeams.map((t) => t.teamId) : [];
+      return ns;
+    });
   }
-  function applyBulkPrice(subIdx) {
-    const val = bulkPrice[subIdx]; if (!val && val !== 0) return; const cents = displayToCents(val);
-    setSubscriptions((prev) => { const ns = JSON.parse(JSON.stringify(prev)); (ns[subIdx].teamPricing || []).forEach((tp) => { tp.priceCents = cents; }); return ns; });
-  }
-  function addItem(subIdx) { setSubscriptions((prev) => { const ns = JSON.parse(JSON.stringify(prev)); ns[subIdx].items.push({ name: "", priceCents: 0, quantity: 1, isRequired: false }); return ns; }); }
+
+  function addItem(subIdx, isDiscount = false) { setSubscriptions((prev) => { const ns = JSON.parse(JSON.stringify(prev)); ns[subIdx].items.push({ name: "", priceCents: 0, quantity: 1, isRequired: false, isDiscount, expiresAt: null }); return ns; }); }
   function updateItem(subIdx, itemIdx, field, value) { setSubscriptions((prev) => { const ns = JSON.parse(JSON.stringify(prev)); ns[subIdx].items[itemIdx][field] = value; return ns; }); }
   function removeItem(subIdx, itemIdx) { setSubscriptions((prev) => { const ns = JSON.parse(JSON.stringify(prev)); ns[subIdx].items.splice(itemIdx, 1); return ns; }); }
   function togglePaymentType(subIdx, type) { setSubscriptions((prev) => { const ns = JSON.parse(JSON.stringify(prev)); ns[subIdx].paymentTypes[type] = !ns[subIdx].paymentTypes[type]; return ns; }); }
@@ -634,6 +671,11 @@ function TabPayment({ activity, onSave, saving }) {
   function updateCoupon(idx, field, value) { setCoupons((prev) => prev.map((c, i) => (i === idx ? { ...c, [field]: value } : c))); }
   function removeCoupon(idx) { setCoupons((prev) => prev.filter((_, i) => i !== idx)); }
   function save() { onSave({ subscriptions, coupons }); }
+
+  function fmtDate(d) {
+    if (!d) return "—";
+    return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  }
 
   return (
     <div className="space-y-8">
@@ -645,8 +687,8 @@ function TabPayment({ activity, onSave, saving }) {
         {subscriptions.length === 0 ? <p className="text-gray-400 text-sm p-4 bg-gray-50 rounded text-center">No subscriptions yet.</p> : (
           <div className="space-y-3">
             {subscriptions.map((sub, sIdx) => {
-              const prices = (sub.teamPricing || []).map((t) => t.priceCents).filter((p) => p > 0);
-              const priceLabel = prices.length === 0 ? "No prices set" : prices.every((p) => p === prices[0]) ? `$${centsToDisplay(prices[0])}` : `$${centsToDisplay(Math.min(...prices))} – $${centsToDisplay(Math.max(...prices))}`;
+              const priceLabel = sub.priceCents > 0 ? `$${centsToDisplay(sub.priceCents)}` : "No price set";
+              const teamCount = (sub.includedTeamIds || []).length;
               return (
                 <div key={sIdx} className="border rounded-lg">
                   <div className="flex items-center justify-between px-4 py-3 bg-gray-50 cursor-pointer" onClick={() => setExpandedSub(expandedSub === sIdx ? null : sIdx)}>
@@ -654,101 +696,210 @@ function TabPayment({ activity, onSave, saving }) {
                       <span className="text-gray-400">{expandedSub === sIdx ? "▼" : "▶"}</span>
                       <span className="font-medium text-gray-900">{sub.title || "(Untitled)"}</span>
                       <span className="text-xs text-gray-500">{priceLabel}</span>
-                      <span className="text-xs text-gray-400">({(sub.teamPricing || []).length} teams)</span>
+                      <span className="text-xs text-gray-400">({teamCount} teams)</span>
                     </div>
                     <button onClick={(e) => { e.stopPropagation(); removeSub(sIdx); }} className="text-xs text-red-500 hover:text-red-700">Remove</button>
                   </div>
                   {expandedSub === sIdx && (
-                    <div className="p-4 space-y-4">
+                    <div className="p-4 space-y-5">
+                      {/* Title & Description */}
                       <div className="grid grid-cols-2 gap-4">
                         <div><label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
                           <input value={sub.title} onChange={(e) => updateSub(sIdx, "title", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
                         <div><label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
                           <input value={sub.description} onChange={(e) => updateSub(sIdx, "description", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Months</label>
-                        <input type="number" value={sub.months} onChange={(e) => updateSub(sIdx, "months", Number(e.target.value))} className="w-32 border rounded-lg px-3 py-2 text-sm" />
+
+                      {/* Price, Due Date Amount, Months */}
+                      <div className="grid grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Total Price</label>
+                          <div className="flex items-center gap-1"><span className="text-sm text-gray-500">$</span>
+                            <PriceInput value={sub.priceCents} onChange={(cents) => updateSub(sIdx, "priceCents", cents)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Due Date Amount</label>
+                          <div className="flex items-center gap-1"><span className="text-sm text-gray-500">$</span>
+                            <PriceInput value={sub.dueDateAmountCents} onChange={(cents) => updateSub(sIdx, "dueDateAmountCents", cents)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+                          <p className="text-xs text-gray-400 mt-1">Upfront amount at registration (counts as installment #1)</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Months</label>
+                          <input type="number" value={sub.months} onChange={(e) => updateSub(sIdx, "months", Number(e.target.value))} className="w-full border rounded-lg px-3 py-2 text-sm" min="1" />
+                        </div>
                       </div>
 
-                      {/* Monthly Reduction */}
+                      {/* Max Installments & First Installment Date */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Max Installments</label>
+                          <input type="number" value={sub.maxInstallments} onChange={(e) => updateSub(sIdx, "maxInstallments", Number(e.target.value))} className="w-full border rounded-lg px-3 py-2 text-sm" min="1" />
+                          <p className="text-xs text-gray-400 mt-1">Parents can choose 1 to {sub.maxInstallments || 1} installments</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">First Installment Date</label>
+                          <input type="date" value={sub.firstInstallmentDate ? sub.firstInstallmentDate.slice(0, 10) : ""}
+                            onChange={(e) => updateSub(sIdx, "firstInstallmentDate", e.target.value || null)}
+                            className="w-full border rounded-lg px-3 py-2 text-sm" />
+                          <p className="text-xs text-gray-400 mt-1">* If a parent pays after this date, installments start on the 1st of next month</p>
+                        </div>
+                      </div>
+
+                      {/* Installment Preview */}
+                      {sub.priceCents > 0 && sub.maxInstallments > 1 && sub.dueDateAmountCents > 0 && sub.firstInstallmentDate && (
+                        <div className="bg-blue-50 rounded-lg p-4">
+                          <h4 className="text-sm font-semibold text-blue-900 mb-2">Installment Preview (max {sub.maxInstallments})</h4>
+                          <div className="text-xs text-blue-800 space-y-1">
+                            <div className="flex justify-between"><span>Due at registration (installment #1)</span><span className="font-medium">${centsToDisplay(sub.dueDateAmountCents)}</span></div>
+                            {(() => {
+                              const remaining = (sub.priceCents || 0) - (sub.dueDateAmountCents || 0);
+                              const numRemaining = (sub.maxInstallments || 1) - 1;
+                              if (remaining <= 0 || numRemaining <= 0) return null;
+                              const perInstallment = Math.round(remaining / numRemaining);
+                              const firstDate = new Date(sub.firstInstallmentDate);
+                              return Array.from({ length: numRemaining }, (_, i) => {
+                                const d = new Date(firstDate.getFullYear(), firstDate.getMonth() + i, firstDate.getDate());
+                                const amt = i === numRemaining - 1 ? remaining - (perInstallment * (numRemaining - 1)) : perInstallment;
+                                return (<div key={i} className="flex justify-between"><span>{fmtDate(d)} (installment #{i + 2})</span><span className="font-medium">${centsToDisplay(amt)}</span></div>);
+                              });
+                            })()}
+                            <div className="flex justify-between border-t border-blue-200 pt-1 mt-1 font-semibold"><span>Total</span><span>${centsToDisplay(sub.priceCents)}</span></div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Reduction Schedule */}
                       <div>
                         <label className="flex items-center gap-2 text-sm mb-2">
-                          <input type="checkbox" checked={sub.hasMonthlyReduction} onChange={(e) => { updateSub(sIdx, "hasMonthlyReduction", e.target.checked); if (e.target.checked && sub.monthlyPricing.length === 0) generateMonthlyPricing(sIdx); }} className="rounded" />
-                          <span className="font-medium text-gray-700">Price Reduction by Month</span>
+                          <input type="checkbox" checked={!!sub.hasReduction} onChange={(e) => { updateSub(sIdx, "hasReduction", e.target.checked); if (e.target.checked && (!sub.reductionSchedule || sub.reductionSchedule.length === 0)) generateReductionSchedule(sIdx); }} className="rounded" />
+                          <span className="font-medium text-gray-700">Price Reduction Schedule</span>
                         </label>
-                        {sub.hasMonthlyReduction && (
+                        {sub.hasReduction && (
                           <div className="border rounded-lg overflow-x-auto">
                             <table className="w-full text-sm">
-                              <thead><tr className="bg-gray-50 text-left"><th className="px-3 py-2">Month</th><th className="px-3 py-2">Start Date</th><th className="px-3 py-2">Max Installments</th></tr></thead>
+                              <thead><tr className="bg-gray-50 text-left">
+                                <th className="px-3 py-2 w-8">#</th>
+                                <th className="px-3 py-2">Date</th>
+                                <th className="px-3 py-2">Price ($)</th>
+                                <th className="px-3 py-2">Max Installments</th>
+                                <th className="px-3 py-2 w-8"></th>
+                              </tr></thead>
                               <tbody>
-                                {(sub.monthlyPricing || []).map((mp, rIdx) => (
+                                {(sub.reductionSchedule || []).map((row, rIdx) => (
                                   <tr key={rIdx} className="border-t">
-                                    <td className="px-3 py-2">{mp.month}</td>
-                                    <td className="px-3 py-2"><input type="date" value={mp.startDate ? mp.startDate.slice(0, 10) : ""} onChange={(e) => updateMonthlyRow(sIdx, rIdx, "startDate", e.target.value)} className="border rounded px-2 py-1 text-sm" /></td>
-                                    <td className="px-3 py-2"><input type="number" value={mp.maxInstallments} onChange={(e) => updateMonthlyRow(sIdx, rIdx, "maxInstallments", e.target.value)} className="border rounded px-2 py-1 text-sm w-20" /></td>
+                                    <td className="px-3 py-2 text-gray-400">{rIdx + 1}</td>
+                                    <td className="px-3 py-2"><input type="date" value={row.date ? row.date.slice(0, 10) : ""}
+                                      onChange={(e) => updateReductionRow(sIdx, rIdx, "date", e.target.value)} className="border rounded px-2 py-1 text-sm" /></td>
+                                    <td className="px-3 py-2"><PriceInput value={row.priceCents}
+                                      onChange={(cents) => updateReductionRow(sIdx, rIdx, "priceCents", cents)} className="border rounded px-2 py-1 text-sm w-28" /></td>
+                                    <td className="px-3 py-2"><input type="number" value={row.maxInstallments}
+                                      onChange={(e) => updateReductionRow(sIdx, rIdx, "maxInstallments", e.target.value)} className="border rounded px-2 py-1 text-sm w-20" min="1" /></td>
+                                    <td className="px-3 py-2"><button onClick={() => removeReductionRow(sIdx, rIdx)} className="text-red-400 hover:text-red-600 text-sm">×</button></td>
                                   </tr>
                                 ))}
                               </tbody>
                             </table>
-                            <div className="px-3 py-2 bg-gray-50"><button onClick={() => generateMonthlyPricing(sIdx)} className="text-xs text-blue-600 hover:text-blue-800">Recalculate schedule</button></div>
+                            <div className="px-3 py-2 bg-gray-50 flex items-center gap-3">
+                              <button onClick={() => addReductionRow(sIdx)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">+ Add Row</button>
+                              <button onClick={() => generateReductionSchedule(sIdx)} className="text-xs text-gray-500 hover:text-gray-700">Auto-generate from start date</button>
+                            </div>
                           </div>
                         )}
                       </div>
 
-                      {/* Team Pricing */}
+                      {/* Included Teams */}
                       <div>
                         <div className="flex items-center justify-between mb-2">
-                          <label className="text-sm font-medium text-gray-700">Team Pricing</label>
+                          <label className="text-sm font-medium text-gray-700">Included Teams ({(sub.includedTeamIds || []).length}/{activityTeams.length})</label>
                           <div className="flex gap-2">
                             <button onClick={() => toggleAllTeamsInSub(sIdx, true)} className="text-xs text-blue-600 hover:text-blue-800">Check All</button>
                             <button onClick={() => toggleAllTeamsInSub(sIdx, false)} className="text-xs text-red-500 hover:text-red-700">Uncheck All</button>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2 mb-3">
-                          <label className="text-xs text-gray-500">Set all prices to:</label>
-                          <input type="text" inputMode="decimal" value={bulkPrice[sIdx] ?? ""} onChange={(e) => { const v = e.target.value; if (v === "" || /^\d*\.?\d{0,2}$/.test(v)) setBulkPrice((p) => ({ ...p, [sIdx]: v })); }}
-                            placeholder="0.00" className="border rounded px-2 py-1 text-sm w-28" />
-                          <button onClick={() => applyBulkPrice(sIdx)} className="text-xs bg-gray-100 px-2 py-1 rounded hover:bg-gray-200">Apply</button>
-                        </div>
-                        {activityTeams.length === 0 ? <p className="text-xs text-gray-400">Add teams in the Teams tab first.</p> : (
-                          <div className="border rounded-lg divide-y max-h-60 overflow-y-auto">
-                            {activityTeams.map((t) => {
-                              const tp = (sub.teamPricing || []).find((p) => p.teamId === t.teamId);
-                              const included = !!tp;
+                        {(sub.includedTeamIds || []).length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mb-2">
+                            {(sub.includedTeamIds || []).map((tid) => {
+                              const team = activityTeams.find((t) => t.teamId === tid);
+                              if (!team) return null;
                               return (
-                                <div key={t.teamId} className="flex items-center gap-3 px-3 py-2">
-                                  <input type="checkbox" checked={included} onChange={() => toggleTeamInSub(sIdx, t.teamId)} className="rounded" />
-                                  <span className="flex-1 text-sm"><span className="font-medium">{t.name}</span><span className="text-xs text-gray-400 ml-2">{t.season}</span></span>
-                                  {included && (
-                                    <div className="flex items-center gap-1">
-                                      <span className="text-xs text-gray-500">$</span>
-                                      <PriceInput value={tp.priceCents} onChange={(cents) => updateTeamPrice(sIdx, t.teamId, cents)}
-                                        className="border rounded px-2 py-1 text-sm w-24" />
-                                    </div>
-                                  )}
-                                </div>
+                                <span key={tid} className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2.5 py-0.5 text-xs font-medium">
+                                  {team.name}
+                                  <button onClick={() => toggleTeamInSub(sIdx, tid)} className="text-blue-400 hover:text-blue-700 ml-0.5" title="Remove">
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                                  </button>
+                                </span>
                               );
                             })}
                           </div>
                         )}
+                        {activityTeams.length === 0 ? <p className="text-xs text-gray-400">Add teams in the Teams tab first.</p> : (
+                          <>
+                            <input type="text" value={teamSearch} onChange={(e) => setTeamSearch(e.target.value)}
+                              placeholder="Search teams..." className="w-full border rounded-lg px-3 py-1.5 text-sm mb-2" />
+                            <div className="border rounded-lg divide-y max-h-48 overflow-y-auto">
+                              {activityTeams.filter((t) => {
+                                if (!teamSearch.trim()) return true;
+                                const q = teamSearch.toLowerCase();
+                                return (t.name || "").toLowerCase().includes(q) || (t.season || "").toLowerCase().includes(q);
+                              }).map((t) => {
+                                const included = (sub.includedTeamIds || []).includes(t.teamId);
+                                return (
+                                  <div key={t.teamId} className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50">
+                                    <input type="checkbox" checked={included} onChange={() => toggleTeamInSub(sIdx, t.teamId)} className="rounded" />
+                                    <span className="flex-1 text-sm"><span className="font-medium">{t.name}</span><span className="text-xs text-gray-400 ml-2">{t.season}</span></span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </>
+                        )}
                       </div>
 
-                      {/* Items */}
+                      {/* Items & Discounts */}
                       <div>
                         <div className="flex items-center justify-between mb-2">
-                          <label className="text-sm font-medium text-gray-700">Items</label>
-                          <button onClick={() => addItem(sIdx)} className="text-xs text-blue-600 hover:text-blue-800">+ Add Item</button>
-                        </div>
-                        {sub.items.map((item, iIdx) => (
-                          <div key={iIdx} className="flex items-center gap-3 mb-2">
-                            <input value={item.name} onChange={(e) => updateItem(sIdx, iIdx, "name", e.target.value)} placeholder="Item name" className="flex-1 border rounded px-2 py-1 text-sm" />
-                            <PriceInput value={item.priceCents} onChange={(cents) => updateItem(sIdx, iIdx, "priceCents", cents)} placeholder="Price" className="w-24 border rounded px-2 py-1 text-sm" />
-                            <input type="number" value={item.quantity} onChange={(e) => updateItem(sIdx, iIdx, "quantity", Number(e.target.value))} className="w-16 border rounded px-2 py-1 text-sm" />
-                            <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={item.isRequired} onChange={(e) => updateItem(sIdx, iIdx, "isRequired", e.target.checked)} className="rounded" />Req</label>
-                            <button onClick={() => removeItem(sIdx, iIdx)} className="text-red-500 text-sm">×</button>
+                          <label className="text-sm font-medium text-gray-700">Items & Discounts</label>
+                          <div className="flex gap-2">
+                            <button onClick={() => addItem(sIdx, false)} className="text-xs text-blue-600 hover:text-blue-800">+ Add Item</button>
+                            <button onClick={() => addItem(sIdx, true)} className="text-xs text-green-600 hover:text-green-800">+ Add Discount</button>
                           </div>
-                        ))}
+                        </div>
+                        {sub.items.length === 0 ? <p className="text-xs text-gray-400 text-center py-2">No items or discounts.</p> : (
+                          <div className="space-y-2">
+                            {sub.items.map((item, iIdx) => (
+                              <div key={iIdx} className={`border rounded-lg p-2.5 ${item.isDiscount ? "bg-red-50/50 border-red-200" : ""}`}>
+                                <div className="flex items-center gap-3">
+                                  {item.isDiscount && <span className="text-red-500 text-xs font-semibold whitespace-nowrap">DISCOUNT</span>}
+                                  <input value={item.name} onChange={(e) => updateItem(sIdx, iIdx, "name", e.target.value)}
+                                    placeholder={item.isDiscount ? "Discount name" : "Item name"} className="flex-1 border rounded px-2 py-1 text-sm" />
+                                  <div className="flex items-center gap-1">
+                                    {item.isDiscount && <span className="text-xs text-red-500">-$</span>}
+                                    {!item.isDiscount && <span className="text-xs text-gray-500">$</span>}
+                                    <PriceInput value={item.priceCents} onChange={(cents) => updateItem(sIdx, iIdx, "priceCents", cents)}
+                                      placeholder="0.00" className="w-24 border rounded px-2 py-1 text-sm" />
+                                  </div>
+                                  <input type="number" value={item.quantity} onChange={(e) => updateItem(sIdx, iIdx, "quantity", Number(e.target.value))}
+                                    className="w-14 border rounded px-2 py-1 text-sm" title="Quantity" min="1" />
+                                  {!item.isDiscount && (
+                                    <label className="flex items-center gap-1 text-xs whitespace-nowrap"><input type="checkbox" checked={item.isRequired}
+                                      onChange={(e) => updateItem(sIdx, iIdx, "isRequired", e.target.checked)} className="rounded" />Req</label>
+                                  )}
+                                  <button onClick={() => removeItem(sIdx, iIdx)} className="text-red-400 hover:text-red-600 text-sm">×</button>
+                                </div>
+                                <div className="flex items-center gap-3 mt-1.5">
+                                  <label className="flex items-center gap-1.5 text-xs text-gray-500">
+                                    <span>Expires:</span>
+                                    <input type="date" value={item.expiresAt ? (typeof item.expiresAt === "string" ? item.expiresAt.slice(0, 10) : "") : ""}
+                                      onChange={(e) => updateItem(sIdx, iIdx, "expiresAt", e.target.value || null)}
+                                      className="border rounded px-1.5 py-0.5 text-xs w-36" />
+                                  </label>
+                                  {item.expiresAt && <span className="text-[10px] text-gray-400">Will not appear after this date</span>}
+                                  {!item.expiresAt && <span className="text-[10px] text-gray-400">No expiry — always included</span>}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
 
                       {/* Payment Types */}

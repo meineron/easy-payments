@@ -26,7 +26,7 @@ export async function POST(request, { params }) {
     parent.invitedAt = new Date();
     await parent.save();
 
-    const club = await Club.findById(session.user.id, "name").lean();
+    const club = await Club.findById(session.user.id, "name logoUrl").lean();
     const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
     const inviteUrl = `${baseUrl}/parent/login?invite=${token}`;
 
@@ -34,6 +34,7 @@ export async function POST(request, { params }) {
       parentName: parent.firstName,
       clubName: club?.name || "Your Club",
       inviteUrl,
+      logoUrl: club?.logoUrl || null,
     });
 
     return NextResponse.json({ success: true, invitedAt: parent.invitedAt });

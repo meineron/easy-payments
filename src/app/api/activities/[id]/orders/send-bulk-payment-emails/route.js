@@ -3,42 +3,11 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import dbConnect from "@/lib/mongodb";
 import mongoose from "mongoose";
-import Stripe from "stripe";
+import crypto from "crypto";
 import Order from "@/models/Order";
 import Activity from "@/models/Activity";
 import Club from "@/models/Club";
 import { sendCustomPaymentEmail } from "@/lib/email";
-
-function buildLineItems(order) {
-  const lineItems = [];
-  if (order.subscriptionPriceCents > 0) {
-    lineItems.push({
-      price_data: { currency: "usd", product_data: { name: order.subscriptionTitle || "Subscription" }, unit_amount: order.subscriptionPriceCents },
-      quantity: 1,
-    });
-  }
-  (order.items || []).forEach((item) => {
-    if (item.isDiscount || item.priceCents <= 0) return;
-    lineItems.push({
-      price_data: { currency: "usd", product_data: { name: item.name || "Item" }, unit_amount: item.priceCents },
-      quantity: item.quantity || 1,
-    });
-  });
-  return lineItems;
-}
-
-function calcTotalDiscount(order) {
-  let d = 0;
-  (order.items || []).filter((i) => i.isDiscount).forEach((i) => { d += Math.abs(i.priceCents) * (i.quantity || 1); });
-  if (order.discountType === "amount") d += order.discountValue || 0;
-  else if (order.discountType === "percentage") {
-    const sub = order.subscriptionPriceCents || 0;
-    const items = (order.items || []).filter((i) => !i.isDiscount).reduce((s, i) => s + i.priceCents * (i.quantity || 1), 0);
-    d += Math.round((sub + items) * (order.discountValue || 0) / 100);
-  }
-  d += order.couponDiscountCents || 0;
-  return d;
-}
 
 function formatCents(c) { return "$" + ((c || 0) / 100).toFixed(2); }
 
@@ -65,23 +34,11 @@ export async function POST(request, { params }) {
 
     const [activity, club] = await Promise.all([
       Activity.findById(id, "title").lean(),
-      Club.findById(session.user.id, "name hasDirectStripeAccess stripeSecretKey stripeAccountId").lean(),
+      Club.findById(session.user.id, "name logoUrl").lean(),
     ]);
 
     if (!activity || !club) {
       return NextResponse.json({ error: "Activity or club not found" }, { status: 404 });
-    }
-
-    let stripe, paymentArgs = {};
-    if (club.hasDirectStripeAccess && club.stripeSecretKey) {
-      stripe = new Stripe(club.stripeSecretKey);
-    } else if (club.stripeAccountId) {
-      stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-      paymentArgs.payment_intent_data = {
-        transfer_data: { destination: club.stripeAccountId },
-      };
-    } else {
-      return NextResponse.json({ error: "Club payment not configured" }, { status: 400 });
     }
 
     const teamObjectIds = teamIds.map((t) => {
@@ -113,42 +70,14 @@ export async function POST(request, { params }) {
       if (TEST_MODE && sentCount >= 1) break;
 
       try {
-        const lineItems = buildLineItems(order);
-        if (lineItems.length === 0) continue;
-
-        const totalDiscount = calcTotalDiscount(order);
-        const connectedArgs = {};
-        if (!club.hasDirectStripeAccess && club.stripeAccountId) {
-          connectedArgs.payment_intent_data = {
-            transfer_data: { destination: club.stripeAccountId },
-            application_fee_amount: Math.max(100, Math.round(order.totalCostCents * 0.02)),
-          };
+        if (!order.paymentToken) {
+          order.paymentToken = crypto.randomUUID();
         }
-
-        let stripeCoupon = null;
-        if (totalDiscount > 0) {
-          stripeCoupon = await stripe.coupons.create({ amount_off: totalDiscount, currency: "usd", duration: "once", name: "Discount" });
-        }
-
-        const recipient = TEST_MODE ? TEST_EMAIL : order.parent1Email;
-
-        const sessionConfig = {
-          mode: "payment",
-          line_items: lineItems,
-          success_url: `${baseUrl}/register/${id}/success?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${baseUrl}/register/${id}`,
-          customer_email: recipient,
-          metadata: { orderId: String(order._id), activityId: String(id), clubId: String(order.clubId), type: "activity_registration" },
-          ...connectedArgs,
-        };
-        if (stripeCoupon) sessionConfig.discounts = [{ coupon: stripeCoupon.id }];
-
-        const stripeSession = await stripe.checkout.sessions.create(sessionConfig);
-
-        order.stripeSessionId = stripeSession.id;
         order.paymentLinkSentAt = new Date();
         await order.save();
 
+        const paymentUrl = `${baseUrl}/payment/${order.paymentToken}`;
+        const recipient = TEST_MODE ? TEST_EMAIL : order.parent1Email;
         const totalDue = order.totalCostCents - (order.paidCents || 0);
 
         await sendCustomPaymentEmail(recipient, {
@@ -157,8 +86,9 @@ export async function POST(request, { params }) {
           playerName: `${order.playerFirstName} ${order.playerLastName}`,
           clubName: club.name || "",
           activityTitle: activity.title || "",
-          paymentUrl: stripeSession.url,
+          paymentUrl,
           totalAmount: formatCents(totalDue > 0 ? totalDue : order.totalCostCents),
+          logoUrl: club.logoUrl || null,
         });
 
         sentCount++;

@@ -30,29 +30,22 @@ function buildInstallmentSchedule(order, sub) {
 
 export async function POST(request, { params }) {
   try {
-    const { activityId } = await params;
+    const { token } = await params;
     const body = await request.json();
-    const { orderId, token, adminReturn, chosenInstallments } = body;
+    const { chosenInstallments } = body;
 
     await dbConnect();
 
-    let order;
-    if (token) {
-      order = await Order.findOne({ registrationToken: token, activityId });
-    } else if (orderId) {
-      order = await Order.findOne({ _id: orderId, activityId });
-    }
-
+    const order = await Order.findOne({ paymentToken: token });
     if (!order) {
-      return NextResponse.json({ error: "Order not found" }, { status: 404 });
+      return NextResponse.json({ error: "Payment link not found" }, { status: 404 });
     }
-
     if (order.status === "paid") {
       return NextResponse.json({ error: "Already paid" }, { status: 400 });
     }
 
     const [activity, club] = await Promise.all([
-      Activity.findById(activityId, "title clubId subscriptions").lean(),
+      Activity.findById(order.activityId, "title clubId subscriptions").lean(),
       Club.findById(order.clubId, "name hasDirectStripeAccess stripeSecretKey stripeAccountId").lean(),
     ]);
 
@@ -62,7 +55,7 @@ export async function POST(request, { params }) {
 
     const actSub = (activity?.subscriptions || []).find((s) => String(s._id) === order.subscriptionId);
     const maxInstallments = actSub?.maxInstallments || 1;
-    const chosen = Math.min(Math.max(chosenInstallments || order.chosenInstallments || 1, 1), maxInstallments);
+    const chosen = Math.min(Math.max(chosenInstallments || 1, 1), maxInstallments);
 
     order.chosenInstallments = chosen;
     const schedule = buildInstallmentSchedule(order, actSub);
@@ -85,29 +78,14 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: "Club payment not configured" }, { status: 400 });
     }
 
-    let totalDiscount = 0;
-    (order.items || []).filter((i) => i.isDiscount).forEach((item) => {
-      totalDiscount += Math.abs(item.priceCents) * (item.quantity || 1);
-    });
-    if (order.discountType === "amount") totalDiscount += order.discountValue || 0;
-    else if (order.discountType === "percentage") {
-      const sub = order.subscriptionPriceCents || 0;
-      const items = (order.items || []).filter((i) => !i.isDiscount).reduce((s, i) => s + i.priceCents * (i.quantity || 1), 0);
-      totalDiscount += Math.round((sub + items) * (order.discountValue || 0) / 100);
-    }
-    totalDiscount += order.couponDiscountCents || 0;
-
     const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
-    const successUrl = adminReturn
-      ? `${baseUrl}/dashboard/activities/${activityId}?tab=participants&paid=1`
-      : `${baseUrl}/register/${activityId}/success?session_id={CHECKOUT_SESSION_ID}`;
-    const cancelUrl = adminReturn
-      ? `${baseUrl}/dashboard/activities/${activityId}?tab=participants`
-      : token ? `${baseUrl}/register/${activityId}?token=${token}` : `${baseUrl}/register/${activityId}`;
+    const activityId = String(order.activityId);
+    const successUrl = `${baseUrl}/register/${activityId}/success?session_id={CHECKOUT_SESSION_ID}`;
+    const cancelUrl = `${baseUrl}/payment/${token}`;
 
     const metadata = {
       orderId: String(order._id),
-      activityId: String(activityId),
+      activityId,
       clubId: String(order.clubId),
       type: "activity_registration",
     };
@@ -123,12 +101,30 @@ export async function POST(request, { params }) {
       });
       if (lineItems.length === 0) return NextResponse.json({ error: "Nothing to pay" }, { status: 400 });
 
+      let totalDiscount = 0;
+      (order.items || []).filter((i) => i.isDiscount).forEach((i) => { totalDiscount += Math.abs(i.priceCents) * (i.quantity || 1); });
+      if (order.discountType === "amount") totalDiscount += order.discountValue || 0;
+      else if (order.discountType === "percentage") {
+        const sub = order.subscriptionPriceCents || 0;
+        const items = (order.items || []).filter((i) => !i.isDiscount).reduce((s, i) => s + i.priceCents * (i.quantity || 1), 0);
+        totalDiscount += Math.round((sub + items) * (order.discountValue || 0) / 100);
+      }
+      totalDiscount += order.couponDiscountCents || 0;
+
       let stripeCoupon = null;
       if (totalDiscount > 0) {
-        stripeCoupon = await stripeClient.coupons.create({ amount_off: totalDiscount, currency: "usd", duration: "once", name: "Registration Discount" });
+        stripeCoupon = await stripeClient.coupons.create({ amount_off: totalDiscount, currency: "usd", duration: "once", name: "Discount" });
       }
 
-      const sessionConfig = { mode: "payment", line_items: lineItems, success_url: successUrl, cancel_url: cancelUrl, customer_email: order.parent1Email || undefined, metadata, ...connectedArgs };
+      const sessionConfig = {
+        mode: "payment",
+        line_items: lineItems,
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        customer_email: order.parent1Email || undefined,
+        metadata,
+        ...connectedArgs,
+      };
       if (stripeCoupon) sessionConfig.discounts = [{ coupon: stripeCoupon.id }];
 
       const session = await stripeClient.checkout.sessions.create(sessionConfig);
@@ -137,6 +133,7 @@ export async function POST(request, { params }) {
       return NextResponse.json({ url: session.url });
     }
 
+    // Multi-installment
     const dueDateAmount = schedule[0].amountCents;
     const recurringAmount = schedule.length > 1 ? schedule[1].amountCents : 0;
     const recurringCount = chosen - 1;
@@ -173,7 +170,7 @@ export async function POST(request, { params }) {
     await order.save();
     return NextResponse.json({ url: session.url });
   } catch (error) {
-    console.error("Create checkout error:", error);
+    console.error("Payment checkout error:", error);
     return NextResponse.json({ error: "Failed to create checkout session" }, { status: 500 });
   }
 }

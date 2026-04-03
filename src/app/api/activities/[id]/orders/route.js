@@ -45,19 +45,35 @@ export async function GET(request, { params }) {
       });
 
       const subscriptions = activity?.subscriptions || [];
+      const now = new Date();
       const teamSubMap = {};
       for (const tid of teamIds) {
         const tidStr = String(tid);
         const matching = subscriptions.filter((s) =>
-          (s.teamPricing || []).some((tp) => String(tp.teamId) === tidStr)
+          (s.includedTeamIds || []).some((id) => String(id) === tidStr)
         );
         if (matching.length === 1) {
           const sub = matching[0];
-          const tp = (sub.teamPricing || []).find((tp) => String(tp.teamId) === tidStr);
+          const activeItems = (sub.items || []).filter((item) =>
+            !item.expiresAt || new Date(item.expiresAt) >= now
+          );
+          let itemTotal = 0;
+          activeItems.forEach((item) => {
+            const amt = (item.priceCents || 0) * (item.quantity || 1);
+            itemTotal += item.isDiscount ? -amt : amt;
+          });
           teamSubMap[tidStr] = {
             subscriptionId: String(sub._id),
             subscriptionTitle: sub.title,
-            subscriptionPriceCents: tp?.priceCents || 0,
+            subscriptionPriceCents: sub.priceCents || 0,
+            items: activeItems.map((item) => ({
+              name: item.name,
+              priceCents: item.priceCents,
+              quantity: item.quantity,
+              isRequired: item.isRequired,
+              isDiscount: item.isDiscount || false,
+            })),
+            itemTotal,
           };
         }
       }
@@ -77,6 +93,8 @@ export async function GET(request, { params }) {
           const parent2 = player.parents?.[1];
           const autoSub = teamSubMap[String(tid)];
           const subPrice = autoSub?.subscriptionPriceCents || 0;
+          const autoItems = autoSub?.items || [];
+          const itemAdj = autoSub?.itemTotal || 0;
 
           expectedPlayers.push({
             _id: `expected_${player._id}_${tid}`,
@@ -101,12 +119,12 @@ export async function GET(request, { params }) {
             subscriptionId: autoSub?.subscriptionId || "",
             subscriptionTitle: autoSub?.subscriptionTitle || "",
             subscriptionPriceCents: subPrice,
-            items: [],
+            items: autoItems,
             discountType: "none",
             discountValue: 0,
             couponCode: "",
             couponDiscountCents: 0,
-            totalCostCents: subPrice,
+            totalCostCents: Math.max(0, subPrice + itemAdj),
             paidCents: 0,
             refundedCents: 0,
             status: "expected",
@@ -138,7 +156,12 @@ export async function GET(request, { params }) {
 function computeTotal(order) {
   let total = order.subscriptionPriceCents || 0;
   (order.items || []).forEach((item) => {
-    total += (item.priceCents || 0) * (item.quantity || 1);
+    const amt = (item.priceCents || 0) * (item.quantity || 1);
+    if (item.isDiscount) {
+      total -= amt;
+    } else {
+      total += amt;
+    }
   });
   if (order.discountType === "amount") {
     total -= order.discountValue || 0;

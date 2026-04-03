@@ -6,7 +6,8 @@ import Activity from "@/models/Activity";
 function computeTotal(order) {
   let total = order.subscriptionPriceCents || 0;
   (order.items || []).forEach((item) => {
-    total += (item.priceCents || 0) * (item.quantity || 1);
+    const amt = (item.priceCents || 0) * (item.quantity || 1);
+    if (item.isDiscount) total -= amt; else total += amt;
   });
   if (order.discountType === "amount") total -= order.discountValue || 0;
   else if (order.discountType === "percentage") total -= Math.round(total * (order.discountValue || 0) / 100);

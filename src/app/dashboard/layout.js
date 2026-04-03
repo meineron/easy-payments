@@ -110,12 +110,24 @@ function DashboardLayoutInner({ children }) {
               </>
             )}
           </div>
-          <button
-            onClick={() => signOut({ callbackUrl: "/" })}
-            className="text-sm text-gray-500 hover:text-gray-900 transition"
-          >
-            Sign Out
-          </button>
+          <div className="flex items-center gap-4">
+            <Link
+              href="/dashboard/profile"
+              className={`text-sm font-medium transition ${
+                pathname === "/dashboard/profile"
+                  ? "text-blue-600"
+                  : "text-gray-500 hover:text-gray-900"
+              }`}
+            >
+              Profile
+            </Link>
+            <button
+              onClick={() => signOut({ callbackUrl: "/" })}
+              className="text-sm text-gray-500 hover:text-gray-900 transition"
+            >
+              Sign Out
+            </button>
+          </div>
         </div>
       </nav>
       <main className="flex-1 p-6">

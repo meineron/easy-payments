@@ -84,8 +84,11 @@ function TabParticipants({ activityId, activity }) {
   const [actionsOpen, setActionsOpen] = useState(null);
 
   const [search, setSearch] = useState("");
-  const [filterTeam, setFilterTeam] = useState("");
+  const [filterTeams, setFilterTeams] = useState(new Set());
+  const [filterTeamType, setFilterTeamType] = useState("");
+  const [filterGender, setFilterGender] = useState("");
   const [filterSub, setFilterSub] = useState("");
+  const [teamFilterOpen, setTeamFilterOpen] = useState(false);
   const [detailed, setDetailed] = useState(false);
 
   const [selected, setSelected] = useState(new Set());
@@ -98,6 +101,8 @@ function TabParticipants({ activityId, activity }) {
   const [editLogs, setEditLogs] = useState([]);
   const [editTab, setEditTab] = useState("invoice");
 
+  const teamFilterRef = useRef(null);
+
   useEffect(() => {
     if (!actionsOpen) return;
     const close = () => setActionsOpen(null);
@@ -105,11 +110,24 @@ function TabParticipants({ activityId, activity }) {
     return () => document.removeEventListener("click", close);
   }, [actionsOpen]);
 
+  useEffect(() => {
+    if (!teamFilterOpen) return;
+    const close = (e) => { if (teamFilterRef.current && !teamFilterRef.current.contains(e.target)) setTeamFilterOpen(false); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [teamFilterOpen]);
+
   const activityTeams = (activity?.teams || []).map((t) => ({
     teamId: t.teamId?._id || t.teamId, name: t.teamId?.name || "Unknown",
+    teamType: t.teamId?.teamType || "", gender: t.teamId?.gender || "",
   }));
+  const teamTypes = [...new Set(activityTeams.map((t) => t.teamType).filter(Boolean))].sort();
+  const genders = [...new Set(activityTeams.map((t) => t.gender).filter(Boolean))].sort();
   const activitySubs = (activity?.subscriptions || []).map((s, i) => ({
-    id: s._id || `sub_${i}`, title: s.title, teamPricing: s.teamPricing || [],
+    id: s._id || `sub_${i}`, title: s.title, priceCents: s.priceCents || 0,
+    includedTeamIds: s.includedTeamIds || [], maxInstallments: s.maxInstallments || 1,
+    dueDateAmountCents: s.dueDateAmountCents || 0, firstInstallmentDate: s.firstInstallmentDate,
+    items: (s.items || []).map((it) => ({ name: it.name, priceCents: it.priceCents, quantity: it.quantity, isRequired: it.isRequired, isDiscount: it.isDiscount || false })),
   }));
 
   const fetchOrders = useCallback(async () => {
@@ -126,16 +144,32 @@ function TabParticipants({ activityId, activity }) {
 
   function computeRowTotal(o) {
     let total = o.subscriptionPriceCents || 0;
-    (o.items || []).forEach((item) => { total += (item.priceCents || 0) * (item.quantity || 1); });
+    (o.items || []).forEach((item) => {
+      const amt = (item.priceCents || 0) * (item.quantity || 1);
+      if (item.isDiscount) total -= amt; else total += amt;
+    });
     if (o.discountType === "amount") total -= o.discountValue || 0;
     else if (o.discountType === "percentage") total -= Math.round(total * (o.discountValue || 0) / 100);
     total -= o.couponDiscountCents || 0;
     return Math.max(0, total);
   }
 
+  const effectiveFilterTeams = (() => {
+    let teams = activityTeams;
+    if (filterTeamType) teams = teams.filter((t) => t.teamType === filterTeamType);
+    if (filterGender) teams = teams.filter((t) => t.gender === filterGender);
+    const typeOrGenderActive = filterTeamType || filterGender;
+    if (typeOrGenderActive && filterTeams.size > 0) {
+      const narrowed = new Set(teams.map((t) => String(t.teamId)));
+      return new Set([...filterTeams].filter((id) => narrowed.has(id)));
+    }
+    if (typeOrGenderActive) return new Set(teams.map((t) => String(t.teamId)));
+    return filterTeams;
+  })();
+
   const allRows = [...orders, ...expectedPlayers];
   const filteredRows = allRows.filter((r) => {
-    if (filterTeam) { const tid = r.teamId?._id || r.teamId || ""; if (String(tid) !== filterTeam) return false; }
+    if (effectiveFilterTeams.size > 0) { const tid = String(r.teamId?._id || r.teamId || ""); if (!effectiveFilterTeams.has(tid)) return false; }
     if (filterSub && (r.subscriptionId || "") !== filterSub) return false;
     if (search) {
       const q = search.toLowerCase();
@@ -157,8 +191,9 @@ function TabParticipants({ activityId, activity }) {
   /* --- helpers to create order from expected player --- */
   async function ensureOrder(ep) {
     const teamId = ep.teamId?._id || ep.teamId || "";
-    const sub = activitySubs.find((s) => (s.teamPricing || []).some((tp) => tp.teamId === teamId));
-    const price = sub ? (sub.teamPricing || []).find((tp) => tp.teamId === teamId)?.priceCents || 0 : 0;
+    const sub = activitySubs.find((s) => (s.includedTeamIds || []).includes(teamId));
+    const price = ep.subscriptionPriceCents || sub?.priceCents || 0;
+    const items = (ep.items && ep.items.length > 0) ? ep.items : (sub?.items || []);
     const res = await fetch(`/api/activities/${activityId}/orders`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -171,7 +206,13 @@ function TabParticipants({ activityId, activity }) {
         parent2Phone: ep.parent2Phone || "", parent2Email: ep.parent2Email || "",
         teamId, playerId: ep.playerId || null,
         subscriptionId: ep.subscriptionId || sub?.id || "", subscriptionTitle: ep.subscriptionTitle || sub?.title || "",
-        subscriptionPriceCents: price, items: [], status: "pending",
+        subscriptionPriceCents: price,
+        items,
+        discountType: ep.discountType || "none",
+        discountValue: ep.discountValue || 0,
+        couponCode: ep.couponCode || "",
+        couponDiscountCents: ep.couponDiscountCents || 0,
+        status: "pending",
       }),
     });
     const data = await res.json();
@@ -225,14 +266,12 @@ function TabParticipants({ activityId, activity }) {
   function onSubChange(subId) {
     const sub = activitySubs.find((s) => s.id === subId);
     if (!sub) { setEditForm((p) => ({ ...p, subscriptionId: "", subscriptionTitle: "", subscriptionPriceCents: 0 })); return; }
-    const teamPrice = (sub.teamPricing || []).find((tp) => tp.teamId === editForm.teamId);
-    setEditForm((p) => ({ ...p, subscriptionId: subId, subscriptionTitle: sub.title, subscriptionPriceCents: teamPrice?.priceCents || 0 }));
+    setEditForm((p) => ({ ...p, subscriptionId: subId, subscriptionTitle: sub.title, subscriptionPriceCents: sub.priceCents || 0 }));
   }
   function onTeamChange(teamId) {
     setEditForm((p) => {
       const sub = activitySubs.find((s) => s.id === p.subscriptionId);
-      const tp = sub ? (sub.teamPricing || []).find((tp) => tp.teamId === teamId)?.priceCents || 0 : p.subscriptionPriceCents;
-      return { ...p, teamId, subscriptionPriceCents: tp };
+      return { ...p, teamId, subscriptionPriceCents: sub?.priceCents || p.subscriptionPriceCents };
     });
   }
 
@@ -384,6 +423,19 @@ function TabParticipants({ activityId, activity }) {
     fetchOrders();
   }
 
+  async function repairOrders() {
+    try {
+      const res = await fetch(`/api/activities/${activityId}/orders/repair`, { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        setToast({ message: `Repaired ${data.repaired} order(s) — items & discounts restored`, type: "success" });
+        refreshList();
+      } else {
+        setToast({ message: data.error || "Repair failed", type: "error" });
+      }
+    } catch { setToast({ message: "Repair failed", type: "error" }); }
+  }
+
   function toggleSelect(id) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -449,6 +501,9 @@ function TabParticipants({ activityId, activity }) {
           <button onClick={refreshList} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded text-sm font-medium hover:bg-gray-200" title="Refresh">
             ↻ Refresh
           </button>
+          <button onClick={repairOrders} className="bg-yellow-50 text-yellow-700 border border-yellow-300 px-3 py-1.5 rounded text-sm font-medium hover:bg-yellow-100" title="Re-apply subscription items & discounts to orders missing them">
+            🔧 Repair
+          </button>
           <button onClick={() => setShowEmailModal(true)} className="bg-green-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-green-700">
             Send Payment Emails
           </button>
@@ -464,13 +519,52 @@ function TabParticipants({ activityId, activity }) {
       </div>
 
       {/* FILTERS */}
-      <div className="flex flex-wrap gap-3 mb-4">
+      <div className="flex flex-wrap gap-3 mb-4 items-start">
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search player, parent name, phone, email..."
           className="flex-1 min-w-[200px] border rounded-lg px-3 py-2 text-sm" />
-        <select value={filterTeam} onChange={(e) => setFilterTeam(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
-          <option value="">All Teams</option>
-          {activityTeams.map((t) => <option key={t.teamId} value={t.teamId}>{t.name}</option>)}
-        </select>
+        {teamTypes.length > 0 && (
+          <select value={filterTeamType} onChange={(e) => setFilterTeamType(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
+            <option value="">All Types</option>
+            {teamTypes.map((tt) => <option key={tt} value={tt}>{tt}</option>)}
+          </select>
+        )}
+        {genders.length > 0 && (
+          <select value={filterGender} onChange={(e) => setFilterGender(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
+            <option value="">All Genders</option>
+            {genders.map((g) => <option key={g} value={g}>{g}</option>)}
+          </select>
+        )}
+        <div className="relative" ref={teamFilterRef}>
+          <button onClick={() => setTeamFilterOpen((v) => !v)}
+            className={`border rounded-lg px-3 py-2 text-sm flex items-center gap-1.5 min-w-[140px] ${filterTeams.size > 0 ? "border-blue-400 bg-blue-50 text-blue-700" : "text-gray-700"}`}>
+            <span>{filterTeams.size > 0 ? `${filterTeams.size} Team${filterTeams.size > 1 ? "s" : ""}` : "All Teams"}</span>
+            <svg className="w-3.5 h-3.5 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+          </button>
+          {teamFilterOpen && (
+            <div className="absolute z-30 mt-1 bg-white border rounded-lg shadow-lg w-64 max-h-72 overflow-y-auto">
+              <div className="sticky top-0 bg-white border-b px-3 py-2 flex items-center justify-between z-10">
+                <button onClick={() => setFilterTeams(new Set())} className="text-xs text-gray-500 hover:text-gray-800">Clear</button>
+                <button onClick={() => setTeamFilterOpen(false)} className="text-xs text-blue-600 font-medium">Done</button>
+              </div>
+              {activityTeams.map((t) => {
+                const checked = filterTeams.has(String(t.teamId));
+                return (
+                  <label key={t.teamId} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm">
+                    <input type="checkbox" checked={checked} onChange={() => {
+                      setFilterTeams((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(String(t.teamId))) next.delete(String(t.teamId)); else next.add(String(t.teamId));
+                        return next;
+                      });
+                    }} className="rounded" />
+                    <span className="flex-1 truncate">{t.name}</span>
+                    {t.teamType && <span className="text-[10px] text-gray-400 flex-shrink-0">{t.teamType}</span>}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
         <select value={filterSub} onChange={(e) => setFilterSub(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
           <option value="">All Subscriptions</option>
           {activitySubs.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
@@ -594,7 +688,12 @@ function TabParticipants({ activityId, activity }) {
                     <td className="py-2.5 px-2 text-right text-xs">{itemsCost > 0 ? `$${centsToDisplay(itemsCost)}` : <span className="text-gray-400">—</span>}</td>
                     <td className="py-2.5 px-2 text-right text-xs">{totalDiscounts > 0 ? <span className="text-red-500">-${centsToDisplay(totalDiscounts)}</span> : <span className="text-gray-400">—</span>}</td>
                     <td className="py-2.5 px-2 text-right font-medium">{total > 0 ? `$${centsToDisplay(total)}` : <span className="text-gray-400">—</span>}</td>
-                    <td className="py-2.5 px-2 text-right text-green-700">{paid > 0 ? `$${centsToDisplay(paid)}` : <span className="text-gray-400">$0.00</span>}</td>
+                    <td className="py-2.5 px-2 text-right">
+                      <span className="text-green-700">{paid > 0 ? `$${centsToDisplay(paid)}` : <span className="text-gray-400">$0.00</span>}</span>
+                      {(r.chosenInstallments || 0) > 1 && (
+                        <div className="text-[10px] text-gray-400">{(r.installmentSchedule || []).filter((i) => i.status === "paid").length}/{r.chosenInstallments} installments</div>
+                      )}
+                    </td>
                     <td className="py-2.5 px-2 text-right text-xs">{refunded > 0 ? <span className="text-purple-600">$${centsToDisplay(refunded)}</span> : <span className="text-gray-400">—</span>}</td>
                     <td className="py-2.5 px-2 text-right font-medium">{due > 0 ? <span className="text-red-600">${centsToDisplay(due)}</span> : <span className="text-green-600">$0.00</span>}</td>
                     <td className="py-2.5 px-2 text-right">
@@ -861,15 +960,13 @@ function CreateOrderModal({ activityTeams, activitySubs, saving, onCreate, onClo
   function onTeamChange(teamId) {
     setForm((p) => {
       const sub = activitySubs.find((s) => s.id === p.subscriptionId);
-      const price = sub ? (sub.teamPricing || []).find((tp) => tp.teamId === teamId)?.priceCents || 0 : 0;
-      return { ...p, teamId, subscriptionPriceCents: price };
+      return { ...p, teamId, subscriptionPriceCents: sub?.priceCents || p.subscriptionPriceCents };
     });
   }
   function onSubChange(subId) {
     const sub = activitySubs.find((s) => s.id === subId);
     if (!sub) { setForm((p) => ({ ...p, subscriptionId: "", subscriptionTitle: "", subscriptionPriceCents: 0 })); return; }
-    const price = (sub.teamPricing || []).find((tp) => tp.teamId === form.teamId)?.priceCents || 0;
-    setForm((p) => ({ ...p, subscriptionId: subId, subscriptionTitle: sub.title, subscriptionPriceCents: price }));
+    setForm((p) => ({ ...p, subscriptionId: subId, subscriptionTitle: sub.title, subscriptionPriceCents: sub.priceCents || 0 }));
   }
 
   const TABS = [
@@ -1113,7 +1210,7 @@ function SendPaymentEmailsModal({ activityId, activity, orders, expectedPlayers,
       bodyRef.current?.focus();
       document.execCommand("insertImage", false, reader.result);
       const imgs = bodyRef.current?.querySelectorAll("img");
-      if (imgs) imgs.forEach((img) => { img.style.maxWidth = "100%"; img.style.height = "auto"; img.style.borderRadius = "8px"; img.style.margin = "8px 0"; });
+      if (imgs) imgs.forEach((img) => { img.style.maxWidth = "100%"; img.style.width = "100%"; img.style.height = "auto"; img.style.display = "block"; img.style.borderRadius = "8px"; img.style.margin = "8px 0"; });
     };
     reader.readAsDataURL(file);
     e.target.value = "";

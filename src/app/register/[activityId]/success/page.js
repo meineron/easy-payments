@@ -34,6 +34,9 @@ export default function RegistrationSuccessPage({ params }) {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-lg max-w-lg w-full p-8 text-center">
+        {activity?.clubLogoUrl && (
+          <img src={activity.clubLogoUrl} alt={activity?.clubName || ""} className="h-16 w-auto mx-auto mb-4 object-contain" />
+        )}
         <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
           <svg className="w-8 h-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />

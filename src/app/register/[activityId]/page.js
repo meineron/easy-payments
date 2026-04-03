@@ -137,7 +137,7 @@ export default function RegisterPage({ params }) {
   const subscriptions = activity?.subscriptions || [];
 
   function getSubsForTeam(tid) {
-    return subscriptions.filter((s) => (s.teamPricing || []).some((tp) => String(tp.teamId) === String(tid)));
+    return subscriptions.filter((s) => (s.includedTeamIds || []).some((id) => String(id) === String(tid)));
   }
 
   function onTeamChange(tid) {
@@ -145,8 +145,7 @@ export default function RegisterPage({ params }) {
     const available = getSubsForTeam(tid);
     if (available.length === 1) {
       const s = available[0];
-      const tp = (s.teamPricing || []).find((tp) => String(tp.teamId) === String(tid));
-      setSubscriptionId(s._id); setSubscriptionTitle(s.title); setSubscriptionPriceCents(tp?.priceCents || 0);
+      setSubscriptionId(s._id); setSubscriptionTitle(s.title); setSubscriptionPriceCents(s.priceCents || 0);
     } else {
       setSubscriptionId(""); setSubscriptionTitle(""); setSubscriptionPriceCents(0);
     }
@@ -156,15 +155,15 @@ export default function RegisterPage({ params }) {
   function onSubChange(sid) {
     const s = subscriptions.find((x) => x._id === sid);
     if (!s) { setSubscriptionId(""); setSubscriptionTitle(""); setSubscriptionPriceCents(0); return; }
-    const tp = (s.teamPricing || []).find((tp) => String(tp.teamId) === String(teamId));
-    setSubscriptionId(s._id); setSubscriptionTitle(s.title); setSubscriptionPriceCents(tp?.priceCents || 0);
+    setSubscriptionId(s._id); setSubscriptionTitle(s.title); setSubscriptionPriceCents(s.priceCents || 0);
     setCouponResult(null);
   }
 
   function computeTotal() {
     let total = subscriptionPriceCents;
     const sub = subscriptions.find((s) => s._id === subscriptionId);
-    (sub?.items || []).filter((i) => i.isRequired).forEach((i) => { total += (i.priceCents || 0) * (i.quantity || 1); });
+    (sub?.items || []).filter((i) => i.isRequired && !i.isDiscount).forEach((i) => { total += (i.priceCents || 0) * (i.quantity || 1); });
+    (sub?.items || []).filter((i) => i.isDiscount).forEach((i) => { total -= (i.priceCents || 0) * (i.quantity || 1); });
     if (couponResult?.discountCents) total -= couponResult.discountCents;
     return Math.max(0, total);
   }
@@ -320,6 +319,9 @@ export default function RegisterPage({ params }) {
     <div className="min-h-screen bg-gray-50 py-8 px-4">
       <div className="max-w-2xl mx-auto">
         <div className="text-center mb-8">
+          {activity?.clubLogoUrl && (
+            <img src={activity.clubLogoUrl} alt={activity?.clubName || ""} className="h-14 w-auto mx-auto mb-3 object-contain" />
+          )}
           <h1 className="text-2xl font-bold text-gray-900">{activity?.title || "Registration"}</h1>
           <p className="text-sm text-gray-500 mt-1">{activity?.clubName}{activity?.season ? ` · ${activity.season}` : ""}</p>
         </div>
@@ -411,8 +413,7 @@ export default function RegisterPage({ params }) {
                   <select value={subscriptionId} onChange={(e) => onSubChange(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm">
                     <option value="">Select a subscription</option>
                     {availableSubs.map((s) => {
-                      const tp = (s.teamPricing || []).find((tp) => String(tp.teamId) === String(teamId));
-                      return <option key={s._id} value={s._id}>{s.title}{tp ? ` — $${centsToDisplay(tp.priceCents)}` : ""}</option>;
+                      return <option key={s._id} value={s._id}>{s.title}{s.priceCents ? ` — $${centsToDisplay(s.priceCents)}` : ""}</option>;
                     })}
                   </select>
                 </div>
@@ -454,10 +455,16 @@ export default function RegisterPage({ params }) {
                     </div>
                   </>
                 )}
-                {currentSub?.items?.filter((i) => i.isRequired).map((item, idx) => (
+                {currentSub?.items?.filter((i) => i.isRequired && !i.isDiscount).map((item, idx) => (
                   <div key={idx} className="flex justify-between text-sm">
                     <span className="text-gray-600">{item.name} × {item.quantity || 1}</span>
                     <span className="font-medium">${centsToDisplay((item.priceCents || 0) * (item.quantity || 1))}</span>
+                  </div>
+                ))}
+                {currentSub?.items?.filter((i) => i.isDiscount).map((item, idx) => (
+                  <div key={idx} className="flex justify-between text-sm text-green-700">
+                    <span>{item.name} × {item.quantity || 1}</span>
+                    <span>-${centsToDisplay((item.priceCents || 0) * (item.quantity || 1))}</span>
                   </div>
                 ))}
                 {couponResult && (

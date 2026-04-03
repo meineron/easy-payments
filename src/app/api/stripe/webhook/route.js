@@ -117,18 +117,72 @@ export async function POST(request) {
         try {
           const order = await Order.findById(activityOrderId);
           if (order) {
-            order.paidCents = session.amount_total;
-            order.status = "paid";
+            order.paidCents = (order.paidCents || 0) + session.amount_total;
             order.stripeSessionId = session.id;
             order.stripePaymentIntentId = session.payment_intent || "";
-            order.registrationCompletedAt = new Date();
+            order.registrationCompletedAt = order.registrationCompletedAt || new Date();
+
+            if (order.installmentSchedule?.length > 0) {
+              const firstPending = order.installmentSchedule.find((i) => i.status === "pending");
+              if (firstPending) { firstPending.status = "paid"; firstPending.paidAt = new Date(); }
+            }
+
+            const needsSubscription = session.metadata?.setupSubscription === "true";
+            const recurringAmount = parseInt(session.metadata?.recurringAmount || "0", 10);
+            const recurringCount = parseInt(session.metadata?.recurringCount || "0", 10);
+
+            if (needsSubscription && recurringAmount > 0 && recurringCount > 0) {
+              order.status = "partial";
+              try {
+                const clubForSub = await Club.findById(order.clubId, "hasDirectStripeAccess stripeSecretKey stripeAccountId").lean();
+                let subStripe;
+                if (clubForSub.hasDirectStripeAccess && clubForSub.stripeSecretKey) {
+                  subStripe = new Stripe(clubForSub.stripeSecretKey);
+                } else {
+                  subStripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+                }
+
+                const customerId = order.stripeCustomerId || session.customer;
+                if (customerId) {
+                  const price = await subStripe.prices.create({
+                    currency: "usd", unit_amount: recurringAmount,
+                    recurring: { interval: "month" },
+                    product_data: { name: `${order.subscriptionTitle || "Registration"} Installment` },
+                  });
+
+                  const firstInstDate = session.metadata?.firstInstDate;
+                  const billingAnchor = firstInstDate ? Math.floor(new Date(firstInstDate).getTime() / 1000) : undefined;
+
+                  const subParams = {
+                    customer: customerId,
+                    items: [{ price: price.id }],
+                    default_payment_method: session.payment_intent ? (await subStripe.paymentIntents.retrieve(session.payment_intent)).payment_method : undefined,
+                    metadata: { orderId: String(order._id), activityId: String(order.activityId), clubId: String(order.clubId) },
+                    cancel_after: recurringCount,
+                  };
+                  if (billingAnchor) {
+                    subParams.billing_cycle_anchor = billingAnchor;
+                    subParams.proration_behavior = "none";
+                  }
+
+                  const stripeSub = await subStripe.subscriptions.create(subParams);
+                  order.stripeSubscriptionId = stripeSub.id;
+                  order.stripeCustomerId = customerId;
+                }
+              } catch (subErr) {
+                console.error("Failed to create installment subscription:", subErr.message);
+              }
+            } else {
+              order.status = order.paidCents >= order.totalCostCents ? "paid" : "partial";
+            }
+
             await order.save();
 
             try {
               const { sendInvoiceEmail } = await import("@/lib/email");
               const Activity = (await import("@/models/Activity")).default;
               const activityDoc = await Activity.findById(order.activityId, "title clubId").lean();
-              const clubDoc = await Club.findById(order.clubId, "name").lean();
+              const clubDoc = await Club.findById(order.clubId, "name logoUrl").lean();
               if (order.parent1Email) {
                 await sendInvoiceEmail(order.parent1Email, {
                   playerName: `${order.playerFirstName} ${order.playerLastName}`,
@@ -139,6 +193,7 @@ export async function POST(request) {
                   items: order.items || [],
                   totalCents: order.totalCostCents,
                   paidCents: session.amount_total,
+                  logoUrl: clubDoc?.logoUrl || null,
                 });
                 order.invoiceSentAt = new Date();
                 await order.save();
@@ -147,7 +202,7 @@ export async function POST(request) {
               console.error("Failed to send invoice email:", emailErr.message);
             }
 
-            console.log(`Activity order ${activityOrderId} marked paid`);
+            console.log(`Activity order ${activityOrderId} updated: paid ${session.amount_total}`);
           }
         } catch (orderErr) {
           console.error("Failed to update activity order:", orderErr.message);
@@ -199,10 +254,12 @@ export async function POST(request) {
 
       let clubId = null;
       let registrationId = null;
+      let orderId = null;
       try {
         const sub = await stripe.subscriptions.retrieve(invoice.subscription);
         clubId = sub.metadata?.clubId;
         registrationId = sub.metadata?.registrationId;
+        orderId = sub.metadata?.orderId;
       } catch (err) {
         console.error("Failed to retrieve subscription:", err.message);
       }
@@ -234,6 +291,28 @@ export async function POST(request) {
         }
       }
 
+      if (orderId && invoice.amount_paid > 0) {
+        try {
+          const order = await Order.findById(orderId);
+          if (order) {
+            order.paidCents = (order.paidCents || 0) + invoice.amount_paid;
+            const installment = (order.installmentSchedule || []).find(
+              (inst) => inst.stripeInvoiceId === invoice.id || inst.status === "pending"
+            );
+            if (installment) {
+              installment.status = "paid";
+              installment.paidAt = new Date();
+              installment.stripeInvoiceId = invoice.id;
+            }
+            order.status = order.paidCents >= order.totalCostCents ? "paid" : "partial";
+            await order.save();
+            console.log(`Order ${orderId} installment paid: ${invoice.amount_paid} cents`);
+          }
+        } catch (err) {
+          console.error("Failed to update order installment:", err.message);
+        }
+      }
+
       console.log(`Installment payment recorded for club ${clubId}, invoice ${invoice.id}`);
       break;
     }
@@ -242,14 +321,24 @@ export async function POST(request) {
       const invoice = event.data.object;
       if (!invoice.subscription) break;
 
+      let registrationId = null;
+      let orderId = null;
       try {
         const sub = await stripe.subscriptions.retrieve(invoice.subscription);
-        const registrationId = sub.metadata?.registrationId;
+        registrationId = sub.metadata?.registrationId;
+        orderId = sub.metadata?.orderId;
         if (registrationId) {
           await Registration.findByIdAndUpdate(registrationId, { status: "failed" });
         }
+        if (orderId) {
+          const order = await Order.findById(orderId);
+          if (order) {
+            const failedInst = (order.installmentSchedule || []).find((i) => i.status === "pending");
+            if (failedInst) { failedInst.status = "failed"; await order.save(); }
+          }
+        }
       } catch (err) {
-        console.error("Failed to update registration on payment failure:", err.message);
+        console.error("Failed to update on payment failure:", err.message);
       }
 
       console.error(`Installment payment failed: invoice ${invoice.id}, subscription ${invoice.subscription}`);
@@ -259,6 +348,8 @@ export async function POST(request) {
     case "customer.subscription.deleted": {
       const subscription = event.data.object;
       const registrationId = subscription.metadata?.registrationId;
+      const orderId = subscription.metadata?.orderId;
+
       if (registrationId) {
         const reg = await Registration.findById(registrationId);
         if (reg && reg.status !== "completed") {
@@ -269,9 +360,20 @@ export async function POST(request) {
         }
       }
 
-      const teamName = subscription.metadata?.teamName || "Unknown";
-      const season = subscription.metadata?.season || "";
-      console.log(`Subscription ${subscription.id} ended for ${teamName} (${season})`);
+      if (orderId) {
+        try {
+          const order = await Order.findById(orderId);
+          if (order && order.status !== "paid") {
+            order.status = order.paidCents >= order.totalCostCents ? "paid" : order.status;
+            order.stripeSubscriptionId = "";
+            await order.save();
+          }
+        } catch (err) {
+          console.error("Failed to update order on subscription end:", err.message);
+        }
+      }
+
+      console.log(`Subscription ${subscription.id} ended`);
       break;
     }
 

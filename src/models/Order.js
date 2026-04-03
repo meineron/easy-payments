@@ -7,6 +7,15 @@ const OrderItemSchema = new mongoose.Schema({
   isDiscount: { type: Boolean, default: false },
 }, { _id: false });
 
+const InstallmentSchema = new mongoose.Schema({
+  number: { type: Number, required: true },
+  date: { type: Date, required: true },
+  amountCents: { type: Number, default: 0 },
+  status: { type: String, enum: ["pending", "paid", "failed"], default: "pending" },
+  stripeInvoiceId: { type: String, default: "" },
+  paidAt: { type: Date, default: null },
+}, { _id: false });
+
 const OrderSchema = new mongoose.Schema({
   activityId: { type: mongoose.Schema.Types.ObjectId, ref: "Activity", required: true, index: true },
   clubId: { type: mongoose.Schema.Types.ObjectId, ref: "Club", required: true, index: true },
@@ -44,6 +53,11 @@ const OrderSchema = new mongoose.Schema({
   paidCents: { type: Number, default: 0 },
   refundedCents: { type: Number, default: 0 },
 
+  chosenInstallments: { type: Number, default: 1 },
+  installmentSchedule: [InstallmentSchema],
+  stripeCustomerId: { type: String, default: "" },
+  stripeSubscriptionId: { type: String, default: "" },
+
   status: {
     type: String,
     enum: ["pending", "partial", "paid", "refunded", "cancelled"],
@@ -52,6 +66,7 @@ const OrderSchema = new mongoose.Schema({
 
   registrationToken: { type: String, default: null, index: true, sparse: true },
   registrationTokenExpiresAt: { type: Date, default: null },
+  paymentToken: { type: String, default: null, index: true, sparse: true },
   stripeSessionId: { type: String, default: "" },
   stripePaymentIntentId: { type: String, default: "" },
   registrationCompletedAt: { type: Date, default: null },

@@ -40,9 +40,8 @@ const ActivityTeamSchema = new mongoose.Schema({
   serialNumber: { type: String, default: "", trim: true },
 }, { _id: false });
 
-const SubscriptionMonthSchema = new mongoose.Schema({
-  month: { type: Number, required: true },
-  startDate: { type: Date, default: null },
+const ReductionRowSchema = new mongoose.Schema({
+  date: { type: Date, required: true },
   priceCents: { type: Number, default: 0 },
   maxInstallments: { type: Number, default: 1 },
 }, { _id: false });
@@ -52,20 +51,21 @@ const SubscriptionItemSchema = new mongoose.Schema({
   priceCents: { type: Number, default: 0 },
   quantity: { type: Number, default: 1 },
   isRequired: { type: Boolean, default: false },
-}, { _id: false });
-
-const SubscriptionTeamPriceSchema = new mongoose.Schema({
-  teamId: { type: mongoose.Schema.Types.ObjectId, ref: "Team", required: true },
-  priceCents: { type: Number, default: 0 },
+  isDiscount: { type: Boolean, default: false },
+  expiresAt: { type: Date, default: null },
 }, { _id: false });
 
 const SubscriptionSchema = new mongoose.Schema({
   title: { type: String, required: true, trim: true },
   description: { type: String, default: "" },
+  priceCents: { type: Number, default: 0 },
+  dueDateAmountCents: { type: Number, default: 0 },
+  maxInstallments: { type: Number, default: 1 },
+  firstInstallmentDate: { type: Date, default: null },
   months: { type: Number, default: 10 },
-  hasMonthlyReduction: { type: Boolean, default: false },
-  monthlyPricing: [SubscriptionMonthSchema],
-  teamPricing: [SubscriptionTeamPriceSchema],
+  hasReduction: { type: Boolean, default: false },
+  reductionSchedule: [ReductionRowSchema],
+  includedTeamIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "Team" }],
   items: [SubscriptionItemSchema],
   paymentTypes: {
     card: { type: Boolean, default: true },

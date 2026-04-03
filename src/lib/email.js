@@ -12,6 +12,12 @@ const transporter = nodemailer.createTransport({
 
 const FROM = () => `"EasyCoach" <${process.env.EASYCOACH_EMAIL}>`;
 
+function logoHeader(logoUrl, clubName) {
+  if (!logoUrl) return clubName ? `<h2 style="color: #111827; margin-bottom: 8px;">${clubName}</h2>` : "";
+  return `<div style="text-align:center;margin-bottom:16px;"><img src="${logoUrl}" alt="${clubName || ""}" style="max-height:60px;max-width:200px;display:inline-block;" /></div>` +
+    (clubName ? `<h2 style="color: #111827; margin-bottom: 8px; text-align:center;">${clubName}</h2>` : "");
+}
+
 export async function sendVerificationEmail(to, code) {
   const html = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 20px;">
@@ -31,9 +37,10 @@ export async function sendVerificationEmail(to, code) {
   await transporter.sendMail({ from: FROM(), to, subject: `${code} is your verification code`, html });
 }
 
-export async function sendRegistrationLink(to, { playerName, clubName, activityTitle, registrationUrl }) {
+export async function sendRegistrationLink(to, { playerName, clubName, activityTitle, registrationUrl, logoUrl }) {
   const html = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 40px 20px;">
+      ${logoHeader(logoUrl, null)}
       <h2 style="color: #111827; margin-bottom: 8px;">Complete Registration</h2>
       <p style="color: #6b7280; font-size: 14px; margin-bottom: 4px;">
         ${clubName} has invited you to complete registration for <strong>${playerName}</strong>.
@@ -55,7 +62,7 @@ export async function sendRegistrationLink(to, { playerName, clubName, activityT
   await transporter.sendMail({ from: FROM(), to, subject: `Complete registration for ${playerName} — ${activityTitle}`, html });
 }
 
-export async function sendInvoiceEmail(to, { playerName, clubName, activityTitle, teamName, subscriptionTitle, items, totalCents, paidCents }) {
+export async function sendInvoiceEmail(to, { playerName, clubName, activityTitle, teamName, subscriptionTitle, items, totalCents, paidCents, logoUrl }) {
   function fmt(cents) { return "$" + ((cents || 0) / 100).toFixed(2); }
   const itemRows = (items || []).map((i) =>
     `<tr><td style="padding:6px 0;border-bottom:1px solid #f3f4f6;">${i.name}</td><td style="padding:6px 0;border-bottom:1px solid #f3f4f6;text-align:right;">${i.isDiscount ? "-" : ""}${fmt(Math.abs(i.priceCents) * (i.quantity || 1))}</td></tr>`
@@ -63,6 +70,7 @@ export async function sendInvoiceEmail(to, { playerName, clubName, activityTitle
 
   const html = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 40px 20px;">
+      ${logoHeader(logoUrl, null)}
       <h2 style="color: #111827; margin-bottom: 4px;">Payment Confirmation</h2>
       <p style="color: #6b7280; font-size: 14px; margin-bottom: 24px;">
         Thank you for completing registration for <strong>${playerName}</strong>.
@@ -89,9 +97,10 @@ export async function sendInvoiceEmail(to, { playerName, clubName, activityTitle
   await transporter.sendMail({ from: FROM(), to, subject: `Payment receipt — ${playerName} — ${activityTitle}`, html });
 }
 
-export async function sendParentInvite(to, { parentName, clubName, inviteUrl }) {
+export async function sendParentInvite(to, { parentName, clubName, inviteUrl, logoUrl }) {
   const html = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 40px 20px;">
+      ${logoHeader(logoUrl, null)}
       <h2 style="color: #111827; margin-bottom: 8px;">You're Invited</h2>
       <p style="color: #6b7280; font-size: 14px; margin-bottom: 24px;">
         Hi ${parentName}, <strong>${clubName}</strong> has invited you to manage your child's registrations.
@@ -110,9 +119,10 @@ export async function sendParentInvite(to, { parentName, clubName, inviteUrl }) 
   await transporter.sendMail({ from: FROM(), to, subject: `${clubName} invited you to EasyCoach`, html });
 }
 
-export async function sendPaymentLink(to, { playerName, clubName, activityTitle, paymentUrl, totalAmount }) {
+export async function sendPaymentLink(to, { playerName, clubName, activityTitle, paymentUrl, totalAmount, logoUrl }) {
   const html = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 40px 20px;">
+      ${logoHeader(logoUrl, null)}
       <h2 style="color: #111827; margin-bottom: 8px;">Payment Required</h2>
       <p style="color: #6b7280; font-size: 14px; margin-bottom: 4px;">
         ${clubName} is requesting payment for <strong>${playerName}</strong>.
@@ -134,12 +144,30 @@ export async function sendPaymentLink(to, { playerName, clubName, activityTitle,
   await transporter.sendMail({ from: FROM(), to, subject: `Payment for ${playerName} — ${activityTitle}`, html });
 }
 
-export async function sendCustomPaymentEmail(to, { subject, bodyHtml, playerName, clubName, activityTitle, paymentUrl, totalAmount }) {
+export async function sendCustomPaymentEmail(to, { subject, bodyHtml, playerName, clubName, activityTitle, paymentUrl, totalAmount, logoUrl }) {
+  const attachments = [];
+  let processedBody = bodyHtml;
+
+  const dataUriRegex = /(<img[^>]*\s+src=["'])(data:image\/([a-zA-Z+]+);base64,([^"']+))(["'][^>]*>)/g;
+  let match;
+  let idx = 0;
+  while ((match = dataUriRegex.exec(bodyHtml)) !== null) {
+    const cid = `img${idx}_${Date.now()}@email`;
+    const ext = match[3].replace("+xml", "").replace("jpeg", "jpg");
+    attachments.push({
+      filename: `image${idx}.${ext}`,
+      content: Buffer.from(match[4], "base64"),
+      cid,
+    });
+    processedBody = processedBody.replace(match[2], `cid:${cid}`);
+    idx++;
+  }
+
   const html = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 40px 20px;">
-      <h2 style="color: #111827; margin-bottom: 16px;">${clubName}</h2>
+      ${logoHeader(logoUrl, clubName)}
       <div style="color: #374151; font-size: 14px; line-height: 1.6; margin-bottom: 24px;">
-        ${bodyHtml}
+        ${processedBody}
       </div>
       <div style="background: #f9fafb; border-radius: 12px; padding: 16px; margin-bottom: 24px; font-size: 14px;">
         <p style="margin:0 0 4px;color:#6b7280;">Player: <strong style="color:#111827;">${playerName}</strong></p>
@@ -157,5 +185,5 @@ export async function sendCustomPaymentEmail(to, { subject, bodyHtml, playerName
     </div>
   `;
 
-  await transporter.sendMail({ from: FROM(), to, subject, html });
+  await transporter.sendMail({ from: FROM(), to, subject, html, attachments });
 }

@@ -11,6 +11,7 @@ export default function ActivitiesPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newSeason, setNewSeason] = useState("");
+  const [newStartDate, setNewStartDate] = useState("");
   const [seasons, setSeasons] = useState([]);
 
   useEffect(() => {
@@ -44,18 +45,19 @@ export default function ActivitiesPage() {
 
   function openCreateModal() {
     setNewTitle("");
+    setNewStartDate("");
     if (seasons.length > 0) setNewSeason(seasons[0]);
     setShowCreateModal(true);
   }
 
   async function createActivity() {
-    if (!newTitle.trim()) return;
+    if (!newTitle.trim() || !newStartDate) return;
     setCreating(true);
     try {
       const res = await fetch("/api/activities", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: newTitle.trim(), season: newSeason }),
+        body: JSON.stringify({ title: newTitle.trim(), season: newSeason, startDate: newStartDate }),
       });
       const data = await res.json();
       if (data.activity?._id) {
@@ -194,21 +196,31 @@ export default function ActivitiesPage() {
                   placeholder="e.g. Fall 2026 Season Registration"
                   autoFocus
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-gray-900"
-                  onKeyDown={(e) => e.key === "Enter" && newTitle.trim() && createActivity()}
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Season</label>
-                <select
-                  value={newSeason}
-                  onChange={(e) => setNewSeason(e.target.value)}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-gray-900"
-                >
-                  <option value="">No season</option>
-                  {seasons.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Season</label>
+                  <select
+                    value={newSeason}
+                    onChange={(e) => setNewSeason(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-gray-900"
+                  >
+                    <option value="">No season</option>
+                    {seasons.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Date *</label>
+                  <input
+                    type="date"
+                    value={newStartDate}
+                    onChange={(e) => setNewStartDate(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-gray-900"
+                  />
+                </div>
               </div>
             </div>
             <div className="flex gap-3 mt-6">
@@ -220,7 +232,7 @@ export default function ActivitiesPage() {
               </button>
               <button
                 onClick={createActivity}
-                disabled={!newTitle.trim() || creating}
+                disabled={!newTitle.trim() || !newStartDate || creating}
                 className="flex-1 bg-blue-600 text-white px-4 py-2.5 rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50"
               >
                 {creating ? "Creating..." : "Create"}

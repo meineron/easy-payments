@@ -19,7 +19,7 @@ export async function GET(request, { params }) {
       return NextResponse.json({ error: "Activity not found" }, { status: 404 });
     }
 
-    const club = await Club.findById(activity.clubId, "name").lean();
+    const club = await Club.findById(activity.clubId, "name logoUrl").lean();
 
     const safeActivity = {
       _id: activity._id,
@@ -48,13 +48,20 @@ export async function GET(request, { params }) {
         _id: s._id,
         title: s.title,
         description: s.description,
-        teamPricing: s.teamPricing || [],
-        items: (s.items || []).map((i) => ({ name: i.name, priceCents: i.priceCents, quantity: i.quantity, isRequired: i.isRequired })),
+        priceCents: s.priceCents || 0,
+        dueDateAmountCents: s.dueDateAmountCents || 0,
+        maxInstallments: s.maxInstallments || 1,
+        firstInstallmentDate: s.firstInstallmentDate,
+        includedTeamIds: s.includedTeamIds || [],
+        hasReduction: s.hasReduction || false,
+        reductionSchedule: s.reductionSchedule || [],
+        items: (s.items || []).filter((i) => !i.expiresAt || new Date(i.expiresAt) >= new Date()).map((i) => ({ name: i.name, priceCents: i.priceCents, quantity: i.quantity, isRequired: i.isRequired, isDiscount: i.isDiscount || false })),
         paymentTypes: s.paymentTypes,
         paymentMessages: s.paymentMessages,
       })),
       formSections: activity.formSections || [],
       clubName: club?.name || "",
+      clubLogoUrl: club?.logoUrl || null,
     };
 
     if (token) {

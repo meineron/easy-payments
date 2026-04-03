@@ -37,6 +37,10 @@ const ClubSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
+  logoUrl: {
+    type: String,
+    default: null,
+  },
 }, {
   timestamps: true,
 });
