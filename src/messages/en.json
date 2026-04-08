@@ -1031,6 +1031,8 @@
     "imageSettings": "Image",
     "imgSize": "Size",
     "imgAlign": "Align",
+    "imgLinkPlaceholder": "Paste URL to link this image...",
+    "removeLink": "Remove",
     "recipientsSummary": "{count} recipient(s) will receive this email (BCC)",
     "noRecipientsYet": "No recipients selected yet",
     "send": "Send",

@@ -1031,6 +1031,8 @@
     "imageSettings": "תמונה",
     "imgSize": "גודל",
     "imgAlign": "ישור",
+    "imgLinkPlaceholder": "הדבק כתובת URL לקישור התמונה...",
+    "removeLink": "הסר",
     "recipientsSummary": "{count} נמענ/ים יקבלו את הדוא\"ל הזה (BCC)",
     "noRecipientsYet": "לא נבחרו נמענים עדיין",
     "send": "שלח",

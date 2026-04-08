@@ -189,6 +189,34 @@ export default function MessagesPage() {
     selectedImg.style.height = "auto";
   }
 
+  function setImgLink(url) {
+    if (!selectedImg) return;
+    const parent = selectedImg.parentElement;
+    if (url) {
+      if (parent?.tagName === "A") {
+        parent.href = url;
+      } else {
+        const a = document.createElement("a");
+        a.href = url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        selectedImg.parentNode.insertBefore(a, selectedImg);
+        a.appendChild(selectedImg);
+      }
+    } else {
+      if (parent?.tagName === "A") {
+        parent.parentNode.insertBefore(selectedImg, parent);
+        parent.remove();
+      }
+    }
+  }
+
+  function getImgLink() {
+    if (!selectedImg) return "";
+    const parent = selectedImg.parentElement;
+    return parent?.tagName === "A" ? parent.href : "";
+  }
+
   function setImgAlign(align) {
     if (!selectedImg) return;
     const wrapper = selectedImg.parentElement;
@@ -616,24 +644,46 @@ export default function MessagesPage() {
 
         {/* Image toolbar (shown when image selected) */}
         {selectedImg && (
-          <div className="flex items-center gap-1 px-4 py-1.5 bg-blue-50 border-b text-xs">
-            <span className="text-blue-700 font-medium mr-2">{t("imageSettings")}:</span>
-            <span className="text-gray-500">{t("imgSize")}:</span>
-            {["25%", "50%", "75%", "100%"].map((w) => (
-              <button key={w} type="button" onClick={() => setImgSize(w)}
-                className="px-2 py-0.5 rounded border border-blue-200 hover:bg-blue-100 text-blue-700">{w}</button>
-            ))}
-            <div className="w-px h-4 bg-blue-200 mx-1" />
-            <span className="text-gray-500">{t("imgAlign")}:</span>
-            <button type="button" onClick={() => setImgAlign("left")} className="px-1.5 py-0.5 rounded border border-blue-200 hover:bg-blue-100">
-              <svg className="w-3.5 h-3.5 text-blue-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M3 6h18M3 12h12M3 18h16"/></svg>
-            </button>
-            <button type="button" onClick={() => setImgAlign("center")} className="px-1.5 py-0.5 rounded border border-blue-200 hover:bg-blue-100">
-              <svg className="w-3.5 h-3.5 text-blue-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M3 6h18M6 12h12M4 18h16"/></svg>
-            </button>
-            <button type="button" onClick={() => setImgAlign("right")} className="px-1.5 py-0.5 rounded border border-blue-200 hover:bg-blue-100">
-              <svg className="w-3.5 h-3.5 text-blue-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M3 6h18M9 12h12M5 18h16"/></svg>
-            </button>
+          <div className="px-4 py-1.5 bg-blue-50 border-b text-xs space-y-1.5">
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-blue-700 font-medium mr-2">{t("imageSettings")}:</span>
+              <span className="text-gray-500">{t("imgSize")}:</span>
+              {["25%", "50%", "75%", "100%"].map((w) => (
+                <button key={w} type="button" onClick={() => setImgSize(w)}
+                  className="px-2 py-0.5 rounded border border-blue-200 hover:bg-blue-100 text-blue-700">{w}</button>
+              ))}
+              <div className="w-px h-4 bg-blue-200 mx-1" />
+              <span className="text-gray-500">{t("imgAlign")}:</span>
+              <button type="button" onClick={() => setImgAlign("left")} className="px-1.5 py-0.5 rounded border border-blue-200 hover:bg-blue-100">
+                <svg className="w-3.5 h-3.5 text-blue-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M3 6h18M3 12h12M3 18h16"/></svg>
+              </button>
+              <button type="button" onClick={() => setImgAlign("center")} className="px-1.5 py-0.5 rounded border border-blue-200 hover:bg-blue-100">
+                <svg className="w-3.5 h-3.5 text-blue-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M3 6h18M6 12h12M4 18h16"/></svg>
+              </button>
+              <button type="button" onClick={() => setImgAlign("right")} className="px-1.5 py-0.5 rounded border border-blue-200 hover:bg-blue-100">
+                <svg className="w-3.5 h-3.5 text-blue-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path d="M3 6h18M9 12h12M5 18h16"/></svg>
+              </button>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <svg className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+              </svg>
+              <input
+                type="url"
+                placeholder={t("imgLinkPlaceholder")}
+                defaultValue={getImgLink()}
+                key={selectedImg?.src}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); setImgLink(e.target.value.trim()); } }}
+                onBlur={(e) => setImgLink(e.target.value.trim())}
+                className="flex-1 min-w-0 border border-blue-200 rounded px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+              />
+              {getImgLink() && (
+                <button type="button" onClick={() => setImgLink("")}
+                  className="px-1.5 py-0.5 rounded border border-red-200 hover:bg-red-50 text-red-500 text-xs">
+                  {t("removeLink")}
+                </button>
+              )}
+            </div>
           </div>
         )}
 
