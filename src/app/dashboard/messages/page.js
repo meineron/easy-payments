@@ -299,6 +299,16 @@ export default function MessagesPage() {
     setView("compose");
   }
 
+  function sendAgain(msg) {
+    setDetail(null);
+    setSubject(msg.subject || "");
+    setRecipients([]);
+    setEditingMessageId(null);
+    setCustomEmail("");
+    setEditorHtml(msg.bodyHtml || "");
+    setView("compose");
+  }
+
   async function handleResend() {
     const html = bodyRef.current?.innerHTML || bodyHtml;
     if (!subject.trim()) { setToast({ message: t("subjectRequired"), type: "error" }); return; }
@@ -473,23 +483,34 @@ export default function MessagesPage() {
                     </div>
                   </div>
 
-                  {detail.status === "failed" && (
-                    <div className="pt-2 border-t">
-                      <div className="flex items-center gap-3 p-3 bg-red-50 border border-red-200 rounded-lg mb-3">
+                  <div className="pt-2 border-t space-y-3">
+                    {detail.status === "failed" && (
+                      <div className="flex items-center gap-3 p-3 bg-red-50 border border-red-200 rounded-lg">
                         <svg className="w-5 h-5 text-red-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
                         </svg>
                         <p className="text-sm text-red-700">{t("failedHint")}</p>
                       </div>
-                      <button onClick={() => editAndResend(detail)}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition">
+                    )}
+                    <div className="flex gap-2">
+                      {detail.status === "failed" && (
+                        <button onClick={() => editAndResend(detail)}
+                          className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-orange-600 text-white rounded-lg text-sm font-semibold hover:bg-orange-700 transition">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" />
+                          </svg>
+                          {t("editAndResend")}
+                        </button>
+                      )}
+                      <button onClick={() => sendAgain(detail)}
+                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition">
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
                         </svg>
-                        {t("editAndResend")}
+                        {t("sendToOthers")}
                       </button>
                     </div>
-                  )}
+                  </div>
                 </div>
               )}
             </div>

@@ -1055,6 +1055,7 @@
     "sendFailedConnection": "Could not connect to the email server. Please check your SMTP settings in Profile → Email Settings.",
     "editAndResend": "Edit & Resend",
     "resend": "Resend",
+    "sendToOthers": "Send to Others",
     "failedHint": "This email failed to send. You can edit and resend it."
   }
 }
