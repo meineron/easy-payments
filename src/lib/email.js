@@ -55,13 +55,7 @@ export async function sendBulkEmail({ club, subject, bodyHtml, bccList, logoUrl 
     idx++;
   }
 
-  if (logoUrl) {
-    const logo = prepareLogoHeader(logoUrl, club?.name);
-    attachments.push(...logo.attachments);
-    processedBody = `${logo.html}<div style="color:#374151;font-size:14px;line-height:1.6;">${processedBody}</div>`;
-  } else {
-    processedBody = `<div style="color:#374151;font-size:14px;line-height:1.6;">${processedBody}</div>`;
-  }
+  processedBody = `<div style="color:#374151;font-size:14px;line-height:1.6;">${processedBody}</div>`;
 
   const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:600px;margin:0 auto;padding:40px 20px;">${processedBody}</div>`;
 
@@ -88,11 +82,11 @@ function prepareLogoHeader(logoUrl, clubName) {
     const cid = `clublogo_${Date.now()}@email`;
     const ext = dataMatch[1].replace("+xml", "").replace("jpeg", "jpg");
     const attachment = { filename: `logo.${ext}`, content: Buffer.from(dataMatch[2], "base64"), cid };
-    const html = `<div style="text-align:center;margin-bottom:16px;"><img src="cid:${cid}" alt="${clubName || ""}" style="max-height:60px;max-width:200px;display:inline-block;" /></div>${nameHtml}`;
+    const html = `<div style="text-align:center;margin-bottom:16px;"><img src="cid:${cid}" alt="${clubName || ""}" style="max-height:60px;max-width:200px;width:auto;height:auto;display:inline-block;" /></div>${nameHtml}`;
     return { html, attachments: [attachment] };
   }
 
-  const html = `<div style="text-align:center;margin-bottom:16px;"><img src="${logoUrl}" alt="${clubName || ""}" style="max-height:60px;max-width:200px;display:inline-block;" /></div>${nameHtml}`;
+  const html = `<div style="text-align:center;margin-bottom:16px;"><img src="${logoUrl}" alt="${clubName || ""}" style="max-height:60px;max-width:200px;width:auto;height:auto;display:inline-block;" /></div>${nameHtml}`;
   return { html, attachments: [] };
 }
 
