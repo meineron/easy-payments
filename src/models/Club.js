@@ -41,6 +41,11 @@ const ClubSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
+  language: {
+    type: String,
+    enum: ["en", "he"],
+    default: "en",
+  },
 }, {
   timestamps: true,
 });

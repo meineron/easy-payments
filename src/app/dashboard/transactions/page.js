@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 
 export default function TransactionsPage() {
+  const t = useTranslations("transactions");
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -32,15 +34,15 @@ export default function TransactionsPage() {
 
   return (
     <div>
-      <h2 className="text-xl font-bold text-gray-900 mb-6">Transactions</h2>
+      <h2 className="text-xl font-bold text-gray-900 mb-6">{t("title")}</h2>
 
       {loading ? (
-        <p className="text-gray-500">Loading transactions...</p>
+        <p className="text-gray-500">{t("loadingTransactions")}</p>
       ) : transactions.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-          <p className="text-gray-500">No transactions yet</p>
+          <p className="text-gray-500">{t("noTransactions")}</p>
           <p className="text-sm text-gray-400 mt-1">
-            Complete a payment to see it here
+            {t("noTransactionsDesc")}
           </p>
         </div>
       ) : (
@@ -48,23 +50,23 @@ export default function TransactionsPage() {
           <table className="w-full">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  Date
+                <th className="text-start px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  {t("date")}
                 </th>
-                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  Amount
+                <th className="text-start px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  {t("amount")}
                 </th>
-                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  Platform Fee
+                <th className="text-start px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  {t("platformFee")}
                 </th>
-                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  Status
+                <th className="text-start px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  {t("status")}
                 </th>
-                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  Email
+                <th className="text-start px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  {t("email")}
                 </th>
-                <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  Invoice
+                <th className="text-start px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  {t("invoice")}
                 </th>
               </tr>
             </thead>
@@ -105,7 +107,7 @@ export default function TransactionsPage() {
                           rel="noopener noreferrer"
                           className="text-blue-600 hover:underline"
                         >
-                          View
+                          {t("invoice")}
                         </a>
                         {tx.invoicePdf && (
                           <a
@@ -114,7 +116,7 @@ export default function TransactionsPage() {
                             rel="noopener noreferrer"
                             className="text-blue-600 hover:underline"
                           >
-                            PDF
+                            {t("pdf")}
                           </a>
                         )}
                       </div>

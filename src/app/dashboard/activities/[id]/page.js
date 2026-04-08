@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback, useRef, use } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
+import InvoiceSlideOver from "@/components/InvoiceSlideOver";
 
 function centsToDisplay(c) { return ((c || 0) / 100).toFixed(2); }
 function displayToCents(v) { return Math.round(parseFloat(v || 0) * 100); }
@@ -14,11 +16,11 @@ function Toast({ message, type = "success", onClose }) {
   }, [onClose]);
   const bg = type === "success" ? "bg-green-600" : type === "error" ? "bg-red-600" : "bg-blue-600";
   return (
-    <div className={`fixed top-4 right-4 z-[100] ${bg} text-white px-5 py-3 rounded-lg shadow-lg text-sm font-medium flex items-center gap-3 animate-[slideIn_0.2s_ease-out]`}>
+    <div className={`fixed top-4 end-4 z-[100] ${bg} text-white px-5 py-3 rounded-lg shadow-lg text-sm font-medium flex items-center gap-3 animate-[slideIn_0.2s_ease-out]`}>
       {type === "success" && <span>&#10003;</span>}
       {type === "error" && <span>&#10007;</span>}
       {message}
-      <button onClick={onClose} className="ml-2 opacity-70 hover:opacity-100">×</button>
+      <button onClick={onClose} className="ms-2 opacity-70 hover:opacity-100">×</button>
     </div>
   );
 }
@@ -73,7 +75,7 @@ const STATUS_COLORS = {
 };
 
 /* ============== PARTICIPANTS TAB ============== */
-function TabParticipants({ activityId, activity }) {
+function TabParticipants({ activityId, activity, tc, td }) {
   const [orders, setOrders] = useState([]);
   const [expectedPlayers, setExpectedPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -95,6 +97,8 @@ function TabParticipants({ activityId, activity }) {
   const [bulkModal, setBulkModal] = useState(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
+  const [headerActionsOpen, setHeaderActionsOpen] = useState(false);
+  const headerActionsRef = useRef(null);
 
   const [editOrder, setEditOrder] = useState(null);
   const [editForm, setEditForm] = useState(null);
@@ -111,18 +115,29 @@ function TabParticipants({ activityId, activity }) {
   }, [actionsOpen]);
 
   useEffect(() => {
+    if (!headerActionsOpen) return;
+    function handleClick(e) {
+      if (headerActionsRef.current && !headerActionsRef.current.contains(e.target)) {
+        setHeaderActionsOpen(false);
+      }
+    }
+    document.addEventListener("click", handleClick);
+    return () => document.removeEventListener("click", handleClick);
+  }, [headerActionsOpen]);
+
+  useEffect(() => {
     if (!teamFilterOpen) return;
     const close = (e) => { if (teamFilterRef.current && !teamFilterRef.current.contains(e.target)) setTeamFilterOpen(false); };
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, [teamFilterOpen]);
 
-  const activityTeams = (activity?.teams || []).map((t) => ({
-    teamId: t.teamId?._id || t.teamId, name: t.teamId?.name || "Unknown",
-    teamType: t.teamId?.teamType || "", gender: t.teamId?.gender || "",
+  const activityTeams = (activity?.teams || []).map((row) => ({
+    teamId: row.teamId?._id || row.teamId, name: row.teamId?.name || "Unknown",
+    teamType: row.teamId?.teamType || "", gender: row.teamId?.gender || "",
   }));
-  const teamTypes = [...new Set(activityTeams.map((t) => t.teamType).filter(Boolean))].sort();
-  const genders = [...new Set(activityTeams.map((t) => t.gender).filter(Boolean))].sort();
+  const teamTypes = [...new Set(activityTeams.map((team) => team.teamType).filter(Boolean))].sort();
+  const genders = [...new Set(activityTeams.map((team) => team.gender).filter(Boolean))].sort();
   const activitySubs = (activity?.subscriptions || []).map((s, i) => ({
     id: s._id || `sub_${i}`, title: s.title, priceCents: s.priceCents || 0,
     includedTeamIds: s.includedTeamIds || [], maxInstallments: s.maxInstallments || 1,
@@ -156,14 +171,14 @@ function TabParticipants({ activityId, activity }) {
 
   const effectiveFilterTeams = (() => {
     let teams = activityTeams;
-    if (filterTeamType) teams = teams.filter((t) => t.teamType === filterTeamType);
-    if (filterGender) teams = teams.filter((t) => t.gender === filterGender);
+    if (filterTeamType) teams = teams.filter((team) => team.teamType === filterTeamType);
+    if (filterGender) teams = teams.filter((team) => team.gender === filterGender);
     const typeOrGenderActive = filterTeamType || filterGender;
     if (typeOrGenderActive && filterTeams.size > 0) {
-      const narrowed = new Set(teams.map((t) => String(t.teamId)));
+      const narrowed = new Set(teams.map((team) => String(team.teamId)));
       return new Set([...filterTeams].filter((id) => narrowed.has(id)));
     }
-    if (typeOrGenderActive) return new Set(teams.map((t) => String(t.teamId)));
+    if (typeOrGenderActive) return new Set(teams.map((team) => String(team.teamId)));
     return filterTeams;
   })();
 
@@ -223,7 +238,10 @@ function TabParticipants({ activityId, activity }) {
     return data.order || null;
   }
 
-  /* --- Edit Invoice modal --- */
+  const [editTransactions, setEditTransactions] = useState([]);
+  const [editPaymentRequests, setEditPaymentRequests] = useState([]);
+
+  /* --- View Invoice slide-over --- */
   async function openInvoiceModal(order) {
     setEditTab("invoice");
     setEditOrder(order);
@@ -237,15 +255,33 @@ function TabParticipants({ activityId, activity }) {
       discountValue: order.discountValue || 0,
       couponCode: order.couponCode || "",
       couponDiscountCents: order.couponDiscountCents || 0,
-      paidCents: order.paidCents || 0,
-      refundedCents: order.refundedCents || 0,
-      status: order.status || "pending",
     });
     try {
       const res = await fetch(`/api/activities/${activityId}/orders/${order._id}`);
       const data = await res.json();
       setEditLogs(data.logs || []);
-    } catch { setEditLogs([]); }
+      setEditTransactions(data.transactions || []);
+      setEditPaymentRequests(data.paymentRequests || []);
+    } catch {
+      setEditLogs([]);
+      setEditTransactions([]);
+      setEditPaymentRequests([]);
+    }
+  }
+
+  async function refreshInvoiceData() {
+    if (!editOrder) return;
+    try {
+      const res = await fetch(`/api/activities/${activityId}/orders/${editOrder._id}`);
+      const data = await res.json();
+      if (data.order) {
+        setEditOrder(data.order);
+        setOrders((prev) => prev.map((o) => (o._id === data.order._id ? data.order : o)));
+      }
+      setEditLogs(data.logs || []);
+      setEditTransactions(data.transactions || []);
+      setEditPaymentRequests(data.paymentRequests || []);
+    } catch { /* ignore */ }
   }
 
   async function openInvoiceForExpected(ep) {
@@ -253,8 +289,8 @@ function TabParticipants({ activityId, activity }) {
     try {
       const order = await ensureOrder(ep);
       if (order) openInvoiceModal(order);
-      else setToast({ message: "Failed to create order", type: "error" });
-    } catch { setToast({ message: "Failed", type: "error" }); }
+      else setToast({ message: tc("somethingWentWrong"), type: "error" });
+    } catch { setToast({ message: tc("somethingWentWrong"), type: "error" }); }
     finally { setActionBusy(null); }
   }
 
@@ -295,10 +331,11 @@ function TabParticipants({ activityId, activity }) {
       const data = await res.json();
       if (data.order) {
         setOrders((prev) => prev.map((o) => (o._id === data.order._id ? data.order : o)));
-        setEditOrder(null); setEditForm(null);
-        setToast({ message: "Invoice saved", type: "success" });
-      } else setToast({ message: data.error || "Failed to save", type: "error" });
-    } catch { setToast({ message: "Failed to save", type: "error" }); }
+        setEditOrder(data.order);
+        setEditForm((prev) => ({ ...prev, _reason: "" }));
+        setToast({ message: td("invoiceSaved"), type: "success" });
+      } else setToast({ message: data.error || tc("failedToSave"), type: "error" });
+    } catch { setToast({ message: tc("failedToSave"), type: "error" }); }
     finally { setSaving(false); }
   }
 
@@ -310,9 +347,9 @@ function TabParticipants({ activityId, activity }) {
       const data = await res.json();
       if (data.success && data.registrationUrl) {
         await navigator.clipboard.writeText(data.registrationUrl);
-        setToast({ message: "Registration link copied!", type: "success" });
-      } else setToast({ message: data.error || "Failed", type: "error" });
-    } catch { setToast({ message: "Failed to get link", type: "error" }); }
+        setToast({ message: td("regLinkCopied"), type: "success" });
+      } else setToast({ message: data.error || tc("somethingWentWrong"), type: "error" });
+    } catch { setToast({ message: tc("somethingWentWrong"), type: "error" }); }
     finally { setActionBusy(null); }
   }
 
@@ -320,14 +357,14 @@ function TabParticipants({ activityId, activity }) {
     setActionBusy(ep._id);
     try {
       const order = await ensureOrder(ep);
-      if (!order) { setToast({ message: "Failed to create order", type: "error" }); return; }
+      if (!order) { setToast({ message: tc("somethingWentWrong"), type: "error" }); return; }
       const res = await fetch(`/api/activities/${activityId}/orders/${order._id}/send-link`, { method: "POST" });
       const data = await res.json();
       if (data.success && data.registrationUrl) {
         await navigator.clipboard.writeText(data.registrationUrl);
-        setToast({ message: "Registration link copied!", type: "success" });
-      } else setToast({ message: data.error || "Failed", type: "error" });
-    } catch { setToast({ message: "Failed", type: "error" }); }
+        setToast({ message: td("regLinkCopied"), type: "success" });
+      } else setToast({ message: data.error || tc("somethingWentWrong"), type: "error" });
+    } catch { setToast({ message: tc("somethingWentWrong"), type: "error" }); }
     finally { setActionBusy(null); }
   }
 
@@ -339,9 +376,9 @@ function TabParticipants({ activityId, activity }) {
       if (data.success && data.paymentUrl) {
         await navigator.clipboard.writeText(data.paymentUrl);
         setOrders((prev) => prev.map((o) => o._id === orderId ? { ...o, paymentLinkSentAt: data.paymentLinkSentAt } : o));
-        setToast({ message: "Payment link copied to clipboard", type: "success" });
-      } else setToast({ message: data.error || "Failed", type: "error" });
-    } catch { setToast({ message: "Failed to get payment link", type: "error" }); }
+        setToast({ message: td("paymentLinkCopied"), type: "success" });
+      } else setToast({ message: data.error || tc("somethingWentWrong"), type: "error" });
+    } catch { setToast({ message: tc("somethingWentWrong"), type: "error" }); }
     finally { setActionBusy(null); }
   }
 
@@ -349,15 +386,15 @@ function TabParticipants({ activityId, activity }) {
     setActionBusy(ep._id);
     try {
       const order = await ensureOrder(ep);
-      if (!order) { setToast({ message: "Failed to create order", type: "error" }); return; }
+      if (!order) { setToast({ message: tc("somethingWentWrong"), type: "error" }); return; }
       const res = await fetch(`/api/activities/${activityId}/orders/${order._id}/send-payment-link`, { method: "POST" });
       const data = await res.json();
       if (data.success && data.paymentUrl) {
         await navigator.clipboard.writeText(data.paymentUrl);
         setOrders((prev) => prev.map((o) => o._id === order._id ? { ...o, paymentLinkSentAt: data.paymentLinkSentAt } : o));
-        setToast({ message: "Payment link copied to clipboard", type: "success" });
-      } else setToast({ message: data.error || "Failed", type: "error" });
-    } catch { setToast({ message: "Failed", type: "error" }); }
+        setToast({ message: td("paymentLinkCopied"), type: "success" });
+      } else setToast({ message: data.error || tc("somethingWentWrong"), type: "error" });
+    } catch { setToast({ message: tc("somethingWentWrong"), type: "error" }); }
     finally { setActionBusy(null); }
   }
 
@@ -371,8 +408,8 @@ function TabParticipants({ activityId, activity }) {
       });
       const data = await res.json();
       if (data.url) window.open(data.url, "_blank");
-      else setToast({ message: data.error || "Failed", type: "error" });
-    } catch { setToast({ message: "Failed to create checkout", type: "error" }); }
+      else setToast({ message: data.error || tc("somethingWentWrong"), type: "error" });
+    } catch { setToast({ message: tc("somethingWentWrong"), type: "error" }); }
     finally { setActionBusy(null); }
   }
 
@@ -380,15 +417,15 @@ function TabParticipants({ activityId, activity }) {
     setActionBusy(ep._id);
     try {
       const order = await ensureOrder(ep);
-      if (!order) { setToast({ message: "Failed to create order", type: "error" }); return; }
+      if (!order) { setToast({ message: tc("somethingWentWrong"), type: "error" }); return; }
       const res = await fetch(`/api/register/${activityId}/checkout`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ orderId: order._id, adminReturn: true }),
       });
       const data = await res.json();
       if (data.url) window.open(data.url, "_blank");
-      else setToast({ message: data.error || "Failed", type: "error" });
-    } catch { setToast({ message: "Failed", type: "error" }); }
+      else setToast({ message: data.error || tc("somethingWentWrong"), type: "error" });
+    } catch { setToast({ message: tc("somethingWentWrong"), type: "error" }); }
     finally { setActionBusy(null); }
   }
 
@@ -406,15 +443,20 @@ function TabParticipants({ activityId, activity }) {
           setExpectedPlayers((prev) => prev.filter((ep) => !(String(ep.playerId) === String(formData.playerId) && String(ep.teamId?._id || ep.teamId) === String(teamId))));
         }
         setShowCreate(false);
-        setToast({ message: "Registration created", type: "success" });
-      } else setToast({ message: data.error || "Failed to create", type: "error" });
-    } catch { setToast({ message: "Failed to create registration", type: "error" }); }
+        setToast({ message: td("registrationCreated"), type: "success" });
+      } else setToast({ message: data.error || tc("somethingWentWrong"), type: "error" });
+    } catch { setToast({ message: tc("somethingWentWrong"), type: "error" }); }
     finally { setSaving(false); }
   }
 
   function copyPublicLink() {
     const url = `${window.location.origin}/register/${activityId}`;
-    navigator.clipboard.writeText(url).then(() => setToast({ message: "Public link copied!", type: "success" }));
+    navigator.clipboard.writeText(url).then(() => setToast({ message: td("publicLinkCopied"), type: "success" }));
+  }
+
+  function copyPublicRegistrationLink() {
+    const url = `${window.location.origin}/register/${activityId}`;
+    navigator.clipboard.writeText(url).then(() => setToast({ message: td("registrationLinkCopied"), type: "success" }));
   }
 
   function refreshList() {
@@ -428,12 +470,12 @@ function TabParticipants({ activityId, activity }) {
       const res = await fetch(`/api/activities/${activityId}/orders/repair`, { method: "POST" });
       const data = await res.json();
       if (data.success) {
-        setToast({ message: `Repaired ${data.repaired} order(s) — items & discounts restored`, type: "success" });
+        setToast({ message: td("repairedOrders", { count: data.repaired }), type: "success" });
         refreshList();
       } else {
-        setToast({ message: data.error || "Repair failed", type: "error" });
+        setToast({ message: data.error || td("repairFailed"), type: "error" });
       }
-    } catch { setToast({ message: "Repair failed", type: "error" }); }
+    } catch { setToast({ message: td("repairFailed"), type: "error" }); }
   }
 
   function toggleSelect(id) {
@@ -459,7 +501,7 @@ function TabParticipants({ activityId, activity }) {
   async function executeBulk(action, payload) {
     const orderIds = getSelectedOrderIds();
     if (orderIds.length === 0) {
-      setToast({ message: "Select registered players (not expected) for bulk actions", type: "error" });
+      setToast({ message: td("selectRegisteredPlayers"), type: "error" });
       return;
     }
     setBulkBusy(true);
@@ -475,17 +517,17 @@ function TabParticipants({ activityId, activity }) {
           (data.updated || []).forEach((o) => { map[o._id] = o; });
           return prev.map((o) => map[o._id] || o);
         });
-        setToast({ message: `Updated ${data.count} invoice${data.count !== 1 ? "s" : ""}`, type: "success" });
+        setToast({ message: td("updatedInvoices", { count: data.count }), type: "success" });
         setSelected(new Set());
         setBulkModal(null);
       } else {
-        setToast({ message: data.error || "Failed", type: "error" });
+        setToast({ message: data.error || tc("somethingWentWrong"), type: "error" });
       }
-    } catch { setToast({ message: "Bulk action failed", type: "error" }); }
+    } catch { setToast({ message: tc("somethingWentWrong"), type: "error" }); }
     finally { setBulkBusy(false); }
   }
 
-  if (loading) return <p className="text-gray-500 py-4 text-center text-sm">Loading participants...</p>;
+  if (loading) return <p className="text-gray-500 py-4 text-center text-sm">{tc("loading")}</p>;
 
   return (
     <div>
@@ -494,71 +536,84 @@ function TabParticipants({ activityId, activity }) {
       {/* HEADER */}
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-semibold text-gray-900">
-          {filteredRows.length} Participant{filteredRows.length !== 1 ? "s" : ""}
-          {expectedPlayers.length > 0 && <span className="text-sm font-normal text-gray-500 ml-2">({orders.length} registered · {expectedPlayers.length} expected)</span>}
+          {td("participantCount", { count: filteredRows.length })}
+          {expectedPlayers.length > 0 && <span className="text-sm font-normal text-gray-500 ms-2">({td("registeredCount", { count: orders.length })} · {td("expectedCount", { count: expectedPlayers.length })})</span>}
         </h3>
         <div className="flex items-center gap-2">
-          <button onClick={refreshList} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded text-sm font-medium hover:bg-gray-200" title="Refresh">
-            ↻ Refresh
+          <div className="relative" ref={headerActionsRef}>
+            <button onClick={() => setHeaderActionsOpen((v) => !v)}
+              className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded text-sm font-medium hover:bg-gray-200 flex items-center gap-1">
+              {tc("actions")} <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+            </button>
+            {headerActionsOpen && (
+              <div className="absolute end-0 top-full mt-1 bg-white border rounded-lg shadow-lg z-30 py-1 min-w-[220px]">
+                {activity?.registrationType === "public" && (
+                  <button onClick={() => { copyPublicLink(); setHeaderActionsOpen(false); }}
+                    className="w-full text-start px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                    {td("copyPublicLink")}
+                  </button>
+                )}
+                <button onClick={() => { setShowEmailModal(true); setHeaderActionsOpen(false); }}
+                  className="w-full text-start px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                  {td("sendPaymentLinks")}
+                </button>
+                {activity?.registrationType === "public" && (
+                  <button onClick={() => { copyPublicRegistrationLink(); setHeaderActionsOpen(false); }}
+                    className="w-full text-start px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                    {td("sendRegistrationLinks")}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          <button onClick={refreshList} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded text-sm font-medium hover:bg-gray-200" title={tc("refresh")}>
+            ↻ {tc("refresh")}
           </button>
-          <button onClick={repairOrders} className="bg-yellow-50 text-yellow-700 border border-yellow-300 px-3 py-1.5 rounded text-sm font-medium hover:bg-yellow-100" title="Re-apply subscription items & discounts to orders missing them">
-            🔧 Repair
-          </button>
-          <button onClick={() => setShowEmailModal(true)} className="bg-green-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-green-700">
-            Send Payment Emails
-          </button>
-          <button onClick={() => setDetailed((v) => !v)}
-            className={`px-3 py-1.5 rounded text-sm font-medium border transition ${detailed ? "bg-blue-50 border-blue-300 text-blue-700" : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100"}`}>
-            {detailed ? "Detailed ✓" : "Detailed"}
-          </button>
-          {activity?.registrationType === "public" && (
-            <button onClick={copyPublicLink} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded text-sm font-medium hover:bg-gray-200">Copy Public Link</button>
-          )}
-          <button onClick={() => setShowCreate(true)} className="bg-blue-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-blue-700">+ Add Registration</button>
+          <button onClick={() => setShowCreate(true)} className="bg-blue-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-blue-700">{td("addRegistration")}</button>
         </div>
       </div>
 
       {/* FILTERS */}
       <div className="flex flex-wrap gap-3 mb-4 items-start">
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search player, parent name, phone, email..."
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={`${tc("search")}...`}
           className="flex-1 min-w-[200px] border rounded-lg px-3 py-2 text-sm" />
         {teamTypes.length > 0 && (
           <select value={filterTeamType} onChange={(e) => setFilterTeamType(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
-            <option value="">All Types</option>
+            <option value="">{td("allTypes")}</option>
             {teamTypes.map((tt) => <option key={tt} value={tt}>{tt}</option>)}
           </select>
         )}
         {genders.length > 0 && (
           <select value={filterGender} onChange={(e) => setFilterGender(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
-            <option value="">All Genders</option>
+            <option value="">{td("allGenders")}</option>
             {genders.map((g) => <option key={g} value={g}>{g}</option>)}
           </select>
         )}
         <div className="relative" ref={teamFilterRef}>
           <button onClick={() => setTeamFilterOpen((v) => !v)}
             className={`border rounded-lg px-3 py-2 text-sm flex items-center gap-1.5 min-w-[140px] ${filterTeams.size > 0 ? "border-blue-400 bg-blue-50 text-blue-700" : "text-gray-700"}`}>
-            <span>{filterTeams.size > 0 ? `${filterTeams.size} Team${filterTeams.size > 1 ? "s" : ""}` : "All Teams"}</span>
-            <svg className="w-3.5 h-3.5 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+            <span>{filterTeams.size > 0 ? `${filterTeams.size} ${td("teams")}` : td("allTeams")}</span>
+            <svg className="w-3.5 h-3.5 ms-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
           </button>
           {teamFilterOpen && (
             <div className="absolute z-30 mt-1 bg-white border rounded-lg shadow-lg w-64 max-h-72 overflow-y-auto">
               <div className="sticky top-0 bg-white border-b px-3 py-2 flex items-center justify-between z-10">
-                <button onClick={() => setFilterTeams(new Set())} className="text-xs text-gray-500 hover:text-gray-800">Clear</button>
-                <button onClick={() => setTeamFilterOpen(false)} className="text-xs text-blue-600 font-medium">Done</button>
+                <button onClick={() => setFilterTeams(new Set())} className="text-xs text-gray-500 hover:text-gray-800">{td("clear")}</button>
+                <button onClick={() => setTeamFilterOpen(false)} className="text-xs text-blue-600 font-medium">{td("done")}</button>
               </div>
-              {activityTeams.map((t) => {
-                const checked = filterTeams.has(String(t.teamId));
+              {activityTeams.map((team) => {
+                const checked = filterTeams.has(String(team.teamId));
                 return (
-                  <label key={t.teamId} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm">
+                  <label key={team.teamId} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm">
                     <input type="checkbox" checked={checked} onChange={() => {
                       setFilterTeams((prev) => {
                         const next = new Set(prev);
-                        if (next.has(String(t.teamId))) next.delete(String(t.teamId)); else next.add(String(t.teamId));
+                        if (next.has(String(team.teamId))) next.delete(String(team.teamId)); else next.add(String(team.teamId));
                         return next;
                       });
                     }} className="rounded" />
-                    <span className="flex-1 truncate">{t.name}</span>
-                    {t.teamType && <span className="text-[10px] text-gray-400 flex-shrink-0">{t.teamType}</span>}
+                    <span className="flex-1 truncate">{team.name}</span>
+                    {team.teamType && <span className="text-[10px] text-gray-400 flex-shrink-0">{team.teamType}</span>}
                   </label>
                 );
               })}
@@ -566,7 +621,7 @@ function TabParticipants({ activityId, activity }) {
           )}
         </div>
         <select value={filterSub} onChange={(e) => setFilterSub(e.target.value)} className="border rounded-lg px-3 py-2 text-sm">
-          <option value="">All Subscriptions</option>
+          <option value="">{td("allSubscriptions")}</option>
           {activitySubs.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
         </select>
       </div>
@@ -574,19 +629,19 @@ function TabParticipants({ activityId, activity }) {
       {/* STATS */}
       <div className="grid grid-cols-4 gap-3 mb-5">
         <div className="bg-gray-50 rounded-lg p-3 text-center">
-          <p className="text-xs text-gray-500">Total Expected</p>
+          <p className="text-xs text-gray-500">{td("totalExpected")}</p>
           <p className="text-lg font-bold text-gray-900">${centsToDisplay(statExpected)}</p>
         </div>
         <div className="bg-green-50 rounded-lg p-3 text-center">
-          <p className="text-xs text-gray-500">Total Collected</p>
+          <p className="text-xs text-gray-500">{td("totalCollected")}</p>
           <p className="text-lg font-bold text-green-700">${centsToDisplay(statCollected)}</p>
         </div>
         <div className="bg-blue-50 rounded-lg p-3 text-center">
-          <p className="text-xs text-gray-500">Fully Paid</p>
+          <p className="text-xs text-gray-500">{td("fullyPaid")}</p>
           <p className="text-lg font-bold text-blue-700">{statFullyPaid}</p>
         </div>
         <div className="bg-yellow-50 rounded-lg p-3 text-center">
-          <p className="text-xs text-gray-500">Partially Paid</p>
+          <p className="text-xs text-gray-500">{td("partiallyPaid")}</p>
           <p className="text-lg font-bold text-yellow-700">{statPartialPaid}</p>
         </div>
       </div>
@@ -594,47 +649,59 @@ function TabParticipants({ activityId, activity }) {
       {/* BULK ACTIONS BAR */}
       {selected.size > 0 && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mb-4 flex items-center justify-between">
-          <span className="text-sm font-medium text-blue-800">{selected.size} selected</span>
+          <span className="text-sm font-medium text-blue-800">{td("selected", { count: selected.size })}</span>
           <div className="flex items-center gap-2">
             <button onClick={() => setBulkModal("add_item")}
               className="bg-white border border-blue-300 text-blue-700 px-3 py-1.5 rounded text-sm font-medium hover:bg-blue-100">
-              + Add Item
+              {td("addItem")}
             </button>
             <button onClick={() => setBulkModal("apply_discount")}
               className="bg-white border border-blue-300 text-blue-700 px-3 py-1.5 rounded text-sm font-medium hover:bg-blue-100">
-              Apply Discount
+              {td("applyDiscount")}
             </button>
             <button onClick={() => setBulkModal("remove_item")}
               className="bg-white border border-red-300 text-red-600 px-3 py-1.5 rounded text-sm font-medium hover:bg-red-50">
-              Remove Item
+              {td("removeItemBtn")}
             </button>
             <button onClick={() => setSelected(new Set())}
-              className="text-sm text-gray-500 hover:text-gray-700 ml-2">Clear</button>
+              className="text-sm text-gray-500 hover:text-gray-700 ms-2">{td("clear")}</button>
           </div>
         </div>
       )}
 
+      {/* DETAILED TOGGLE */}
+      <div className="flex items-center mb-3">
+        <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+          <span className="relative">
+            <input type="checkbox" checked={detailed} onChange={() => setDetailed((v) => !v)} className="sr-only peer" />
+            <span className="block w-9 h-5 bg-gray-300 rounded-full peer-checked:bg-blue-600 transition-colors" />
+            <span className="absolute start-0.5 top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform peer-checked:translate-x-4 rtl:peer-checked:-translate-x-4" />
+          </span>
+          <span className="text-sm text-gray-600">{td("detailed")}</span>
+        </label>
+      </div>
+
       {/* TABLE */}
       {filteredRows.length === 0 ? (
-        <p className="text-gray-400 text-sm p-8 bg-gray-50 rounded-lg text-center">{allRows.length === 0 ? "No participants yet." : "No results match your filters."}</p>
+        <p className="text-gray-400 text-sm p-8 bg-gray-50 rounded-lg text-center">{allRows.length === 0 ? td("noParticipantsYet") : td("noResultsMatchFilters")}</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b text-left text-gray-500 text-xs uppercase tracking-wider">
+              <tr className="border-b text-start text-gray-500 text-xs uppercase tracking-wider">
                 <th className="pb-2 px-2 w-8"><input type="checkbox" checked={filteredRows.length > 0 && selected.size === filteredRows.length} onChange={toggleSelectAll} className="rounded" /></th>
-                <th className="pb-2 px-2 font-medium">Player</th>
-                <th className="pb-2 px-2 font-medium">Reg. Date</th>
-                {detailed && <th className="pb-2 px-2 font-medium">Parent 1</th>}
-                {detailed && <th className="pb-2 px-2 font-medium">Parent 2</th>}
-                <th className="pb-2 px-2 font-medium text-right">Sub Cost</th>
-                <th className="pb-2 px-2 font-medium text-right">Items</th>
-                <th className="pb-2 px-2 font-medium text-right">Discounts</th>
-                <th className="pb-2 px-2 font-medium text-right">Total</th>
-                <th className="pb-2 px-2 font-medium text-right">Paid</th>
-                <th className="pb-2 px-2 font-medium text-right">Refund</th>
-                <th className="pb-2 px-2 font-medium text-right">Due</th>
-                <th className="pb-2 px-2 font-medium text-right">Actions</th>
+                <th className="pb-2 px-2 font-medium">{td("player")}</th>
+                <th className="pb-2 px-2 font-medium">{td("regDate")}</th>
+                {detailed && <th className="pb-2 px-2 font-medium">{td("parent1")}</th>}
+                {detailed && <th className="pb-2 px-2 font-medium">{td("parent2")}</th>}
+                <th className="pb-2 px-2 font-medium text-right">{td("subCost")}</th>
+                <th className="pb-2 px-2 font-medium text-right">{td("items")}</th>
+                <th className="pb-2 px-2 font-medium text-right">{td("discounts")}</th>
+                <th className="pb-2 px-2 font-medium text-right">{tc("total")}</th>
+                <th className="pb-2 px-2 font-medium text-right">{td("paid")}</th>
+                <th className="pb-2 px-2 font-medium text-right">{td("refund")}</th>
+                <th className="pb-2 px-2 font-medium text-right">{td("due")}</th>
+                <th className="pb-2 px-2 font-medium text-right">{tc("actions")}</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -691,7 +758,7 @@ function TabParticipants({ activityId, activity }) {
                     <td className="py-2.5 px-2 text-right">
                       <span className="text-green-700">{paid > 0 ? `$${centsToDisplay(paid)}` : <span className="text-gray-400">$0.00</span>}</span>
                       {(r.chosenInstallments || 0) > 1 && (
-                        <div className="text-[10px] text-gray-400">{(r.installmentSchedule || []).filter((i) => i.status === "paid").length}/{r.chosenInstallments} installments</div>
+                        <div className="text-[10px] text-gray-400">{(r.installmentSchedule || []).filter((i) => i.status === "paid").length}/{r.chosenInstallments} {td("installments")}</div>
                       )}
                     </td>
                     <td className="py-2.5 px-2 text-right text-xs">{refunded > 0 ? <span className="text-purple-600">$${centsToDisplay(refunded)}</span> : <span className="text-gray-400">—</span>}</td>
@@ -701,40 +768,40 @@ function TabParticipants({ activityId, activity }) {
                         <button onClick={(e) => { e.stopPropagation(); setActionsOpen(actionsOpen === rowId ? null : rowId); }}
                           disabled={actionBusy === rowId}
                           className="text-xs font-medium text-gray-600 hover:text-gray-900 border rounded-lg px-2.5 py-1 hover:bg-gray-50 disabled:opacity-50">
-                          {actionBusy === rowId ? "..." : "Actions ▾"}
+                          {actionBusy === rowId ? "..." : `${tc("actions")} ▾`}
                         </button>
                         {actionsOpen === rowId && (
                           <div className="absolute right-0 top-full mt-1 bg-white border rounded-lg shadow-lg z-20 py-1 min-w-[180px]">
                             {isExpected ? (
                               <>
                                 <button onClick={() => { setActionsOpen(null); openInvoiceForExpected(r); }}
-                                  className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Edit Invoice</button>
+                                  className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("viewInvoice")}</button>
                                 {r.parent1Email && (
                                   <button onClick={() => { setActionsOpen(null); sendPaymentLinkForExpected(r); }}
-                                    className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Copy Payment Link</button>
+                                    className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("copyPaymentLink")}</button>
                                 )}
                                 <button onClick={() => { setActionsOpen(null); copyRegistrationLinkForExpected(r); }}
-                                  className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Copy Registration Link</button>
+                                  className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("copyRegistrationLink")}</button>
                                 <button onClick={() => { setActionsOpen(null); payFromAdminForExpected(r); }}
-                                  className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Pay from Admin</button>
+                                  className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("payFromAdmin")}</button>
                               </>
                             ) : (
                               <>
                                 <button onClick={() => { setActionsOpen(null); openInvoiceModal(r); }}
-                                  className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Edit Invoice</button>
+                                  className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("viewInvoice")}</button>
                                 {r.parent1Email && r.status !== "paid" && (
                                   <button onClick={() => { setActionsOpen(null); sendPaymentLink(r._id); }}
-                                    className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-                                    Copy Payment Link
+                                    className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                                    {td("copyPaymentLink")}
                                   </button>
                                 )}
                                 <button onClick={() => { setActionsOpen(null); copyRegistrationLink(r._id); }}
-                                  className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-                                  Copy Registration Link
+                                  className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                                  {td("copyRegistrationLink")}
                                 </button>
                                 {r.status !== "paid" && (
                                   <button onClick={() => { setActionsOpen(null); payFromAdmin(r._id); }}
-                                    className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Pay from Admin</button>
+                                    className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("payFromAdmin")}</button>
                                 )}
                               </>
                             )}
@@ -760,6 +827,8 @@ function TabParticipants({ activityId, activity }) {
           allOrders={orders}
           onExecute={executeBulk}
           onClose={() => setBulkModal(null)}
+          tc={tc}
+          td={td}
         />
       )}
 
@@ -773,176 +842,38 @@ function TabParticipants({ activityId, activity }) {
           onClose={() => setShowEmailModal(false)}
           onDone={(msg) => { setShowEmailModal(false); setToast({ message: msg, type: "success" }); refreshList(); }}
           onError={(msg) => setToast({ message: msg, type: "error" })}
+          tc={tc}
+          td={td}
         />
       )}
 
-      {/* EDIT INVOICE MODAL */}
+      {/* VIEW INVOICE SLIDE-OVER */}
       {editOrder && editForm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => { setEditOrder(null); setEditForm(null); }}>
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="px-6 py-4 border-b flex items-center justify-between">
-              <h3 className="font-bold text-gray-900">Edit Invoice — {editOrder.playerFirstName} {editOrder.playerLastName}</h3>
-              <button onClick={() => { setEditOrder(null); setEditForm(null); }} className="text-gray-400 hover:text-gray-600 text-lg">×</button>
-            </div>
-            <div className="border-b flex">
-              {[{ key: "invoice", label: "Invoice" }, { key: "logs", label: "Logs" }].map((t) => (
-                <button key={t.key} onClick={() => setEditTab(t.key)}
-                  className={`px-4 py-2 text-sm font-medium border-b-2 whitespace-nowrap ${editTab === t.key ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500"}`}>
-                  {t.label}
-                </button>
-              ))}
-            </div>
-            <div className="p-6">
-
-              {editTab === "invoice" && (
-                <div className="space-y-5">
-                  <div>
-                    <h4 className="text-sm font-semibold text-gray-700 mb-3">Team & Subscription</h4>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div><label className="block text-xs font-medium text-gray-500 mb-1">Team</label>
-                        <select value={editForm.teamId} onChange={(e) => onTeamChange(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm">
-                          <option value="">No team</option>
-                          {activityTeams.map((t) => <option key={t.teamId} value={t.teamId}>{t.name}</option>)}
-                        </select></div>
-                      <div><label className="block text-xs font-medium text-gray-500 mb-1">Subscription</label>
-                        <select value={editForm.subscriptionId} onChange={(e) => onSubChange(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm">
-                          <option value="">No subscription</option>
-                          {activitySubs.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
-                        </select></div>
-                    </div>
-                    <div className="mt-3">
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Subscription Price ($)</label>
-                      <PriceInput value={editForm.subscriptionPriceCents} onChange={(cents) => updateEditForm("subscriptionPriceCents", cents)} className="w-full border rounded-lg px-3 py-2 text-sm" />
-                    </div>
-                  </div>
-                  <hr />
-                  <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <h4 className="text-sm font-semibold text-gray-700">Items</h4>
-                      <button onClick={addEditItem} className="text-xs text-blue-600 hover:text-blue-800">+ Add Item</button>
-                    </div>
-                    {editForm.items.length === 0 ? <p className="text-sm text-gray-400 text-center py-2">No items.</p> : (
-                      <div className="space-y-2">
-                        {editForm.items.map((item, idx) => (
-                          <div key={idx} className="flex items-center gap-2 border rounded-lg p-2">
-                            <input value={item.name} onChange={(e) => updateEditItem(idx, "name", e.target.value)} placeholder="Name" className="flex-1 border rounded px-2 py-1 text-sm" />
-                            <PriceInput value={item.priceCents} onChange={(cents) => updateEditItem(idx, "priceCents", cents)} className="w-24 border rounded px-2 py-1 text-sm" placeholder="Price" />
-                            <input type="number" value={item.quantity} onChange={(e) => updateEditItem(idx, "quantity", Number(e.target.value))} min="1" className="w-14 border rounded px-2 py-1 text-sm" />
-                            <label className="flex items-center gap-1 text-xs whitespace-nowrap">
-                              <input type="checkbox" checked={item.isDiscount} onChange={(e) => updateEditItem(idx, "isDiscount", e.target.checked)} className="rounded" />Disc.
-                            </label>
-                            <button onClick={() => removeEditItem(idx)} className="text-red-500 text-sm">×</button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <hr />
-                  <div>
-                    <h4 className="text-sm font-semibold text-gray-700 mb-3">Discounts & Coupons</h4>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div><label className="block text-xs font-medium text-gray-500 mb-1">Discount Type</label>
-                        <select value={editForm.discountType} onChange={(e) => updateEditForm("discountType", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm">
-                          <option value="none">None</option><option value="amount">Fixed Amount</option><option value="percentage">Percentage</option>
-                        </select></div>
-                      {editForm.discountType !== "none" && (
-                        <div><label className="block text-xs font-medium text-gray-500 mb-1">{editForm.discountType === "percentage" ? "Discount (%)" : "Discount ($)"}</label>
-                          {editForm.discountType === "percentage" ? (
-                            <input type="text" inputMode="numeric" value={editForm.discountValue}
-                              onChange={(e) => { const v = e.target.value; if (v === "" || /^\d*$/.test(v)) updateEditForm("discountValue", Number(v || 0)); }}
-                              className="w-full border rounded-lg px-3 py-2 text-sm" />
-                          ) : (
-                            <PriceInput value={editForm.discountValue} onChange={(cents) => updateEditForm("discountValue", cents)} className="w-full border rounded-lg px-3 py-2 text-sm" />
-                          )}</div>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-2 gap-4 mt-3">
-                      <div><label className="block text-xs font-medium text-gray-500 mb-1">Coupon Code</label>
-                        <input value={editForm.couponCode} onChange={(e) => updateEditForm("couponCode", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
-                      <div><label className="block text-xs font-medium text-gray-500 mb-1">Coupon Discount ($)</label>
-                        <PriceInput value={editForm.couponDiscountCents} onChange={(cents) => updateEditForm("couponDiscountCents", cents)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
-                    </div>
-                  </div>
-                  <hr />
-                  <div>
-                    <h4 className="text-sm font-semibold text-gray-700 mb-3">Payment</h4>
-                    <div className="grid grid-cols-3 gap-4">
-                      <div><label className="block text-xs font-medium text-gray-500 mb-1">Paid ($)</label>
-                        <PriceInput value={editForm.paidCents} onChange={(cents) => updateEditForm("paidCents", cents)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
-                      <div><label className="block text-xs font-medium text-gray-500 mb-1">Refunded ($)</label>
-                        <PriceInput value={editForm.refundedCents} onChange={(cents) => updateEditForm("refundedCents", cents)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
-                      <div><label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
-                        <select value={editForm.status} onChange={(e) => updateEditForm("status", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm">
-                          <option value="pending">Pending</option><option value="partial">Partial</option><option value="paid">Paid</option><option value="refunded">Refunded</option><option value="cancelled">Cancelled</option>
-                        </select></div>
-                    </div>
-                  </div>
-                  <hr />
-                  <div className="bg-gray-50 rounded-lg p-4">
-                    <h4 className="text-sm font-semibold text-gray-700 mb-2">Invoice Summary</h4>
-                    <div className="flex justify-between text-sm"><span className="text-gray-500">Subscription</span><span>${centsToDisplay(editForm.subscriptionPriceCents)}</span></div>
-                    {editForm.items.filter((i) => !i.isDiscount).map((i, idx) => (
-                      <div key={idx} className="flex justify-between text-sm"><span className="text-gray-500">{i.name || "Item"} × {i.quantity || 1}</span><span>${centsToDisplay((i.priceCents || 0) * (i.quantity || 1))}</span></div>
-                    ))}
-                    {editForm.items.filter((i) => i.isDiscount).map((i, idx) => (
-                      <div key={idx} className="flex justify-between text-sm text-red-600"><span>{i.name || "Discount"}</span><span>-${centsToDisplay(Math.abs(i.priceCents || 0) * (i.quantity || 1))}</span></div>
-                    ))}
-                    {editForm.discountType !== "none" && editForm.discountValue > 0 && (
-                      <div className="flex justify-between text-sm text-red-600"><span>Discount ({editForm.discountType})</span><span>-{editForm.discountType === "percentage" ? `${editForm.discountValue}%` : `$${centsToDisplay(editForm.discountValue)}`}</span></div>
-                    )}
-                    {editForm.couponDiscountCents > 0 && (
-                      <div className="flex justify-between text-sm text-red-600"><span>Coupon{editForm.couponCode ? `: ${editForm.couponCode}` : ""}</span><span>-${centsToDisplay(editForm.couponDiscountCents)}</span></div>
-                    )}
-                    <div className="flex justify-between text-sm font-bold border-t mt-2 pt-2"><span>Total</span><span>${centsToDisplay(editFormTotal())}</span></div>
-                    <div className="flex justify-between text-sm"><span className="text-green-700">Paid</span><span className="text-green-700">${centsToDisplay(editForm.paidCents)}</span></div>
-                    <div className="flex justify-between text-sm font-medium">
-                      <span>Due</span>
-                      {(() => { const d = Math.max(0, editFormTotal() - (editForm.paidCents || 0) + (editForm.refundedCents || 0)); return d > 0 ? <span className="text-red-600">${centsToDisplay(d)}</span> : <span className="text-green-600">$0.00</span>; })()}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {editTab === "logs" && (
-                <div>
-                  {editLogs.length === 0 ? <p className="text-sm text-gray-400 text-center py-4">No changes recorded yet.</p> : (
-                    <div className="space-y-2">
-                      {editLogs.map((log) => (
-                        <div key={log._id} className="border rounded-lg p-3 text-sm">
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="font-medium text-gray-900">{log.description}</span>
-                            <span className="text-xs text-gray-400">{fmtDateTime(log.createdAt)}</span>
-                          </div>
-                          <div className="text-xs text-gray-500">
-                            by {log.userName} · Field: <span className="font-mono">{log.field}</span>
-                            {log.previousValue && <> · Prev: <span className="text-red-600">{log.previousValue.length > 80 ? log.previousValue.slice(0, 80) + "..." : log.previousValue}</span></>}
-                            {log.newValue && <> · New: <span className="text-green-600">{log.newValue.length > 80 ? log.newValue.slice(0, 80) + "..." : log.newValue}</span></>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-            {editTab === "invoice" && (
-              <div className="px-6 py-4 border-t flex justify-end gap-3">
-                <button onClick={() => { setEditOrder(null); setEditForm(null); }} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
-                <button onClick={saveEdit} disabled={saving} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{saving ? "Saving..." : "Save Changes"}</button>
-              </div>
-            )}
-          </div>
-        </div>
+        <InvoiceSlideOver
+          order={editOrder}
+          editForm={editForm}
+          activityId={activityId}
+          activityTeams={activityTeams}
+          activitySubs={activitySubs}
+          transactions={editTransactions}
+          paymentRequests={editPaymentRequests}
+          logs={editLogs}
+          onUpdateForm={updateEditForm}
+          onSave={saveEdit}
+          onClose={() => { setEditOrder(null); setEditForm(null); }}
+          saving={saving}
+          onRefresh={refreshInvoiceData}
+        />
       )}
 
       {/* CREATE ORDER MODAL */}
       {showCreate && <CreateOrderModal activityTeams={activityTeams} activitySubs={activitySubs} saving={saving} onCreate={createOrder} onClose={() => setShowCreate(false)}
-        prefill={typeof showCreate === "object" ? showCreate : null} />}
+        prefill={typeof showCreate === "object" ? showCreate : null} tc={tc} td={td} />}
     </div>
   );
 }
 
-function CreateOrderModal({ activityTeams, activitySubs, saving, onCreate, onClose, prefill }) {
+function CreateOrderModal({ activityTeams, activitySubs, saving, onCreate, onClose, prefill, tc, td }) {
   const [tab, setTab] = useState("registration");
   const [form, setForm] = useState(() => {
     const defaults = {
@@ -970,23 +901,23 @@ function CreateOrderModal({ activityTeams, activitySubs, saving, onCreate, onClo
   }
 
   const TABS = [
-    { key: "registration", label: "Registration" },
-    { key: "parents", label: "Parents" },
-    { key: "invoice", label: "Invoice" },
+    { key: "registration", label: td("registration") },
+    { key: "parents", label: td("parents") },
+    { key: "invoice", label: td("invoice") },
   ];
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="px-6 py-4 border-b flex items-center justify-between">
-          <h3 className="font-bold text-gray-900">Add Registration</h3>
+          <h3 className="font-bold text-gray-900">{td("addRegistrationTitle")}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg">×</button>
         </div>
         <div className="border-b flex">
-          {TABS.map((t) => (
-            <button key={t.key} onClick={() => setTab(t.key)}
-              className={`px-4 py-2 text-sm font-medium border-b-2 ${tab === t.key ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500"}`}>
-              {t.label}
+          {TABS.map((tabItem) => (
+            <button key={tabItem.key} onClick={() => setTab(tabItem.key)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 ${tab === tabItem.key ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500"}`}>
+              {tabItem.label}
             </button>
           ))}
         </div>
@@ -994,53 +925,53 @@ function CreateOrderModal({ activityTeams, activitySubs, saving, onCreate, onClo
           {tab === "registration" && (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-xs font-medium text-gray-500 mb-1">First Name *</label>
+                <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("firstName")} *</label>
                   <input value={form.playerFirstName} onChange={(e) => update("playerFirstName", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
-                <div><label className="block text-xs font-medium text-gray-500 mb-1">Last Name *</label>
+                <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("lastName")} *</label>
                   <input value={form.playerLastName} onChange={(e) => update("playerLastName", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-xs font-medium text-gray-500 mb-1">Date of Birth</label>
+                <div><label className="block text-xs font-medium text-gray-500 mb-1">{td("dateOfBirth")}</label>
                   <input type="date" value={form.playerDob} onChange={(e) => update("playerDob", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
-                <div><label className="block text-xs font-medium text-gray-500 mb-1">Gender</label>
+                <div><label className="block text-xs font-medium text-gray-500 mb-1">{td("gender")}</label>
                   <select value={form.playerGender} onChange={(e) => update("playerGender", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm">
-                    <option value="">—</option><option value="Male">Male</option><option value="Female">Female</option>
+                    <option value="">—</option><option value="Male">{td("male")}</option><option value="Female">{td("female")}</option>
                   </select></div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-xs font-medium text-gray-500 mb-1">Phone</label>
+                <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("phone")}</label>
                   <input value={form.playerPhone} onChange={(e) => update("playerPhone", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
-                <div><label className="block text-xs font-medium text-gray-500 mb-1">Email</label>
+                <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("email")}</label>
                   <input value={form.playerEmail} onChange={(e) => update("playerEmail", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
               </div>
-              <div><label className="block text-xs font-medium text-gray-500 mb-1">Team</label>
+              <div><label className="block text-xs font-medium text-gray-500 mb-1">{td("team")}</label>
                 <select value={form.teamId} onChange={(e) => onTeamChange(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm">
-                  <option value="">No team</option>
-                  {activityTeams.map((t) => <option key={t.teamId} value={t.teamId}>{t.name}</option>)}
+                  <option value="">{td("noTeam")}</option>
+                  {activityTeams.map((team) => <option key={team.teamId} value={team.teamId}>{team.name}</option>)}
                 </select></div>
             </div>
           )}
           {tab === "parents" && (
             <div className="space-y-5">
-              <div><h4 className="text-sm font-semibold text-gray-700 mb-3">Parent 1</h4>
+              <div><h4 className="text-sm font-semibold text-gray-700 mb-3">{td("parent1Title")}</h4>
                 <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-xs font-medium text-gray-500 mb-1">First Name</label><input value={form.parent1FirstName} onChange={(e) => update("parent1FirstName", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
-                  <div><label className="block text-xs font-medium text-gray-500 mb-1">Last Name</label><input value={form.parent1LastName} onChange={(e) => update("parent1LastName", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+                  <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("firstName")}</label><input value={form.parent1FirstName} onChange={(e) => update("parent1FirstName", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+                  <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("lastName")}</label><input value={form.parent1LastName} onChange={(e) => update("parent1LastName", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
                 </div>
                 <div className="grid grid-cols-2 gap-4 mt-3">
-                  <div><label className="block text-xs font-medium text-gray-500 mb-1">Phone</label><input value={form.parent1Phone} onChange={(e) => update("parent1Phone", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
-                  <div><label className="block text-xs font-medium text-gray-500 mb-1">Email</label><input value={form.parent1Email} onChange={(e) => update("parent1Email", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+                  <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("phone")}</label><input value={form.parent1Phone} onChange={(e) => update("parent1Phone", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+                  <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("email")}</label><input value={form.parent1Email} onChange={(e) => update("parent1Email", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
                 </div>
               </div>
               <hr />
-              <div><h4 className="text-sm font-semibold text-gray-700 mb-3">Parent 2 <span className="font-normal text-gray-400">(optional)</span></h4>
+              <div><h4 className="text-sm font-semibold text-gray-700 mb-3">{td("parent2Title")} <span className="font-normal text-gray-400">{td("parent2Optional")}</span></h4>
                 <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-xs font-medium text-gray-500 mb-1">First Name</label><input value={form.parent2FirstName} onChange={(e) => update("parent2FirstName", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
-                  <div><label className="block text-xs font-medium text-gray-500 mb-1">Last Name</label><input value={form.parent2LastName} onChange={(e) => update("parent2LastName", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+                  <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("firstName")}</label><input value={form.parent2FirstName} onChange={(e) => update("parent2FirstName", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+                  <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("lastName")}</label><input value={form.parent2LastName} onChange={(e) => update("parent2LastName", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
                 </div>
                 <div className="grid grid-cols-2 gap-4 mt-3">
-                  <div><label className="block text-xs font-medium text-gray-500 mb-1">Phone</label><input value={form.parent2Phone} onChange={(e) => update("parent2Phone", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
-                  <div><label className="block text-xs font-medium text-gray-500 mb-1">Email</label><input value={form.parent2Email} onChange={(e) => update("parent2Email", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+                  <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("phone")}</label><input value={form.parent2Phone} onChange={(e) => update("parent2Phone", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+                  <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("email")}</label><input value={form.parent2Email} onChange={(e) => update("parent2Email", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
                 </div>
               </div>
             </div>
@@ -1048,21 +979,21 @@ function CreateOrderModal({ activityTeams, activitySubs, saving, onCreate, onClo
           {tab === "invoice" && (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-xs font-medium text-gray-500 mb-1">Subscription</label>
+                <div><label className="block text-xs font-medium text-gray-500 mb-1">{td("subscription")}</label>
                   <select value={form.subscriptionId} onChange={(e) => onSubChange(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm">
-                    <option value="">No subscription</option>
+                    <option value="">{td("noSubscription")}</option>
                     {activitySubs.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
                   </select></div>
-                <div><label className="block text-xs font-medium text-gray-500 mb-1">Subscription Price ($)</label>
+                <div><label className="block text-xs font-medium text-gray-500 mb-1">{td("subscriptionPrice")}</label>
                   <PriceInput value={form.subscriptionPriceCents} onChange={(cents) => update("subscriptionPriceCents", cents)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
               </div>
             </div>
           )}
         </div>
         <div className="px-6 py-4 border-t flex justify-end gap-3">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">{tc("cancel")}</button>
           <button onClick={() => onCreate(form)} disabled={saving || !form.playerFirstName.trim() || !form.playerLastName.trim()}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{saving ? "Creating..." : "Create"}</button>
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{saving ? tc("creating") : tc("create")}</button>
         </div>
       </div>
     </div>
@@ -1070,7 +1001,7 @@ function CreateOrderModal({ activityTeams, activitySubs, saving, onCreate, onClo
 }
 
 /* ============== BULK ACTION MODAL ============== */
-function BulkActionModal({ type, busy, selectedCount, orderCount, allOrders, onExecute, onClose }) {
+function BulkActionModal({ type, busy, selectedCount, orderCount, allOrders, onExecute, onClose, tc, td }) {
   const [itemName, setItemName] = useState("");
   const [itemPrice, setItemPrice] = useState(0);
   const [itemQty, setItemQty] = useState(1);
@@ -1094,7 +1025,7 @@ function BulkActionModal({ type, busy, selectedCount, orderCount, allOrders, onE
     }
   }
 
-  const title = type === "add_item" ? "Add Item to Selected" : type === "apply_discount" ? "Apply Discount to Selected" : "Remove Item from Selected";
+  const title = type === "add_item" ? td("addItemToSelected") : type === "apply_discount" ? td("applyDiscountToSelected") : td("removeItemFromSelected");
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
@@ -1105,29 +1036,29 @@ function BulkActionModal({ type, busy, selectedCount, orderCount, allOrders, onE
         </div>
         <div className="p-6 space-y-4">
           <p className="text-sm text-gray-500">
-            This will apply to <strong>{orderCount}</strong> registered player invoice{orderCount !== 1 ? "s" : ""}
-            {selectedCount > orderCount ? ` (${selectedCount - orderCount} expected player${selectedCount - orderCount !== 1 ? "s" : ""} skipped)` : ""}.
+            {td("bulkApplyNote", { count: orderCount })}
+            {selectedCount > orderCount ? ` (${td("expectedSkipped", { count: selectedCount - orderCount })})` : ""}
           </p>
 
           {type === "add_item" && (
             <>
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Item Name *</label>
+                <label className="block text-xs font-medium text-gray-500 mb-1">{td("itemName")}</label>
                 <input value={itemName} onChange={(e) => setItemName(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="e.g. Jersey Fee, Late Fee..." />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Price ($)</label>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">{td("priceDollar")}</label>
                   <PriceInput value={itemPrice} onChange={setItemPrice} className="w-full border rounded-lg px-3 py-2 text-sm" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Quantity</label>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">{td("quantity")}</label>
                   <input type="number" min="1" value={itemQty} onChange={(e) => setItemQty(Number(e.target.value) || 1)} className="w-full border rounded-lg px-3 py-2 text-sm" />
                 </div>
               </div>
               <label className="flex items-center gap-2 text-sm text-gray-700">
                 <input type="checkbox" checked={itemIsDiscount} onChange={(e) => setItemIsDiscount(e.target.checked)} className="rounded" />
-                This is a discount item (negative amount)
+                {td("discountItemLabel")}
               </label>
             </>
           )}
@@ -1135,14 +1066,14 @@ function BulkActionModal({ type, busy, selectedCount, orderCount, allOrders, onE
           {type === "apply_discount" && (
             <>
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Discount Type</label>
+                <label className="block text-xs font-medium text-gray-500 mb-1">{td("discountType")}</label>
                 <select value={discType} onChange={(e) => setDiscType(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm">
-                  <option value="amount">Fixed Amount ($)</option>
-                  <option value="percentage">Percentage (%)</option>
+                  <option value="amount">{td("discountTypeFixed")}</option>
+                  <option value="percentage">{td("discountTypePercent")}</option>
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">{discType === "percentage" ? "Discount (%)" : "Discount ($)"}</label>
+                <label className="block text-xs font-medium text-gray-500 mb-1">{discType === "percentage" ? td("discountPercent") : td("discountDollar")}</label>
                 {discType === "percentage" ? (
                   <input type="text" inputMode="numeric" value={discValue || ""} onChange={(e) => { const v = e.target.value; if (v === "" || /^\d*$/.test(v)) setDiscValue(Number(v || 0)); }}
                     className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="e.g. 10" />
@@ -1155,23 +1086,23 @@ function BulkActionModal({ type, busy, selectedCount, orderCount, allOrders, onE
 
           {type === "remove_item" && (
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Item to Remove *</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1">{td("itemToRemove")}</label>
               {allItemNames.length > 0 ? (
                 <select value={removeItemName} onChange={(e) => setRemoveItemName(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm">
-                  <option value="">Select an item...</option>
+                  <option value="">{td("selectAnItem")}</option>
                   {allItemNames.map((n) => <option key={n} value={n}>{n}</option>)}
                 </select>
               ) : (
-                <p className="text-sm text-gray-400">No items found in selected orders.</p>
+                <p className="text-sm text-gray-400">{td("noItemsFoundInSelected")}</p>
               )}
             </div>
           )}
         </div>
         <div className="px-6 py-4 border-t flex justify-end gap-3">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">{tc("cancel")}</button>
           <button onClick={handleSubmit} disabled={busy}
             className={`px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 ${type === "remove_item" ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700"}`}>
-            {busy ? "Applying..." : `Apply to ${orderCount} Invoice${orderCount !== 1 ? "s" : ""}`}
+            {busy ? td("applying") : td("applyToInvoices", { count: orderCount })}
           </button>
         </div>
       </div>
@@ -1180,11 +1111,11 @@ function BulkActionModal({ type, busy, selectedCount, orderCount, allOrders, onE
 }
 
 /* ============== SEND PAYMENT EMAILS MODAL ============== */
-function SendPaymentEmailsModal({ activityId, activity, orders, expectedPlayers, onClose, onDone, onError }) {
-  const activityTeams = (activity?.teams || []).map((t) => ({
-    teamId: t.teamId?._id || t.teamId, name: t.teamId?.name || "Unknown",
+function SendPaymentEmailsModal({ activityId, activity, orders, expectedPlayers, onClose, onDone, onError, tc, td }) {
+  const activityTeams = (activity?.teams || []).map((row) => ({
+    teamId: row.teamId?._id || row.teamId, name: row.teamId?.name || "Unknown",
   }));
-  const [selectedTeams, setSelectedTeams] = useState(() => new Set(activityTeams.map((t) => t.teamId)));
+  const [selectedTeams, setSelectedTeams] = useState(() => new Set(activityTeams.map((row) => row.teamId)));
   const [subject, setSubject] = useState(`Payment link for ${activity?.title || "Activity"}`);
   const [bodyHtml, setBodyHtml] = useState("<p>Dear parent,</p><p>Please complete your payment using the link below.</p>");
   const [sending, setSending] = useState(false);
@@ -1228,7 +1159,7 @@ function SendPaymentEmailsModal({ activityId, activity, orders, expectedPlayers,
     if (selectedTeams.size === activityTeams.length) {
       setSelectedTeams(new Set());
     } else {
-      setSelectedTeams(new Set(activityTeams.map((t) => t.teamId)));
+      setSelectedTeams(new Set(activityTeams.map((row) => row.teamId)));
     }
   }
 
@@ -1247,9 +1178,9 @@ function SendPaymentEmailsModal({ activityId, activity, orders, expectedPlayers,
 
   async function handleSend() {
     const html = bodyRef.current?.innerHTML || bodyHtml;
-    if (!subject.trim()) { onError("Subject is required"); return; }
-    if (!html.trim() || html.trim() === "<br>") { onError("Message body is required"); return; }
-    if (selectedTeams.size === 0) { onError("Select at least one team"); return; }
+    if (!subject.trim()) { onError(td("subjectRequired")); return; }
+    if (!html.trim() || html.trim() === "<br>") { onError(td("messageBodyRequired")); return; }
+    if (selectedTeams.size === 0) { onError(td("selectAtLeastOneTeam")); return; }
 
     setSending(true);
     try {
@@ -1259,13 +1190,13 @@ function SendPaymentEmailsModal({ activityId, activity, orders, expectedPlayers,
       });
       const data = await res.json();
       if (data.success) {
-        let msg = `Sent ${data.sentCount} payment email${data.sentCount !== 1 ? "s" : ""}`;
-        if (data.errorCount > 0) msg += ` (${data.errorCount} failed)`;
+        let msg = td("sentPaymentLinks", { count: data.sentCount });
+        if (data.errorCount > 0) msg += ` (${td("failedCount", { count: data.errorCount })})`;
         onDone(msg);
       } else {
-        onError(data.error || "Failed to send emails");
+        onError(data.error || td("failedToSendEmails"));
       }
-    } catch { onError("Failed to send payment emails"); }
+    } catch { onError(td("failedToSendEmails")); }
     finally { setSending(false); }
   }
 
@@ -1273,57 +1204,57 @@ function SendPaymentEmailsModal({ activityId, activity, orders, expectedPlayers,
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="px-6 py-4 border-b flex items-center justify-between">
-          <h3 className="font-bold text-gray-900">Send Payment Emails</h3>
+          <h3 className="font-bold text-gray-900">{td("sendPaymentLinksTitle")}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg">×</button>
         </div>
         <div className="p-6 space-y-5">
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-semibold text-gray-700">Teams</label>
+              <label className="text-sm font-semibold text-gray-700">{td("teams")}</label>
               <button onClick={toggleAll} className="text-xs text-blue-600 hover:text-blue-800">
-                {selectedTeams.size === activityTeams.length ? "Deselect All" : "Select All"}
+                {selectedTeams.size === activityTeams.length ? td("deselectAll") : td("selectAll")}
               </button>
             </div>
             <div className="border rounded-lg p-3 max-h-40 overflow-y-auto space-y-1.5">
-              {activityTeams.map((t) => (
-                <label key={t.teamId} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
-                  <input type="checkbox" checked={selectedTeams.has(t.teamId)} onChange={() => toggleTeam(t.teamId)} className="rounded" />
-                  {t.name}
+              {activityTeams.map((team) => (
+                <label key={team.teamId} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
+                  <input type="checkbox" checked={selectedTeams.has(team.teamId)} onChange={() => toggleTeam(team.teamId)} className="rounded" />
+                  {team.name}
                 </label>
               ))}
             </div>
-            <p className="text-xs text-gray-400 mt-1.5">{selectedTeams.size} team{selectedTeams.size !== 1 ? "s" : ""} selected</p>
+            <p className="text-xs text-gray-400 mt-1.5">{td("teamsSelected", { count: selectedTeams.size })}</p>
           </div>
 
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">Email Subject</label>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">{td("emailSubject")}</label>
             <input value={subject} onChange={(e) => setSubject(e.target.value)}
               className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="Payment link for..." />
           </div>
 
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">Email Message</label>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">{td("emailMessage")}</label>
             <div className="border rounded-lg overflow-hidden">
               <div className="flex items-center gap-0.5 px-2 py-1.5 bg-gray-50 border-b flex-wrap">
-                <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("bold"); }} className="px-2 py-1 rounded text-sm font-bold hover:bg-gray-200" title="Bold">B</button>
-                <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("italic"); }} className="px-2 py-1 rounded text-sm italic hover:bg-gray-200" title="Italic">I</button>
-                <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("underline"); }} className="px-2 py-1 rounded text-sm underline hover:bg-gray-200" title="Underline">U</button>
+                <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("bold"); }} className="px-2 py-1 rounded text-sm font-bold hover:bg-gray-200" title={td("bold")}>{td("bold")}</button>
+                <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("italic"); }} className="px-2 py-1 rounded text-sm italic hover:bg-gray-200" title={td("italic")}>{td("italic")}</button>
+                <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("underline"); }} className="px-2 py-1 rounded text-sm underline hover:bg-gray-200" title={td("underline")}>{td("underline")}</button>
                 <div className="w-px h-5 bg-gray-300 mx-1" />
-                <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("insertUnorderedList"); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200" title="Bullet List">&#8226; List</button>
-                <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("insertOrderedList"); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200" title="Numbered List">1. List</button>
+                <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("insertUnorderedList"); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200" title={td("bulletList")}>{td("bulletList")}</button>
+                <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("insertOrderedList"); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200" title={td("numberedList")}>{td("numberedList")}</button>
                 <div className="w-px h-5 bg-gray-300 mx-1" />
-                <button type="button" onMouseDown={(e) => { e.preventDefault(); insertLink(); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200 text-blue-600" title="Insert Link">Link</button>
-                <button type="button" onMouseDown={(e) => { e.preventDefault(); imgInputRef.current?.click(); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200" title="Insert Image">Image</button>
+                <button type="button" onMouseDown={(e) => { e.preventDefault(); insertLink(); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200 text-blue-600" title={td("link")}>{td("link")}</button>
+                <button type="button" onMouseDown={(e) => { e.preventDefault(); imgInputRef.current?.click(); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200" title={td("image")}>{td("image")}</button>
                 <input ref={imgInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
                 <div className="w-px h-5 bg-gray-300 mx-1" />
                 <select onChange={(e) => { if (e.target.value) { execCmd("fontSize", "7"); const sel = window.getSelection(); if (sel.rangeCount) { const span = sel.anchorNode?.parentElement; if (span && span.style) span.style.fontSize = e.target.value; } } e.target.value = ""; }}
                   className="text-xs border-0 bg-transparent py-1 pr-1 text-gray-600 cursor-pointer hover:bg-gray-200 rounded" defaultValue="">
-                  <option value="" disabled>Size</option>
-                  <option value="12px">Small</option>
-                  <option value="16px">Normal</option>
-                  <option value="20px">Large</option>
-                  <option value="24px">XL</option>
+                  <option value="" disabled>{td("size")}</option>
+                  <option value="12px">{td("small")}</option>
+                  <option value="16px">{td("normal")}</option>
+                  <option value="20px">{td("large")}</option>
+                  <option value="24px">{td("xl")}</option>
                 </select>
               </div>
               <div ref={bodyRef} contentEditable suppressContentEditableWarning
@@ -1333,25 +1264,25 @@ function SendPaymentEmailsModal({ activityId, activity, orders, expectedPlayers,
                 dangerouslySetInnerHTML={{ __html: bodyHtml }}
               />
             </div>
-            <p className="text-xs text-gray-400 mt-1">This message will appear above the player details and payment button in the email.</p>
+            <p className="text-xs text-gray-400 mt-1">{td("emailMessageHint")}</p>
           </div>
 
           <div className="bg-gray-50 rounded-lg p-4">
             <p className="text-sm text-gray-700">
-              <strong>{orderOnlyCount}</strong> unpaid parent{orderOnlyCount !== 1 ? "s" : ""} will receive this email
+              {td("unpaidParentsWillReceive", { count: orderOnlyCount })}
               {eligibleCount > orderOnlyCount && (
-                <span className="text-gray-400"> ({eligibleCount - orderOnlyCount} expected players without orders will be skipped)</span>
+                <span className="text-gray-400"> ({td("expectedPlayersSkipped", { count: eligibleCount - orderOnlyCount })})</span>
               )}
             </p>
-            {orderOnlyCount === 0 && <p className="text-xs text-orange-600 mt-1">No eligible parents found for the selected teams.</p>}
+            {orderOnlyCount === 0 && <p className="text-xs text-orange-600 mt-1">{td("noEligibleParents")}</p>}
           </div>
         </div>
 
         <div className="px-6 py-4 border-t flex justify-end gap-3">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">{tc("cancel")}</button>
           <button onClick={handleSend} disabled={sending || orderOnlyCount === 0}
             className="bg-green-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50">
-            {sending ? "Sending..." : `Send to ${orderOnlyCount} Parent${orderOnlyCount !== 1 ? "s" : ""}`}
+            {sending ? td("sending") : td("sendToParents", { count: orderOnlyCount })}
           </button>
         </div>
       </div>
@@ -1360,7 +1291,7 @@ function SendPaymentEmailsModal({ activityId, activity, orders, expectedPlayers,
 }
 
 /* ============== TEAMS TAB ============== */
-function TabActivityTeams({ activityId, activity }) {
+function TabActivityTeams({ activityId, activity, tc, td }) {
   const [orders, setOrders] = useState([]);
   const [expectedPlayers, setExpectedPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1372,9 +1303,9 @@ function TabActivityTeams({ activityId, activity }) {
     }).catch(() => {}).finally(() => setLoading(false));
   }, [activityId]);
 
-  const activityTeams = (activity?.teams || []).map((t) => ({
-    teamId: t.teamId?._id || t.teamId, name: t.teamId?.name || "Unknown",
-    season: t.teamId?.season || "", gender: t.teamId?.gender || "",
+  const activityTeams = (activity?.teams || []).map((row) => ({
+    teamId: row.teamId?._id || row.teamId, name: row.teamId?.name || "Unknown",
+    season: row.teamId?.season || "", gender: row.teamId?.gender || "",
   }));
 
   function teamStats(teamId) {
@@ -1400,43 +1331,43 @@ function TabActivityTeams({ activityId, activity }) {
     return { members, registered, expectedCount: teamExpected.length, expectedRevenue, collected, fullyPaid, partialPaid };
   }
 
-  if (loading) return <p className="text-gray-500 py-4 text-center text-sm">Loading teams...</p>;
+  if (loading) return <p className="text-gray-500 py-4 text-center text-sm">{tc("loading")}</p>;
 
   return (
     <div>
-      <h3 className="font-semibold text-gray-900 mb-4">Teams ({activityTeams.length})</h3>
-      {activityTeams.length === 0 ? <p className="text-gray-400 text-sm p-8 bg-gray-50 rounded-lg text-center">No teams in this activity.</p> : (
+      <h3 className="font-semibold text-gray-900 mb-4">{td("teamsCount", { count: activityTeams.length })}</h3>
+      {activityTeams.length === 0 ? <p className="text-gray-400 text-sm p-8 bg-gray-50 rounded-lg text-center">{td("noTeamsInActivity")}</p> : (
         <div className="space-y-3">
-          {activityTeams.map((t) => {
-            const s = teamStats(t.teamId);
+          {activityTeams.map((team) => {
+            const s = teamStats(team.teamId);
             return (
-              <div key={t.teamId} className="border rounded-lg p-4">
+              <div key={team.teamId} className="border rounded-lg p-4">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
-                    <span className="font-semibold text-gray-900">{t.name}</span>
-                    {t.gender && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{t.gender}</span>}
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{t.season}</span>
+                    <span className="font-semibold text-gray-900">{team.name}</span>
+                    {team.gender && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{team.gender}</span>}
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{team.season}</span>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="text-sm font-medium text-gray-700">{s.members} player{s.members !== 1 ? "s" : ""}</span>
-                    {s.expectedCount > 0 && <span className="text-xs text-orange-600">({s.registered} registered · {s.expectedCount} expected)</span>}
+                    <span className="text-sm font-medium text-gray-700">{td("playerCount", { count: s.members })}</span>
+                    {s.expectedCount > 0 && <span className="text-xs text-orange-600">({s.registered} {td("registered")} · {s.expectedCount} {td("expected")})</span>}
                   </div>
                 </div>
                 <div className="grid grid-cols-4 gap-4 text-center">
                   <div className="bg-gray-50 rounded-lg p-3">
-                    <p className="text-xs text-gray-500">Expected Revenue</p>
+                    <p className="text-xs text-gray-500">{td("expectedRevenue")}</p>
                     <p className="text-lg font-bold text-gray-900">${centsToDisplay(s.expectedRevenue)}</p>
                   </div>
                   <div className="bg-green-50 rounded-lg p-3">
-                    <p className="text-xs text-gray-500">Collected</p>
+                    <p className="text-xs text-gray-500">{td("collected")}</p>
                     <p className="text-lg font-bold text-green-700">${centsToDisplay(s.collected)}</p>
                   </div>
                   <div className="bg-blue-50 rounded-lg p-3">
-                    <p className="text-xs text-gray-500">Fully Paid</p>
+                    <p className="text-xs text-gray-500">{td("fullyPaid")}</p>
                     <p className="text-lg font-bold text-blue-700">{s.fullyPaid}</p>
                   </div>
                   <div className="bg-yellow-50 rounded-lg p-3">
-                    <p className="text-xs text-gray-500">Partially Paid</p>
+                    <p className="text-xs text-gray-500">{td("partiallyPaid")}</p>
                     <p className="text-lg font-bold text-yellow-700">{s.partialPaid}</p>
                   </div>
                 </div>
@@ -1450,7 +1381,7 @@ function TabActivityTeams({ activityId, activity }) {
 }
 
 /* ============== LOGS TAB ============== */
-function TabLogs({ activityId }) {
+function TabLogs({ activityId, tc, td }) {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -1458,12 +1389,12 @@ function TabLogs({ activityId }) {
     fetch(`/api/activities/${activityId}/logs`).then((r) => r.json()).then((d) => setLogs(d.logs || [])).catch(() => {}).finally(() => setLoading(false));
   }, [activityId]);
 
-  if (loading) return <p className="text-gray-500 py-4 text-center text-sm">Loading logs...</p>;
+  if (loading) return <p className="text-gray-500 py-4 text-center text-sm">{tc("loading")}</p>;
 
   return (
     <div>
-      <h3 className="font-semibold text-gray-900 mb-4">Activity Logs ({logs.length})</h3>
-      {logs.length === 0 ? <p className="text-gray-400 text-sm p-8 bg-gray-50 rounded-lg text-center">No changes recorded yet.</p> : (
+      <h3 className="font-semibold text-gray-900 mb-4">{td("activityLogs", { count: logs.length })}</h3>
+      {logs.length === 0 ? <p className="text-gray-400 text-sm p-8 bg-gray-50 rounded-lg text-center">{td("noChangesRecordedYet")}</p> : (
         <div className="space-y-2">
           {logs.map((log) => (
             <div key={log._id} className="border rounded-lg p-3 text-sm">
@@ -1485,17 +1416,20 @@ function TabLogs({ activityId }) {
 }
 
 /* ============== MAIN PAGE ============== */
-const OVERVIEW_TABS = [
-  { key: "participants", label: "Participants" },
-  { key: "teams", label: "Teams" },
-  { key: "logs", label: "Logs" },
-];
-
 export default function ActivityPage({ params }) {
   const resolvedParams = use(params);
   const activityId = resolvedParams.id;
   const router = useRouter();
   const searchParams = useSearchParams();
+  const t = useTranslations("activities");
+  const tc = useTranslations("common");
+  const td = useTranslations("activityDetail");
+
+  const OVERVIEW_TABS = [
+    { key: "participants", label: td("participants") },
+    { key: "teams", label: td("teams") },
+    { key: "logs", label: td("logs") },
+  ];
   const [activity, setActivity] = useState(null);
   const [loading, setLoading] = useState(true);
   const currentTab = searchParams.get("tab") || "participants";
@@ -1510,23 +1444,23 @@ export default function ActivityPage({ params }) {
 
   function switchTab(tab) { router.push(`/dashboard/activities/${activityId}?tab=${tab}`, { scroll: false }); }
 
-  if (loading) return <p className="text-gray-500 py-8 text-center">Loading activity...</p>;
+  if (loading) return <p className="text-gray-500 py-8 text-center">{tc("loading")}</p>;
 
   return (
     <div>
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <button onClick={() => router.push("/dashboard/activities")} className="text-gray-400 hover:text-gray-600 text-sm">← Activities</button>
+          <button onClick={() => router.push("/dashboard/activities")} className="text-gray-400 hover:text-gray-600 text-sm">← {t("title")}</button>
           <h2 className="text-xl font-bold text-gray-900">{activity?.title || "Activity"}</h2>
           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${activity?.status === "published" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}>
-            {activity?.status || "draft"}
+            {activity?.status === "published" ? t("published") : activity?.status === "draft" || !activity?.status ? t("draft") : activity.status}
           </span>
-          {activity?.season && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{activity.season}</span>}
+          {activity?.season && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600" title={t("season")}>{activity.season}</span>}
         </div>
         <Link href={`/dashboard/activities/${activityId}/edit`}
           className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">
-          Edit Activity
+          {td("editActivity")}
         </Link>
       </div>
 
@@ -1544,9 +1478,9 @@ export default function ActivityPage({ params }) {
 
       {/* Content */}
       <div className="bg-white rounded-lg border p-6">
-        {currentTab === "participants" && <TabParticipants activityId={activityId} activity={activity} />}
-        {currentTab === "teams" && <TabActivityTeams activityId={activityId} activity={activity} />}
-        {currentTab === "logs" && <TabLogs activityId={activityId} />}
+        {currentTab === "participants" && <TabParticipants activityId={activityId} activity={activity} tc={tc} td={td} />}
+        {currentTab === "teams" && <TabActivityTeams activityId={activityId} activity={activity} tc={tc} td={td} />}
+        {currentTab === "logs" && <TabLogs activityId={activityId} tc={tc} td={td} />}
       </div>
     </div>
   );

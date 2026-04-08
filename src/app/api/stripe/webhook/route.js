@@ -6,6 +6,7 @@ import Club from "@/models/Club";
 import Transaction from "@/models/Transaction";
 import Registration from "@/models/Registration";
 import Order from "@/models/Order";
+import PaymentRequest from "@/models/PaymentRequest";
 
 export async function POST(request) {
   const body = await request.text();
@@ -69,6 +70,7 @@ export async function POST(request) {
 
       await Transaction.create({
         clubId,
+        orderId: session.metadata?.orderId || null,
         stripeSessionId: session.id,
         stripePaymentIntentId: session.payment_intent,
         amount: session.amount_total,
@@ -124,7 +126,7 @@ export async function POST(request) {
 
             if (order.installmentSchedule?.length > 0) {
               const firstPending = order.installmentSchedule.find((i) => i.status === "pending");
-              if (firstPending) { firstPending.status = "paid"; firstPending.paidAt = new Date(); }
+              if (firstPending) { firstPending.status = "paid"; firstPending.paidAt = new Date(); firstPending.paymentMethod = "card"; }
             }
 
             const needsSubscription = session.metadata?.setupSubscription === "true";
@@ -182,7 +184,7 @@ export async function POST(request) {
               const { sendInvoiceEmail } = await import("@/lib/email");
               const Activity = (await import("@/models/Activity")).default;
               const activityDoc = await Activity.findById(order.activityId, "title clubId").lean();
-              const clubDoc = await Club.findById(order.clubId, "name logoUrl").lean();
+              const clubDoc = await Club.findById(order.clubId, "name logoUrl language").lean();
               if (order.parent1Email) {
                 await sendInvoiceEmail(order.parent1Email, {
                   playerName: `${order.playerFirstName} ${order.playerLastName}`,
@@ -194,6 +196,7 @@ export async function POST(request) {
                   totalCents: order.totalCostCents,
                   paidCents: session.amount_total,
                   logoUrl: clubDoc?.logoUrl || null,
+                  locale: clubDoc?.language || "en",
                 });
                 order.invoiceSentAt = new Date();
                 await order.save();
@@ -206,6 +209,58 @@ export async function POST(request) {
           }
         } catch (orderErr) {
           console.error("Failed to update activity order:", orderErr.message);
+        }
+      }
+
+      const prId = session.metadata?.paymentRequestId;
+      const prType = session.metadata?.type;
+      if (prId && prType === "payment_request" && session.payment_status === "paid") {
+        try {
+          const pr = await PaymentRequest.findById(prId);
+          if (pr && pr.status !== "paid") {
+            pr.paidCents = pr.totalCents;
+            pr.status = "paid";
+            pr.paidAt = new Date();
+            pr.stripeSessionId = session.id;
+            pr.stripePaymentIntentId = session.payment_intent || "";
+            await pr.save();
+
+            const prOrder = await Order.findById(pr.orderId);
+            if (prOrder) {
+              prOrder.paidCents = (prOrder.paidCents || 0) + pr.totalCents;
+              prOrder.status = prOrder.paidCents >= prOrder.totalCostCents ? "paid" : "partial";
+              await prOrder.save();
+            }
+
+            try {
+              const { sendInvoiceEmail } = await import("@/lib/email");
+              const Activity = (await import("@/models/Activity")).default;
+              const actDoc = await Activity.findById(pr.activityId, "title").lean();
+              const clubDoc = await Club.findById(pr.clubId, "name logoUrl language").lean();
+              const orderDoc = await Order.findById(pr.orderId).lean();
+              const emailTo = pr.recipientEmail || orderDoc?.parent1Email;
+              if (emailTo) {
+                await sendInvoiceEmail(emailTo, {
+                  playerName: `${orderDoc?.playerFirstName || ""} ${orderDoc?.playerLastName || ""}`.trim(),
+                  clubName: clubDoc?.name || "",
+                  activityTitle: actDoc?.title || "",
+                  teamName: "",
+                  subscriptionTitle: "",
+                  items: pr.items.map((i) => ({ name: i.name, priceCents: i.amountCents, quantity: 1 })),
+                  totalCents: pr.totalCents,
+                  paidCents: pr.totalCents,
+                  logoUrl: clubDoc?.logoUrl || null,
+                  locale: clubDoc?.language || "en",
+                });
+              }
+            } catch (emailErr) {
+              console.error("Failed to send payment request receipt:", emailErr.message);
+            }
+
+            console.log(`PaymentRequest ${prId} marked paid, order updated`);
+          }
+        } catch (prErr) {
+          console.error("Failed to update payment request:", prErr.message);
         }
       }
 
@@ -268,6 +323,7 @@ export async function POST(request) {
 
       await Transaction.create({
         clubId,
+        orderId: orderId || null,
         stripeSessionId: invoice.id,
         stripePaymentIntentId: invoice.payment_intent,
         amount: invoice.amount_paid,
@@ -303,6 +359,7 @@ export async function POST(request) {
               installment.status = "paid";
               installment.paidAt = new Date();
               installment.stripeInvoiceId = invoice.id;
+              installment.paymentMethod = "card";
             }
             order.status = order.paidCents >= order.totalCostCents ? "paid" : "partial";
             await order.save();

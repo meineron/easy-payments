@@ -585,7 +585,7 @@ export default function TeamDetailPage() {
                         <div>
                           <div className="text-xs font-medium text-gray-900">{row.parent1.firstName} {row.parent1.lastName}</div>
                           {row.parent1.email && <div className="text-[10px] text-gray-400">{row.parent1.email}</div>}
-                          {row.parent1.phone && <div className="text-[10px] text-gray-400">{row.parent1.phonePrefix || ""}{row.parent1.phone}</div>}
+                          {row.parent1.phone && <div className="text-[10px] text-gray-400" dir="ltr">{row.parent1.phonePrefix || ""}{row.parent1.phone}</div>}
                         </div>
                       ) : <span className="text-gray-400 text-xs">—</span>}
                     </td>
@@ -594,7 +594,7 @@ export default function TeamDetailPage() {
                         <div>
                           <div className="text-xs font-medium text-gray-900">{row.parent2.firstName} {row.parent2.lastName}</div>
                           {row.parent2.email && <div className="text-[10px] text-gray-400">{row.parent2.email}</div>}
-                          {row.parent2.phone && <div className="text-[10px] text-gray-400">{row.parent2.phonePrefix || ""}{row.parent2.phone}</div>}
+                          {row.parent2.phone && <div className="text-[10px] text-gray-400" dir="ltr">{row.parent2.phonePrefix || ""}{row.parent2.phone}</div>}
                         </div>
                       ) : <span className="text-gray-400 text-xs">—</span>}
                     </td>

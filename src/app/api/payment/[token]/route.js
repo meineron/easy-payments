@@ -22,8 +22,8 @@ export async function GET(request, { params }) {
     }
 
     const [activity, club] = await Promise.all([
-      Activity.findById(order.activityId, "title description subscriptions startDate hasPayment").lean(),
-      Club.findById(order.clubId, "name logoUrl").lean(),
+      Activity.findById(order.activityId, "title description subscriptions startDate hasPayment waivers passStripeFeeToCustomer").lean(),
+      Club.findById(order.clubId, "name logoUrl language").lean(),
     ]);
 
     const actSub = (activity?.subscriptions || []).find((s) => String(s._id) === order.subscriptionId);
@@ -59,12 +59,21 @@ export async function GET(request, { params }) {
       club: {
         name: club?.name || "",
         logoUrl: club?.logoUrl || null,
+        language: club?.language || "en",
+        passStripeFeeToCustomer: !!activity?.passStripeFeeToCustomer,
       },
       installmentOptions: {
         maxInstallments,
         dueDateAmountCents,
         firstInstallmentDate,
+        installmentFeeThreshold: actSub?.installmentFeeThreshold || 0,
+        installmentFeePercent: actSub?.installmentFeePercent || 0,
+        installmentFeeMode: actSub?.installmentFeeMode || "split",
       },
+      waivers: (activity?.waivers || []).map((w) => ({
+        _id: w._id, title: w.title, contentHtml: w.contentHtml, isRequired: w.isRequired,
+      })),
+      existingConsents: (order.waiverConsents || []).map((c) => c.waiverId),
     });
   } catch (error) {
     console.error("Get payment details error:", error);

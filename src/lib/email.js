@@ -1,4 +1,15 @@
 import nodemailer from "nodemailer";
+import en from "@/messages/en.json";
+import he from "@/messages/he.json";
+
+const messages = { en, he };
+function t(locale, namespace, key, replacements = {}) {
+  const msg = messages[locale]?.[namespace]?.[key] || messages.en[namespace]?.[key] || key;
+  return Object.entries(replacements).reduce(
+    (str, [k, v]) => str.replace(new RegExp(`\\{${k}\\}`, "g"), v),
+    msg,
+  );
+}
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
@@ -12,139 +23,162 @@ const transporter = nodemailer.createTransport({
 
 const FROM = () => `"EasyCoach" <${process.env.EASYCOACH_EMAIL}>`;
 
-function logoHeader(logoUrl, clubName) {
-  if (!logoUrl) return clubName ? `<h2 style="color: #111827; margin-bottom: 8px;">${clubName}</h2>` : "";
-  return `<div style="text-align:center;margin-bottom:16px;"><img src="${logoUrl}" alt="${clubName || ""}" style="max-height:60px;max-width:200px;display:inline-block;" /></div>` +
-    (clubName ? `<h2 style="color: #111827; margin-bottom: 8px; text-align:center;">${clubName}</h2>` : "");
+function getDir(locale) { return locale === "he" ? "rtl" : "ltr"; }
+
+function prepareLogoHeader(logoUrl, clubName) {
+  const nameHtml = clubName ? `<h2 style="color: #111827; margin-bottom: 8px; text-align:center;">${clubName}</h2>` : "";
+  if (!logoUrl) return { html: nameHtml, attachments: [] };
+
+  const dataMatch = logoUrl.match(/^data:image\/([a-zA-Z+]+);base64,(.+)$/);
+  if (dataMatch) {
+    const cid = `clublogo_${Date.now()}@email`;
+    const ext = dataMatch[1].replace("+xml", "").replace("jpeg", "jpg");
+    const attachment = { filename: `logo.${ext}`, content: Buffer.from(dataMatch[2], "base64"), cid };
+    const html = `<div style="text-align:center;margin-bottom:16px;"><img src="cid:${cid}" alt="${clubName || ""}" style="max-height:60px;max-width:200px;display:inline-block;" /></div>${nameHtml}`;
+    return { html, attachments: [attachment] };
+  }
+
+  const html = `<div style="text-align:center;margin-bottom:16px;"><img src="${logoUrl}" alt="${clubName || ""}" style="max-height:60px;max-width:200px;display:inline-block;" /></div>${nameHtml}`;
+  return { html, attachments: [] };
 }
 
-export async function sendVerificationEmail(to, code) {
+export async function sendVerificationEmail(to, code, locale = "en") {
+  const dir = getDir(locale);
   const html = `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 20px;">
-      <h2 style="color: #111827; margin-bottom: 8px;">Verify your email</h2>
+    <div dir="${dir}" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 20px; direction: ${dir};">
+      <h2 style="color: #111827; margin-bottom: 8px;">${t(locale, "email", "verifyTitle")}</h2>
       <p style="color: #6b7280; font-size: 14px; margin-bottom: 24px;">
-        Use the code below to complete your registration. This code expires in 10 minutes.
+        ${t(locale, "email", "verifyDesc")}
       </p>
       <div style="background: #f3f4f6; border-radius: 12px; padding: 24px; text-align: center; margin-bottom: 24px;">
-        <span style="font-size: 32px; font-weight: 700; letter-spacing: 8px; color: #111827;">${code}</span>
+        <span style="font-size: 32px; font-weight: 700; letter-spacing: 8px; color: #111827; direction: ltr; display: inline-block;">${code}</span>
       </div>
       <p style="color: #9ca3af; font-size: 12px;">
-        If you didn't request this code, you can safely ignore this email.
+        ${t(locale, "email", "verifyIgnore")}
       </p>
     </div>
   `;
 
-  await transporter.sendMail({ from: FROM(), to, subject: `${code} is your verification code`, html });
+  await transporter.sendMail({ from: FROM(), to, subject: t(locale, "email", "verifySubject", { code }), html });
 }
 
-export async function sendRegistrationLink(to, { playerName, clubName, activityTitle, registrationUrl, logoUrl }) {
+export async function sendRegistrationLink(to, { playerName, clubName, activityTitle, registrationUrl, logoUrl, locale = "en" }) {
+  const dir = getDir(locale);
+  const logo = prepareLogoHeader(logoUrl, null);
   const html = `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 40px 20px;">
-      ${logoHeader(logoUrl, null)}
-      <h2 style="color: #111827; margin-bottom: 8px;">Complete Registration</h2>
+    <div dir="${dir}" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 40px 20px; direction: ${dir};">
+      ${logo.html}
+      <h2 style="color: #111827; margin-bottom: 8px;">${t(locale, "email", "regLinkTitle")}</h2>
       <p style="color: #6b7280; font-size: 14px; margin-bottom: 4px;">
-        ${clubName} has invited you to complete registration for <strong>${playerName}</strong>.
+        ${t(locale, "email", "regLinkDesc", { club: clubName, player: `<strong>${playerName}</strong>` })}
       </p>
       <p style="color: #6b7280; font-size: 14px; margin-bottom: 24px;">
-        Activity: <strong>${activityTitle}</strong>
+        ${t(locale, "email", "regLinkActivity", { activity: `<strong>${activityTitle}</strong>` })}
       </p>
       <div style="text-align: center; margin-bottom: 24px;">
         <a href="${registrationUrl}" style="display: inline-block; background: #2563eb; color: #fff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px;">
-          Complete Registration
+          ${t(locale, "email", "regLinkButton")}
         </a>
       </div>
       <p style="color: #9ca3af; font-size: 12px;">
-        If you didn't expect this email, you can safely ignore it.
+        ${t(locale, "email", "regLinkIgnore")}
       </p>
     </div>
   `;
 
-  await transporter.sendMail({ from: FROM(), to, subject: `Complete registration for ${playerName} — ${activityTitle}`, html });
+  await transporter.sendMail({ from: FROM(), to, subject: t(locale, "email", "regSubject", { player: playerName, activity: activityTitle }), html, attachments: logo.attachments });
 }
 
-export async function sendInvoiceEmail(to, { playerName, clubName, activityTitle, teamName, subscriptionTitle, items, totalCents, paidCents, logoUrl }) {
+export async function sendInvoiceEmail(to, { playerName, clubName, activityTitle, teamName, subscriptionTitle, items, totalCents, paidCents, logoUrl, locale = "en" }) {
+  const dir = getDir(locale);
   function fmt(cents) { return "$" + ((cents || 0) / 100).toFixed(2); }
   const itemRows = (items || []).map((i) =>
-    `<tr><td style="padding:6px 0;border-bottom:1px solid #f3f4f6;">${i.name}</td><td style="padding:6px 0;border-bottom:1px solid #f3f4f6;text-align:right;">${i.isDiscount ? "-" : ""}${fmt(Math.abs(i.priceCents) * (i.quantity || 1))}</td></tr>`
+    `<tr><td style="padding:6px 0;border-bottom:1px solid #f3f4f6;">${i.name}</td><td style="padding:6px 0;border-bottom:1px solid #f3f4f6;text-align:${dir === "rtl" ? "left" : "right"};">${i.isDiscount ? "-" : ""}${fmt(Math.abs(i.priceCents) * (i.quantity || 1))}</td></tr>`
   ).join("");
 
+  const logo = prepareLogoHeader(logoUrl, null);
   const html = `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 40px 20px;">
-      ${logoHeader(logoUrl, null)}
-      <h2 style="color: #111827; margin-bottom: 4px;">Payment Confirmation</h2>
+    <div dir="${dir}" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 40px 20px; direction: ${dir};">
+      ${logo.html}
+      <h2 style="color: #111827; margin-bottom: 4px;">${t(locale, "email", "invoiceTitle")}</h2>
       <p style="color: #6b7280; font-size: 14px; margin-bottom: 24px;">
-        Thank you for completing registration for <strong>${playerName}</strong>.
+        ${t(locale, "email", "invoiceDesc", { player: `<strong>${playerName}</strong>` })}
       </p>
       <div style="background: #f9fafb; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
-        <p style="margin:0 0 6px;font-size:13px;color:#6b7280;">Club: <strong style="color:#111827;">${clubName}</strong></p>
-        <p style="margin:0 0 6px;font-size:13px;color:#6b7280;">Activity: <strong style="color:#111827;">${activityTitle}</strong></p>
-        ${teamName ? `<p style="margin:0 0 6px;font-size:13px;color:#6b7280;">Team: <strong style="color:#111827;">${teamName}</strong></p>` : ""}
-        ${subscriptionTitle ? `<p style="margin:0 0 6px;font-size:13px;color:#6b7280;">Subscription: <strong style="color:#111827;">${subscriptionTitle}</strong></p>` : ""}
+        <p style="margin:0 0 6px;font-size:13px;color:#6b7280;">${t(locale, "email", "invoiceClub")} <strong style="color:#111827;">${clubName}</strong></p>
+        <p style="margin:0 0 6px;font-size:13px;color:#6b7280;">${t(locale, "email", "invoiceActivity")} <strong style="color:#111827;">${activityTitle}</strong></p>
+        ${teamName ? `<p style="margin:0 0 6px;font-size:13px;color:#6b7280;">${t(locale, "email", "invoiceTeam")} <strong style="color:#111827;">${teamName}</strong></p>` : ""}
+        ${subscriptionTitle ? `<p style="margin:0 0 6px;font-size:13px;color:#6b7280;">${t(locale, "email", "invoiceSubscription")} <strong style="color:#111827;">${subscriptionTitle}</strong></p>` : ""}
       </div>
       <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:16px;">
-        ${subscriptionTitle ? `<tr><td style="padding:6px 0;border-bottom:1px solid #f3f4f6;">${subscriptionTitle}</td><td style="padding:6px 0;border-bottom:1px solid #f3f4f6;text-align:right;">${fmt(paidCents)}</td></tr>` : ""}
+        ${subscriptionTitle ? `<tr><td style="padding:6px 0;border-bottom:1px solid #f3f4f6;">${subscriptionTitle}</td><td style="padding:6px 0;border-bottom:1px solid #f3f4f6;text-align:${dir === "rtl" ? "left" : "right"};">${fmt(paidCents)}</td></tr>` : ""}
         ${itemRows}
       </table>
-      <div style="text-align:right;font-size:16px;font-weight:700;color:#111827;border-top:2px solid #111827;padding-top:8px;">
-        Total Paid: ${fmt(paidCents)}
+      <div style="text-align:${dir === "rtl" ? "left" : "right"};font-size:16px;font-weight:700;color:#111827;border-top:2px solid #111827;padding-top:8px;">
+        ${t(locale, "email", "invoiceTotalPaid")} ${fmt(paidCents)}
       </div>
       <p style="color: #9ca3af; font-size: 12px; margin-top: 24px;">
-        This is your receipt. Keep it for your records.
+        ${t(locale, "email", "invoiceReceipt")}
       </p>
     </div>
   `;
 
-  await transporter.sendMail({ from: FROM(), to, subject: `Payment receipt — ${playerName} — ${activityTitle}`, html });
+  await transporter.sendMail({ from: FROM(), to, subject: t(locale, "email", "invoiceSubject", { player: playerName, activity: activityTitle }), html, attachments: logo.attachments });
 }
 
-export async function sendParentInvite(to, { parentName, clubName, inviteUrl, logoUrl }) {
+export async function sendParentInvite(to, { parentName, clubName, inviteUrl, logoUrl, locale = "en" }) {
+  const dir = getDir(locale);
+  const logo = prepareLogoHeader(logoUrl, null);
   const html = `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 40px 20px;">
-      ${logoHeader(logoUrl, null)}
-      <h2 style="color: #111827; margin-bottom: 8px;">You're Invited</h2>
+    <div dir="${dir}" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 40px 20px; direction: ${dir};">
+      ${logo.html}
+      <h2 style="color: #111827; margin-bottom: 8px;">${t(locale, "email", "inviteTitle")}</h2>
       <p style="color: #6b7280; font-size: 14px; margin-bottom: 24px;">
-        Hi ${parentName}, <strong>${clubName}</strong> has invited you to manage your child's registrations.
+        ${t(locale, "email", "inviteDesc", { parent: parentName, club: `<strong>${clubName}</strong>` })}
       </p>
       <div style="text-align: center; margin-bottom: 24px;">
         <a href="${inviteUrl}" style="display: inline-block; background: #2563eb; color: #fff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px;">
-          Accept Invitation
+          ${t(locale, "email", "inviteButton")}
         </a>
       </div>
       <p style="color: #9ca3af; font-size: 12px;">
-        If you didn't expect this email, you can safely ignore it.
+        ${t(locale, "email", "inviteIgnore")}
       </p>
     </div>
   `;
 
-  await transporter.sendMail({ from: FROM(), to, subject: `${clubName} invited you to EasyCoach`, html });
+  await transporter.sendMail({ from: FROM(), to, subject: t(locale, "email", "inviteSubject", { club: clubName }), html, attachments: logo.attachments });
 }
 
-export async function sendPaymentLink(to, { playerName, clubName, activityTitle, paymentUrl, totalAmount, logoUrl }) {
+export async function sendPaymentLink(to, { playerName, clubName, activityTitle, paymentUrl, totalAmount, logoUrl, locale = "en" }) {
+  const dir = getDir(locale);
+  const logo = prepareLogoHeader(logoUrl, null);
   const html = `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 40px 20px;">
-      ${logoHeader(logoUrl, null)}
-      <h2 style="color: #111827; margin-bottom: 8px;">Payment Required</h2>
+    <div dir="${dir}" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 40px 20px; direction: ${dir};">
+      ${logo.html}
+      <h2 style="color: #111827; margin-bottom: 8px;">${t(locale, "email", "paymentTitle")}</h2>
       <p style="color: #6b7280; font-size: 14px; margin-bottom: 4px;">
-        ${clubName} is requesting payment for <strong>${playerName}</strong>.
+        ${t(locale, "email", "paymentDesc", { club: clubName, player: `<strong>${playerName}</strong>` })}
       </p>
       <p style="color: #6b7280; font-size: 14px; margin-bottom: 24px;">
-        Activity: <strong>${activityTitle}</strong>${totalAmount ? ` — Amount: <strong>${totalAmount}</strong>` : ""}
+        ${t(locale, "email", "paymentActivity", { activity: `<strong>${activityTitle}</strong>` })}${totalAmount ? ` — ${t(locale, "email", "paymentAmount", { amount: `<strong>${totalAmount}</strong>` })}` : ""}
       </p>
       <div style="text-align: center; margin-bottom: 24px;">
         <a href="${paymentUrl}" style="display: inline-block; background: #16a34a; color: #fff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px;">
-          Pay Now
+          ${t(locale, "email", "payNowButton")}
         </a>
       </div>
       <p style="color: #9ca3af; font-size: 12px;">
-        If you didn't expect this email, you can safely ignore it.
+        ${t(locale, "email", "paymentIgnore")}
       </p>
     </div>
   `;
 
-  await transporter.sendMail({ from: FROM(), to, subject: `Payment for ${playerName} — ${activityTitle}`, html });
+  await transporter.sendMail({ from: FROM(), to, subject: t(locale, "email", "paymentSubject", { player: playerName, activity: activityTitle }), html, attachments: logo.attachments });
 }
 
-export async function sendCustomPaymentEmail(to, { subject, bodyHtml, playerName, clubName, activityTitle, paymentUrl, totalAmount, logoUrl }) {
+export async function sendCustomPaymentEmail(to, { subject, bodyHtml, playerName, clubName, activityTitle, paymentUrl, totalAmount, logoUrl, locale = "en" }) {
+  const dir = getDir(locale);
   const attachments = [];
   let processedBody = bodyHtml;
 
@@ -163,24 +197,27 @@ export async function sendCustomPaymentEmail(to, { subject, bodyHtml, playerName
     idx++;
   }
 
+  const logo = prepareLogoHeader(logoUrl, clubName);
+  attachments.push(...logo.attachments);
+
   const html = `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 40px 20px;">
-      ${logoHeader(logoUrl, clubName)}
+    <div dir="${dir}" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 40px 20px; direction: ${dir};">
+      ${logo.html}
       <div style="color: #374151; font-size: 14px; line-height: 1.6; margin-bottom: 24px;">
         ${processedBody}
       </div>
       <div style="background: #f9fafb; border-radius: 12px; padding: 16px; margin-bottom: 24px; font-size: 14px;">
-        <p style="margin:0 0 4px;color:#6b7280;">Player: <strong style="color:#111827;">${playerName}</strong></p>
-        <p style="margin:0 0 4px;color:#6b7280;">Activity: <strong style="color:#111827;">${activityTitle}</strong></p>
-        ${totalAmount ? `<p style="margin:0;color:#6b7280;">Amount Due: <strong style="color:#111827;">${totalAmount}</strong></p>` : ""}
+        <p style="margin:0 0 4px;color:#6b7280;">${t(locale, "email", "paymentPlayer")} <strong style="color:#111827;">${playerName}</strong></p>
+        <p style="margin:0 0 4px;color:#6b7280;">${t(locale, "email", "invoiceActivity")} <strong style="color:#111827;">${activityTitle}</strong></p>
+        ${totalAmount ? `<p style="margin:0;color:#6b7280;">${t(locale, "email", "paymentAmount", { amount: `<strong style="color:#111827;">${totalAmount}</strong>` })}</p>` : ""}
       </div>
       <div style="text-align: center; margin-bottom: 24px;">
         <a href="${paymentUrl}" style="display: inline-block; background: #16a34a; color: #fff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px;">
-          Pay Now
+          ${t(locale, "email", "payNowButton")}
         </a>
       </div>
       <p style="color: #9ca3af; font-size: 12px;">
-        If you didn't expect this email, you can safely ignore it.
+        ${t(locale, "email", "paymentIgnore")}
       </p>
     </div>
   `;

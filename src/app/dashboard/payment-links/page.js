@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 
 const EMPTY_CUSTOM_FIELD = {
   key: "",
@@ -12,6 +13,9 @@ const EMPTY_CUSTOM_FIELD = {
 };
 
 export default function ClubPaymentLinksPage() {
+  const t = useTranslations("paymentLinks");
+  const tc = useTranslations("common");
+
   const [view, setView] = useState("list");
   const [links, setLinks] = useState([]);
   const [products, setProducts] = useState([]);
@@ -130,10 +134,10 @@ export default function ClubPaymentLinksPage() {
     }
 
     if (priceSource === "existing") {
-      if (!priceId) { setError("Please select a product"); setCreating(false); return; }
+      if (!priceId) { setError(t("selectProductError")); setCreating(false); return; }
       body.priceId = priceId;
     } else {
-      if (!inlineName || !inlineAmount) { setError("Name and amount are required"); setCreating(false); return; }
+      if (!inlineName || !inlineAmount) { setError(t("nameAmountRequired")); setCreating(false); return; }
       body.inlinePrice = {
         name: inlineName,
         amount: parseFloat(inlineAmount),
@@ -183,20 +187,20 @@ export default function ClubPaymentLinksPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-bold text-gray-900">Payment Links</h2>
+        <h2 className="text-xl font-bold text-gray-900">{t("title")}</h2>
         <button
           onClick={() => { setView(view === "list" ? "create" : "list"); setError(""); setSuccess(""); }}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
             view === "create" ? "bg-gray-200 text-gray-700 hover:bg-gray-300" : "bg-blue-600 text-white hover:bg-blue-700"
           }`}
         >
-          {view === "create" ? "Back to List" : "+ Create Payment Link"}
+          {view === "create" ? t("backToList") : t("createPaymentLink")}
         </button>
       </div>
 
       {success && (
         <div className="bg-green-50 text-green-700 text-sm px-4 py-3 rounded-lg border border-green-200 mb-6">
-          Payment link created:{" "}
+          {t("linkCreated")}{" "}
           <a href={success} target="_blank" rel="noopener noreferrer" className="font-medium underline break-all">{success}</a>
         </div>
       )}
@@ -207,6 +211,8 @@ export default function ClubPaymentLinksPage() {
 
       {view === "create" ? (
         <CreateForm
+          t={t}
+          tc={tc}
           priceSource={priceSource} setPriceSource={setPriceSource}
           priceId={priceId} setPriceId={setPriceId} pricesFlat={pricesFlat}
           inlineName={inlineName} setInlineName={setInlineName}
@@ -228,13 +234,15 @@ export default function ClubPaymentLinksPage() {
           creating={creating} handleCreate={handleCreate}
         />
       ) : (
-        <LinksList links={links} loading={loading} formatDate={formatDate} />
+        <LinksList links={links} loading={loading} formatDate={formatDate} t={t} tc={tc} />
       )}
     </div>
   );
 }
 
 function CreateForm({
+  t,
+  tc,
   priceSource, setPriceSource, priceId, setPriceId, pricesFlat,
   inlineName, setInlineName, inlineAmount, setInlineAmount,
   inlineCurrency, setInlineCurrency, inlineRecurring, setInlineRecurring,
@@ -251,20 +259,20 @@ function CreateForm({
 }) {
   return (
     <form onSubmit={handleCreate} className="space-y-6 max-w-2xl">
-      <Section title="Product">
+      <Section title={t("product")}>
         <div className="flex gap-4 mb-4">
           <label className="flex items-center gap-2 text-sm">
             <input type="radio" value="existing" checked={priceSource === "existing"} onChange={() => setPriceSource("existing")} className="accent-blue-600" />
-            Choose existing product
+            {t("chooseExisting")}
           </label>
           <label className="flex items-center gap-2 text-sm">
             <input type="radio" value="inline" checked={priceSource === "inline"} onChange={() => setPriceSource("inline")} className="accent-blue-600" />
-            Create new product
+            {t("createNew")}
           </label>
         </div>
         {priceSource === "existing" ? (
           <select value={priceId} onChange={(e) => setPriceId(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
-            <option value="">Select a product...</option>
+            <option value="">{t("selectProduct")}</option>
             {pricesFlat.map((p) => (
               <option key={p.priceId} value={p.priceId}>
                 {p.productName} — ${(p.amount / 100).toFixed(2)} {p.currency.toUpperCase()}{p.recurring ? ` / ${p.recurring.interval}` : ""}
@@ -273,9 +281,9 @@ function CreateForm({
           </select>
         ) : (
           <div className="space-y-3">
-            <input type="text" placeholder="Product name" value={inlineName} onChange={(e) => setInlineName(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+            <input type="text" placeholder={t("productName")} value={inlineName} onChange={(e) => setInlineName(e.target.value)} className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
             <div className="flex gap-3">
-              <input type="number" step="0.01" min="0.50" placeholder="Amount" value={inlineAmount} onChange={(e) => setInlineAmount(e.target.value)} className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+              <input type="number" step="0.01" min="0.50" placeholder={tc("amount")} value={inlineAmount} onChange={(e) => setInlineAmount(e.target.value)} className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
               <select value={inlineCurrency} onChange={(e) => setInlineCurrency(e.target.value)} className="px-4 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
                 <option value="usd">USD</option>
                 <option value="eur">EUR</option>
@@ -285,57 +293,57 @@ function CreateForm({
             </div>
             <label className="flex items-center gap-2 text-sm text-gray-700">
               <input type="checkbox" checked={inlineRecurring} onChange={(e) => setInlineRecurring(e.target.checked)} className="accent-blue-600" />
-              Recurring payment
+              {t("recurringPayment")}
             </label>
             {inlineRecurring && (
               <select value={inlineInterval} onChange={(e) => setInlineInterval(e.target.value)} className="px-4 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
-                <option value="day">Daily</option>
-                <option value="week">Weekly</option>
-                <option value="month">Monthly</option>
-                <option value="year">Yearly</option>
+                <option value="day">{t("daily")}</option>
+                <option value="week">{t("weekly")}</option>
+                <option value="month">{t("monthly")}</option>
+                <option value="year">{t("yearly")}</option>
               </select>
             )}
           </div>
         )}
       </Section>
 
-      <Section title="Quantity">
+      <Section title={t("quantity")}>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-700">Default:</label>
+            <label className="text-sm text-gray-700">{t("default")}</label>
             <input type="number" min="1" value={quantity} onChange={(e) => setQuantity(parseInt(e.target.value) || 1)} className="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
           </div>
           <label className="flex items-center gap-2 text-sm text-gray-700">
             <input type="checkbox" checked={adjustableEnabled} onChange={(e) => setAdjustableEnabled(e.target.checked)} className="accent-blue-600" />
-            Let customer adjust quantity
+            {t("adjustQuantity")}
           </label>
         </div>
         {adjustableEnabled && (
           <div className="flex items-center gap-4 mt-3">
             <div className="flex items-center gap-2">
-              <label className="text-sm text-gray-500">Min:</label>
+              <label className="text-sm text-gray-500">{t("min")}</label>
               <input type="number" min="1" value={adjustableMin} onChange={(e) => setAdjustableMin(parseInt(e.target.value) || 1)} className="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-sm text-gray-500">Max:</label>
+              <label className="text-sm text-gray-500">{t("max")}</label>
               <input type="number" min="1" value={adjustableMax} onChange={(e) => setAdjustableMax(parseInt(e.target.value) || 10)} className="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
             </div>
           </div>
         )}
       </Section>
 
-      <Section title="Options">
+      <Section title={t("options")}>
         <div className="space-y-4">
           <div>
-            <label className="block text-sm text-gray-700 mb-1">Button text</label>
+            <label className="block text-sm text-gray-700 mb-1 text-start">{t("buttonText")}</label>
             {isRecurring ? (
-              <p className="text-sm text-amber-600 italic">Button text is automatically set to &quot;Subscribe&quot; for recurring prices</p>
+              <p className="text-sm text-amber-600 italic text-start">{t("buttonTextRecurring")}</p>
             ) : (
               <div className="flex gap-3">
-                {["pay", "book", "donate"].map((t) => (
-                  <label key={t} className="flex items-center gap-2 text-sm">
-                    <input type="radio" value={t} checked={submitType === t} onChange={() => setSubmitType(t)} className="accent-blue-600" />
-                    <span className="capitalize">{t}</span>
+                {["pay", "book", "donate"].map((type) => (
+                  <label key={type} className="flex items-center gap-2 text-sm">
+                    <input type="radio" value={type} checked={submitType === type} onChange={() => setSubmitType(type)} className="accent-blue-600" />
+                    <span className="capitalize">{t(type)}</span>
                   </label>
                 ))}
               </div>
@@ -343,21 +351,22 @@ function CreateForm({
           </div>
           <label className="flex items-center gap-2 text-sm text-gray-700">
             <input type="checkbox" checked={allowPromotionCodes} onChange={(e) => setAllowPromotionCodes(e.target.checked)} className="accent-blue-600" />
-            Allow promotion codes
+            {t("allowPromoCodes")}
           </label>
           <label className="flex items-center gap-2 text-sm text-gray-700">
             <input type="checkbox" checked={savePaymentDetails} onChange={(e) => setSavePaymentDetails(e.target.checked)} className="accent-blue-600" />
-            Save payment details for future use
+            {t("savePaymentDetails")}
           </label>
         </div>
       </Section>
 
-      <Section title="Custom Fields">
-        {customFields.length === 0 && <p className="text-sm text-gray-400 mb-3">No custom fields added yet</p>}
+      <Section title={t("customFields")}>
+        {customFields.length === 0 && <p className="text-sm text-gray-400 mb-3 text-start">{t("noCustomFields")}</p>}
         <div className="space-y-4">
           {customFields.map((field, fi) => (
             <CustomFieldEditor
               key={fi} field={field} index={fi}
+              t={t} tc={tc}
               updateCustomField={updateCustomField} removeCustomField={removeCustomField}
               addDropdownOption={addDropdownOption} removeDropdownOption={removeDropdownOption}
               updateDropdownOption={updateDropdownOption}
@@ -365,82 +374,82 @@ function CreateForm({
           ))}
         </div>
         <button type="button" onClick={addCustomField} className="mt-3 px-4 py-2 text-sm font-medium text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50 transition">
-          + Add Custom Field
+          {t("addCustomField")}
         </button>
       </Section>
 
       <button type="submit" disabled={creating} className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
-        {creating ? "Creating..." : "Create Payment Link"}
+        {creating ? tc("creating") : t("createPaymentLink")}
       </button>
     </form>
   );
 }
 
-function CustomFieldEditor({ field, index, updateCustomField, removeCustomField, addDropdownOption, removeDropdownOption, updateDropdownOption }) {
+function CustomFieldEditor({ field, index, t, tc, updateCustomField, removeCustomField, addDropdownOption, removeDropdownOption, updateDropdownOption }) {
   return (
     <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-sm font-medium text-gray-700">Field {index + 1}</span>
-        <button type="button" onClick={() => removeCustomField(index)} className="text-red-500 text-sm hover:underline">Remove</button>
+        <span className="text-sm font-medium text-gray-700 text-start">{t("field")} {index + 1}</span>
+        <button type="button" onClick={() => removeCustomField(index)} className="text-red-500 text-sm hover:underline">{tc("remove")}</button>
       </div>
       <div className="grid grid-cols-2 gap-3 mb-3">
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Key</label>
-          <input type="text" placeholder="e.g. team_name" value={field.key} onChange={(e) => updateCustomField(index, { key: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          <label className="block text-xs text-gray-500 mb-1 text-start">{t("key")}</label>
+          <input type="text" placeholder={t("keyPlaceholder")} value={field.key} onChange={(e) => updateCustomField(index, { key: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
         </div>
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Label</label>
-          <input type="text" placeholder="e.g. Team Name" value={field.label} onChange={(e) => updateCustomField(index, { label: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          <label className="block text-xs text-gray-500 mb-1 text-start">{t("label")}</label>
+          <input type="text" placeholder={t("labelPlaceholder")} value={field.label} onChange={(e) => updateCustomField(index, { label: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
         </div>
       </div>
       <div className="grid grid-cols-3 gap-3 mb-3">
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Type</label>
+          <label className="block text-xs text-gray-500 mb-1 text-start">{t("fieldType")}</label>
           <select value={field.type} onChange={(e) => updateCustomField(index, { type: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
-            <option value="text">Text</option>
-            <option value="numeric">Number</option>
-            <option value="dropdown">Dropdown</option>
+            <option value="text">{t("text")}</option>
+            <option value="numeric">{t("number")}</option>
+            <option value="dropdown">{t("dropdown")}</option>
           </select>
         </div>
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Default value</label>
-          <input type={field.type === "numeric" ? "number" : "text"} placeholder="Optional" value={field.defaultValue} onChange={(e) => updateCustomField(index, { defaultValue: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+          <label className="block text-xs text-gray-500 mb-1 text-start">{t("defaultValue")}</label>
+          <input type={field.type === "numeric" ? "number" : "text"} placeholder={t("optionalField")} value={field.defaultValue} onChange={(e) => updateCustomField(index, { defaultValue: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
         </div>
         <div className="flex items-end pb-1">
           <label className="flex items-center gap-2 text-sm text-gray-700">
             <input type="checkbox" checked={field.optional} onChange={(e) => updateCustomField(index, { optional: e.target.checked })} className="accent-blue-600" />
-            Optional
+            {t("optionalField")}
           </label>
         </div>
       </div>
       {field.type === "dropdown" && (
         <div className="mt-3 border-t border-gray-200 pt-3">
-          <label className="block text-xs text-gray-500 mb-2">Dropdown Options</label>
+          <label className="block text-xs text-gray-500 mb-2 text-start">{t("dropdownOptions")}</label>
           <div className="space-y-2">
             {field.options.map((opt, oi) => (
               <div key={oi} className="flex gap-2 items-center">
-                <input type="text" placeholder="Label" value={opt.label} onChange={(e) => updateDropdownOption(index, oi, { label: e.target.value })} className="flex-1 px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
-                <input type="text" placeholder="Value" value={opt.value} onChange={(e) => updateDropdownOption(index, oi, { value: e.target.value })} className="flex-1 px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                <input type="text" placeholder={t("label")} value={opt.label} onChange={(e) => updateDropdownOption(index, oi, { label: e.target.value })} className="flex-1 px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+                <input type="text" placeholder={t("value")} value={opt.value} onChange={(e) => updateDropdownOption(index, oi, { value: e.target.value })} className="flex-1 px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
                 {field.options.length > 1 && (
                   <button type="button" onClick={() => removeDropdownOption(index, oi)} className="text-red-400 text-sm hover:text-red-600">&times;</button>
                 )}
               </div>
             ))}
           </div>
-          <button type="button" onClick={() => addDropdownOption(index)} className="mt-2 text-xs text-blue-600 hover:underline">+ Add option</button>
+          <button type="button" onClick={() => addDropdownOption(index)} className="mt-2 text-xs text-blue-600 hover:underline text-start">{t("addOption")}</button>
         </div>
       )}
     </div>
   );
 }
 
-function LinksList({ links, loading, formatDate }) {
-  if (loading) return <p className="text-gray-500">Loading...</p>;
+function LinksList({ links, loading, formatDate, t, tc }) {
+  if (loading) return <p className="text-gray-500">{tc("loading")}</p>;
 
   if (links.length === 0) {
     return (
       <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-        <p className="text-gray-500">No payment links created yet</p>
+        <p className="text-gray-500">{t("noLinks")}</p>
       </div>
     );
   }
@@ -450,10 +459,10 @@ function LinksList({ links, loading, formatDate }) {
       <table className="w-full">
         <thead>
           <tr className="bg-gray-50 border-b border-gray-200">
-            <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">URL</th>
-            <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
-            <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Created</th>
-            <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
+            <th className="text-start px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("url")}</th>
+            <th className="text-start px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tc("status")}</th>
+            <th className="text-start px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tc("date")}</th>
+            <th className="text-start px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tc("actions")}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200">
@@ -464,12 +473,12 @@ function LinksList({ links, loading, formatDate }) {
               </td>
               <td className="px-6 py-4">
                 <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${link.active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}`}>
-                  {link.active ? "Active" : "Inactive"}
+                  {link.active ? t("active") : t("inactive")}
                 </span>
               </td>
               <td className="px-6 py-4 text-sm text-gray-500">{formatDate(link.created)}</td>
               <td className="px-6 py-4 text-sm">
-                <button onClick={() => navigator.clipboard.writeText(link.url)} className="text-blue-600 hover:underline text-sm">Copy Link</button>
+                <button onClick={() => navigator.clipboard.writeText(link.url)} className="text-blue-600 hover:underline text-sm">{t("copyLink")}</button>
               </td>
             </tr>
           ))}
@@ -482,7 +491,7 @@ function LinksList({ links, loading, formatDate }) {
 function Section({ title, children }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
-      <h3 className="text-sm font-semibold text-gray-900 mb-4">{title}</h3>
+      <h3 className="text-sm font-semibold text-gray-900 mb-4 text-start">{title}</h3>
       {children}
     </div>
   );

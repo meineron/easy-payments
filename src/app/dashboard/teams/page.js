@@ -2,10 +2,13 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 
 const EMPTY_TEAM = { name: "", season: "26/27", gender: "Male", teamType: "" };
 
 export default function TeamsPage() {
+  const t = useTranslations("teams");
+  const tc = useTranslations("common");
   const [teams, setTeams] = useState([]);
   const [stats, setStats] = useState({ byTeam: {}, global: { totalPlayers: 0, committedPlayers: 0 } });
   const [loading, setLoading] = useState(true);
@@ -96,7 +99,7 @@ export default function TeamsPage() {
         });
         const data = await res.json();
         if (!res.ok) {
-          setFormError(data.error || "Failed to update team");
+          setFormError(data.error || tc("failedToSave"));
           setFormLoading(false);
           return;
         }
@@ -108,7 +111,7 @@ export default function TeamsPage() {
         });
         const data = await res.json();
         if (!res.ok) {
-          setFormError(data.error || "Failed to create teams");
+          setFormError(data.error || t("failedToCreate"));
           setFormLoading(false);
           return;
         }
@@ -118,7 +121,7 @@ export default function TeamsPage() {
       setEditingTeam(null);
       fetchAll();
     } catch {
-      setFormError("Something went wrong");
+      setFormError(tc("somethingWentWrong"));
     } finally {
       setFormLoading(false);
     }
@@ -144,13 +147,13 @@ export default function TeamsPage() {
       } else {
         setUploadResult({
           success: true,
-          message: `${data.created} team${data.created !== 1 ? "s" : ""} imported successfully!`,
+          message: t("importSuccess", { count: data.created }),
           errors: data.errors,
         });
         fetchAll();
       }
     } catch {
-      setUploadResult({ success: false, message: "Failed to upload file" });
+      setUploadResult({ success: false, message: t("failedToUpload") });
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -158,7 +161,7 @@ export default function TeamsPage() {
   }
 
   async function handleDelete(teamId) {
-    if (!confirm("Are you sure you want to delete this team?")) return;
+    if (!confirm(t("deleteConfirm"))) return;
 
     try {
       const res = await fetch(`/api/teams/${teamId}`, { method: "DELETE" });
@@ -177,17 +180,17 @@ export default function TeamsPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <p className="text-gray-500">Loading teams...</p>
+        <p className="text-gray-500">{t("loadingTeams")}</p>
       </div>
     );
   }
 
-  const allSeasons = [...new Set(teams.map((t) => t.season))].sort().reverse();
+  const allSeasons = [...new Set(teams.map((team) => team.season))].sort().reverse();
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="max-w-5xl mx-auto text-start">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-bold text-gray-900">Teams</h2>
+        <h2 className="text-xl font-bold text-gray-900">{t("title")}</h2>
         <div className="flex items-center gap-2">
           <input
             ref={fileInputRef}
@@ -201,13 +204,13 @@ export default function TeamsPage() {
             disabled={uploading}
             className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition disabled:opacity-50"
           >
-            {uploading ? "Uploading..." : "Upload Excel"}
+            {uploading ? t("uploading") : t("uploadExcel")}
           </button>
           <button
             onClick={openCreateForm}
             className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition"
           >
-            + Add Teams
+            {t("addTeam")}
           </button>
         </div>
       </div>
@@ -220,8 +223,8 @@ export default function TeamsPage() {
             onChange={(e) => setFilterType(e.target.value)}
             className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
           >
-            <option value="all">All Types</option>
-            {[...new Set(teams.map((t) => t.teamType || "Other"))].sort((a, b) => {
+            <option value="all">{t("allTypes")}</option>
+            {[...new Set(teams.map((team) => team.teamType || "Other"))].sort((a, b) => {
               if (a === "Other") return 1;
               if (b === "Other") return -1;
               return a.localeCompare(b);
@@ -234,7 +237,7 @@ export default function TeamsPage() {
             onChange={(e) => setFilterSeason(e.target.value)}
             className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
           >
-            <option value="all">All Seasons</option>
+            <option value="all">{t("allSeasons")}</option>
             {allSeasons.map((s) => (
               <option key={s} value={s}>{s}</option>
             ))}
@@ -244,16 +247,16 @@ export default function TeamsPage() {
             onChange={(e) => setFilterGender(e.target.value)}
             className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
           >
-            <option value="all">All Genders</option>
-            <option value="Male">Male</option>
-            <option value="Female">Female</option>
+            <option value="all">{t("allGenders")}</option>
+            <option value="Male">{t("male")}</option>
+            <option value="Female">{t("female")}</option>
           </select>
           {(filterType !== "all" || filterGender !== "all" || filterSeason !== "all") && (
             <button
               onClick={() => { setFilterType("all"); setFilterGender("all"); setFilterSeason("all"); }}
               className="text-sm text-gray-500 hover:text-gray-700 transition underline"
             >
-              Clear filters
+              {t("clearFilters")}
             </button>
           )}
         </div>
@@ -268,7 +271,7 @@ export default function TeamsPage() {
         }`}>
           <div className="flex items-center justify-between">
             <span className="font-medium">{uploadResult.message}</span>
-            <button onClick={() => setUploadResult(null)} className="text-current opacity-50 hover:opacity-100">
+            <button type="button" onClick={() => setUploadResult(null)} className="text-current opacity-50 hover:opacity-100">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
@@ -287,38 +290,38 @@ export default function TeamsPage() {
       {/* Create / Edit Form Modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl border border-gray-200 p-6 w-full max-w-2xl shadow-xl max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-xl border border-gray-200 p-6 w-full max-w-2xl shadow-xl max-h-[90vh] overflow-y-auto text-start">
             <h3 className="text-lg font-bold text-gray-900 mb-4">
-              {editingTeam ? "Edit Team" : "Add Teams"}
+              {editingTeam ? t("editTeam") : t("addTeamTitle")}
             </h3>
 
             <form onSubmit={handleSubmit} className="space-y-4">
               {editingTeam ? (
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Team Name</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">{t("teamName")}</label>
                     <input
                       type="text"
                       value={editFormData.name}
                       onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
                       required
                       className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-gray-900"
-                      placeholder="e.g. U12 Male"
+                      placeholder={t("editNamePlaceholder")}
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Team Type</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">{t("teamType")}</label>
                     <input
                       type="text"
                       value={editFormData.teamType}
                       onChange={(e) => setEditFormData({ ...editFormData, teamType: e.target.value })}
                       className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-gray-900"
-                      placeholder="e.g. MLSNEXT, APEX"
+                      placeholder={t("editTypePlaceholder")}
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Season</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">{t("season")}</label>
                       <select
                         value={editFormData.season}
                         onChange={(e) => setEditFormData({ ...editFormData, season: e.target.value })}
@@ -331,24 +334,24 @@ export default function TeamsPage() {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Gender</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">{t("gender")}</label>
                       <select
                         value={editFormData.gender}
                         onChange={(e) => setEditFormData({ ...editFormData, gender: e.target.value })}
                         className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-gray-900"
                       >
-                        <option value="Male">Male</option>
-                        <option value="Female">Female</option>
+                        <option value="Male">{t("male")}</option>
+                        <option value="Female">{t("female")}</option>
                       </select>
                     </div>
                   </div>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {batchTeams.map((t, index) => (
+                  {batchTeams.map((row, index) => (
                     <div key={index} className="bg-gray-50 rounded-lg p-4 relative">
                       <div className="flex items-center justify-between mb-3">
-                        <span className="text-xs font-medium text-gray-500">Team {index + 1}</span>
+                        <span className="text-xs font-medium text-gray-500">{t("teamRowLabel", { index: index + 1 })}</span>
                         {batchTeams.length > 1 && (
                           <button
                             type="button"
@@ -365,23 +368,23 @@ export default function TeamsPage() {
                         <div className="grid grid-cols-2 gap-2">
                           <input
                             type="text"
-                            value={t.name}
+                            value={row.name}
                             onChange={(e) => updateBatchTeam(index, "name", e.target.value)}
                             required
                             className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-gray-900 text-sm"
-                            placeholder="Team name (e.g. U12 Male)"
+                            placeholder={t("placeholderTeamName")}
                           />
                           <input
                             type="text"
-                            value={t.teamType}
+                            value={row.teamType}
                             onChange={(e) => updateBatchTeam(index, "teamType", e.target.value)}
                             className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-gray-900 text-sm"
-                            placeholder="Type (e.g. MLSNEXT)"
+                            placeholder={t("placeholderTeamType")}
                           />
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           <select
-                            value={t.season}
+                            value={row.season}
                             onChange={(e) => updateBatchTeam(index, "season", e.target.value)}
                             className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-gray-900 text-sm"
                           >
@@ -390,12 +393,12 @@ export default function TeamsPage() {
                             {!allSeasons.includes("25/26") && <option value="25/26">25/26</option>}
                           </select>
                           <select
-                            value={t.gender}
+                            value={row.gender}
                             onChange={(e) => updateBatchTeam(index, "gender", e.target.value)}
                             className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-gray-900 text-sm"
                           >
-                            <option value="Male">Male</option>
-                            <option value="Female">Female</option>
+                            <option value="Male">{t("male")}</option>
+                            <option value="Female">{t("female")}</option>
                           </select>
                         </div>
                       </div>
@@ -407,7 +410,7 @@ export default function TeamsPage() {
                     onClick={addBatchRow}
                     className="w-full py-2.5 border-2 border-dashed border-gray-300 rounded-lg text-sm text-gray-500 font-medium hover:border-blue-400 hover:text-blue-600 transition"
                   >
-                    + Add Another Team
+                    {t("addAnotherTeam")}
                   </button>
                 </div>
               )}
@@ -424,7 +427,7 @@ export default function TeamsPage() {
                   onClick={() => { setShowForm(false); setEditingTeam(null); }}
                   className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition"
                 >
-                  Cancel
+                  {tc("cancel")}
                 </button>
                 <button
                   type="submit"
@@ -432,12 +435,12 @@ export default function TeamsPage() {
                   className="flex-1 bg-blue-600 text-white px-4 py-2.5 rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50"
                 >
                   {formLoading
-                    ? "Saving..."
+                    ? tc("saving")
                     : editingTeam
-                    ? "Update"
+                    ? t("updateTeam")
                     : batchTeams.length === 1
-                    ? "Create Team"
-                    : `Create ${batchTeams.length} Teams`}
+                    ? t("createTeam")
+                    : t("createTeamsCount", { count: batchTeams.length })}
                 </button>
               </div>
             </form>
@@ -453,20 +456,20 @@ export default function TeamsPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
           </div>
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">No Teams Yet</h3>
-          <p className="text-gray-500 mb-4">Create teams manually or upload an Excel file.</p>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">{t("noTeams")}</h3>
+          <p className="text-gray-500 mb-4">{t("noTeamsDesc")}</p>
           <div className="flex items-center justify-center gap-3">
             <button
               onClick={() => fileInputRef.current?.click()}
               className="px-6 py-2.5 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition"
             >
-              Upload Excel
+              {t("uploadExcel")}
             </button>
             <button
               onClick={openCreateForm}
               className="bg-blue-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-blue-700 transition"
             >
-              + Add Teams
+              {t("addTeam")}
             </button>
           </div>
         </div>
@@ -514,10 +517,10 @@ export default function TeamsPage() {
                                   </span>
                                 )}
                                 <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
-                                  Season {team.season}
+                                  {t("seasonBadge", { season: team.season })}
                                 </span>
                                 <span className="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 font-medium">
-                                  {ts.teamMembers} member{ts.teamMembers !== 1 ? "s" : ""}
+                                  {t("membersBadge", { count: ts.teamMembers })}
                                 </span>
                               </div>
                             </div>
@@ -526,13 +529,13 @@ export default function TeamsPage() {
                                 href={`/dashboard/teams/${team._id}`}
                                 className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
                               >
-                                Players
+                                {t("players")}
                               </Link>
-                              <button onClick={() => openEditForm(team)} className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition">
-                                Edit
+                              <button type="button" onClick={() => openEditForm(team)} className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition">
+                                {tc("edit")}
                               </button>
-                              <button onClick={() => handleDelete(team._id)} className="px-3 py-1.5 border border-red-200 rounded-lg text-sm text-red-600 hover:bg-red-50 transition">
-                                Delete
+                              <button type="button" onClick={() => handleDelete(team._id)} className="px-3 py-1.5 border border-red-200 rounded-lg text-sm text-red-600 hover:bg-red-50 transition">
+                                {tc("delete")}
                               </button>
                             </div>
                           </div>

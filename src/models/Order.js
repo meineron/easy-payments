@@ -12,6 +12,7 @@ const InstallmentSchema = new mongoose.Schema({
   date: { type: Date, required: true },
   amountCents: { type: Number, default: 0 },
   status: { type: String, enum: ["pending", "paid", "failed"], default: "pending" },
+  paymentMethod: { type: String, enum: ["card", "bank_transfer", "cash", "check"], default: "card" },
   stripeInvoiceId: { type: String, default: "" },
   paidAt: { type: Date, default: null },
 }, { _id: false });
@@ -50,6 +51,8 @@ const OrderSchema = new mongoose.Schema({
   couponDiscountCents: { type: Number, default: 0 },
 
   totalCostCents: { type: Number, default: 0 },
+  installmentFeeCents: { type: Number, default: 0 },
+  processingFeeCents: { type: Number, default: 0 },
   paidCents: { type: Number, default: 0 },
   refundedCents: { type: Number, default: 0 },
 
@@ -73,6 +76,14 @@ const OrderSchema = new mongoose.Schema({
   invoiceSentAt: { type: Date, default: null },
   linkSentAt: { type: Date, default: null },
   paymentLinkSentAt: { type: Date, default: null },
+
+  waiverConsents: [{
+    waiverId: { type: String, required: true },
+    title: { type: String, default: "" },
+    agreedAt: { type: Date, default: null },
+    agreedByName: { type: String, default: "" },
+    agreedByEmail: { type: String, default: "" },
+  }],
 
   formData: { type: mongoose.Schema.Types.Mixed, default: {} },
 }, {

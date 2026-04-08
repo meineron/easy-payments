@@ -7,6 +7,12 @@ const TransactionSchema = new mongoose.Schema({
     required: true,
     index: true,
   },
+  orderId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Order",
+    default: null,
+    index: true,
+  },
   stripeSessionId: {
     type: String,
     required: true,

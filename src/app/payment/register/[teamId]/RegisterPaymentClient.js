@@ -239,7 +239,7 @@ export default function RegisterPaymentClient({ team, clubName, hasDiscount }) {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 phone-group">
                     <select
                       value={parent.phonePrefix}
                       onChange={(e) => setParent({ ...parent, phonePrefix: e.target.value })}

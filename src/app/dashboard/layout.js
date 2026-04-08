@@ -1,18 +1,28 @@
 "use client";
 
+import { useState, useEffect, createContext, useContext } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { SessionProvider } from "next-auth/react";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import IntlProvider from "@/components/IntlProvider";
+import { getMessages, getDirection } from "@/lib/i18n";
+
+const LocaleContext = createContext({ locale: "en", setLocale: () => {} });
+export function useLocale() { return useContext(LocaleContext); }
 
 function DashboardLayoutInner({ children }) {
   const { data: session, status } = useSession();
   const pathname = usePathname();
+  const t = useTranslations("nav");
+  const tAuth = useTranslations("auth");
+  const tc = useTranslations("common");
 
   if (status === "loading") {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <p className="text-gray-500">Loading...</p>
+        <p className="text-gray-500">{tc("loading")}</p>
       </div>
     );
   }
@@ -33,7 +43,7 @@ function DashboardLayoutInner({ children }) {
                   : "text-gray-500 hover:text-gray-900"
               }`}
             >
-              Dashboard
+              {t("dashboard")}
             </Link>
             <Link
               href="/dashboard/activities"
@@ -43,7 +53,7 @@ function DashboardLayoutInner({ children }) {
                   : "text-gray-500 hover:text-gray-900"
               }`}
             >
-              Activities
+              {t("activities")}
             </Link>
             <Link
               href="/dashboard/teams"
@@ -53,7 +63,7 @@ function DashboardLayoutInner({ children }) {
                   : "text-gray-500 hover:text-gray-900"
               }`}
             >
-              Teams
+              {t("teams")}
             </Link>
             <Link
               href="/dashboard/parents"
@@ -63,7 +73,7 @@ function DashboardLayoutInner({ children }) {
                   : "text-gray-500 hover:text-gray-900"
               }`}
             >
-              Parents
+              {t("parents")}
             </Link>
             <Link
               href="/dashboard/players"
@@ -73,7 +83,7 @@ function DashboardLayoutInner({ children }) {
                   : "text-gray-500 hover:text-gray-900"
               }`}
             >
-              Players
+              {t("players")}
             </Link>
             <Link
               href="/dashboard/transactions"
@@ -83,7 +93,7 @@ function DashboardLayoutInner({ children }) {
                   : "text-gray-500 hover:text-gray-900"
               }`}
             >
-              Transactions
+              {t("transactions")}
             </Link>
             {session?.user?.hasDirectStripeAccess && (
               <>
@@ -95,7 +105,7 @@ function DashboardLayoutInner({ children }) {
                       : "text-gray-500 hover:text-gray-900"
                   }`}
                 >
-                  Customer Data
+                  {t("customerData")}
                 </Link>
                 <Link
                   href="/dashboard/payment-links"
@@ -105,7 +115,7 @@ function DashboardLayoutInner({ children }) {
                       : "text-gray-500 hover:text-gray-900"
                   }`}
                 >
-                  Payment Links
+                  {t("paymentLinks")}
                 </Link>
               </>
             )}
@@ -119,13 +129,13 @@ function DashboardLayoutInner({ children }) {
                   : "text-gray-500 hover:text-gray-900"
               }`}
             >
-              Profile
+              {t("profile")}
             </Link>
             <button
               onClick={() => signOut({ callbackUrl: "/" })}
               className="text-sm text-gray-500 hover:text-gray-900 transition"
             >
-              Sign Out
+              {tAuth("signOut")}
             </button>
           </div>
         </div>
@@ -138,9 +148,41 @@ function DashboardLayoutInner({ children }) {
 }
 
 export default function DashboardLayout({ children }) {
+  const [locale, setLocale] = useState("en");
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/club/profile")
+      .then((r) => r.json())
+      .then((d) => {
+        const lang = d.club?.language || "en";
+        setLocale(lang);
+        document.documentElement.lang = lang;
+        document.documentElement.dir = getDirection(lang);
+        setReady(true);
+      })
+      .catch(() => setReady(true));
+  }, []);
+
+  function updateLocale(newLocale) {
+    setLocale(newLocale);
+    document.documentElement.lang = newLocale;
+    document.documentElement.dir = getDirection(newLocale);
+  }
+
   return (
     <SessionProvider>
-      <DashboardLayoutInner>{children}</DashboardLayoutInner>
+      <LocaleContext.Provider value={{ locale, setLocale: updateLocale }}>
+        <IntlProvider locale={locale} messages={getMessages(locale)}>
+          {!ready ? (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+            </div>
+          ) : (
+            <DashboardLayoutInner>{children}</DashboardLayoutInner>
+          )}
+        </IntlProvider>
+      </LocaleContext.Provider>
     </SessionProvider>
   );
 }

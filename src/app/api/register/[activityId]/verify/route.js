@@ -3,6 +3,8 @@ import { sendVerificationEmail } from "@/lib/email";
 import { storeCode, generateCode } from "@/lib/verification-codes";
 import dbConnect from "@/lib/mongodb";
 import Order from "@/models/Order";
+import Activity from "@/models/Activity";
+import Club from "@/models/Club";
 
 const SANDBOX_EMAILS = ["shlomi+1@easycoach.club"];
 
@@ -34,7 +36,12 @@ export async function POST(request, { params }) {
     const code = generateCode();
     storeCode(emailLower, code);
 
-    await sendVerificationEmail(emailLower, code);
+    await dbConnect();
+    const activity = await Activity.findById(activityId, "clubId").lean();
+    const club = activity ? await Club.findById(activity.clubId, "language").lean() : null;
+    const locale = club?.language || "en";
+
+    await sendVerificationEmail(emailLower, code, locale);
 
     return NextResponse.json({ success: true });
   } catch (error) {

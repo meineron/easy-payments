@@ -1,0 +1,134 @@
+import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import dbConnect from "@/lib/mongodb";
+import crypto from "crypto";
+import Order from "@/models/Order";
+import PaymentRequest from "@/models/PaymentRequest";
+import Activity from "@/models/Activity";
+import Club from "@/models/Club";
+import { sendPaymentLink } from "@/lib/email";
+
+export async function GET(request, { params }) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session || session.user.role !== "club") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const { id, orderId } = await params;
+    await dbConnect();
+
+    const paymentRequests = await PaymentRequest.find({
+      orderId,
+      activityId: id,
+      clubId: session.user.id,
+    }).sort({ createdAt: -1 }).lean();
+
+    return NextResponse.json({ paymentRequests });
+  } catch (error) {
+    console.error("Get payment requests error:", error);
+    return NextResponse.json({ error: "Failed to get payment requests" }, { status: 500 });
+  }
+}
+
+export async function POST(request, { params }) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session || session.user.role !== "club") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const { id, orderId } = await params;
+    const body = await request.json();
+    const { items, sendMethod, recipientEmail, recipientName, note } = body;
+
+    if (!items?.length) {
+      return NextResponse.json({ error: "Select at least one item" }, { status: 400 });
+    }
+
+    await dbConnect();
+
+    const order = await Order.findOne({ _id: orderId, activityId: id, clubId: session.user.id }).lean();
+    if (!order) {
+      return NextResponse.json({ error: "Order not found" }, { status: 404 });
+    }
+
+    const totalCents = items.reduce((sum, i) => sum + (i.amountCents || 0), 0);
+    if (totalCents <= 0) {
+      return NextResponse.json({ error: "Total must be greater than zero" }, { status: 400 });
+    }
+
+    const outstandingRequests = await PaymentRequest.find({
+      orderId, clubId: session.user.id, status: "pending",
+    }).lean();
+    const pendingTotal = outstandingRequests.reduce((s, r) => s + r.totalCents, 0);
+    const outstandingBalance = order.totalCostCents - (order.paidCents || 0) - pendingTotal;
+
+    if (totalCents > outstandingBalance) {
+      return NextResponse.json({ error: "Total exceeds outstanding balance" }, { status: 400 });
+    }
+
+    let email = "";
+    let name = "";
+    if (sendMethod === "parent1") {
+      email = order.parent1Email || "";
+      name = `${order.parent1FirstName} ${order.parent1LastName}`.trim();
+    } else if (sendMethod === "parent2") {
+      email = order.parent2Email || "";
+      name = `${order.parent2FirstName} ${order.parent2LastName}`.trim();
+    } else if (sendMethod === "custom") {
+      email = recipientEmail || "";
+      name = recipientName || "";
+    }
+
+    const paymentToken = crypto.randomUUID();
+    const pr = await PaymentRequest.create({
+      orderId,
+      clubId: session.user.id,
+      activityId: id,
+      items,
+      totalCents,
+      status: "pending",
+      recipientEmail: email,
+      recipientName: name,
+      sendMethod: sendMethod || "copy_only",
+      paymentToken,
+      note: note || "",
+      sentAt: sendMethod !== "copy_only" && email ? new Date() : null,
+    });
+
+    const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
+    const paymentUrl = `${baseUrl}/payment/request/${paymentToken}`;
+
+    if (sendMethod !== "copy_only" && email) {
+      try {
+        const [activity, club] = await Promise.all([
+          Activity.findById(id, "title").lean(),
+          Club.findById(session.user.id, "name logoUrl language").lean(),
+        ]);
+        const playerName = `${order.playerFirstName} ${order.playerLastName}`.trim();
+        const totalAmount = "$" + (totalCents / 100).toFixed(2);
+
+        await sendPaymentLink(email, {
+          playerName,
+          clubName: club?.name || "",
+          activityTitle: activity?.title || "",
+          paymentUrl,
+          totalAmount,
+          logoUrl: club?.logoUrl || null,
+          locale: club?.language || "en",
+        });
+      } catch (emailErr) {
+        console.error("Failed to send payment request email:", emailErr.message);
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      paymentRequest: pr.toObject(),
+      paymentUrl,
+    }, { status: 201 });
+  } catch (error) {
+    console.error("Create payment request error:", error);
+    return NextResponse.json({ error: "Failed to create payment request" }, { status: 500 });
+  }
+}

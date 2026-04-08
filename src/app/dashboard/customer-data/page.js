@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 
 export default function ClubCustomerDataPage() {
+  const t = useTranslations("customerData");
+  const tc = useTranslations("common");
   const [tab, setTab] = useState("transactions");
   const [transactions, setTransactions] = useState([]);
   const [products, setProducts] = useState([]);
@@ -86,27 +89,27 @@ export default function ClubCustomerDataPage() {
   }
 
   const tabs = [
-    { id: "transactions", label: "Transactions" },
-    { id: "products", label: "Products" },
-    { id: "customers", label: "Customers" },
+    { id: "transactions", label: t("transactions") },
+    { id: "products", label: t("products") },
+    { id: "customers", label: t("customers") },
   ];
 
   return (
     <div>
-      <h2 className="text-xl font-bold text-gray-900 mb-6">Stripe Data</h2>
+      <h2 className="text-xl font-bold text-gray-900 mb-6">{t("title")}</h2>
 
       <div className="flex gap-2 mb-6">
-        {tabs.map((t) => (
+        {tabs.map((tabItem) => (
           <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
+            key={tabItem.id}
+            onClick={() => setTab(tabItem.id)}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-              tab === t.id
+              tab === tabItem.id
                 ? "bg-blue-600 text-white"
                 : "bg-white text-gray-600 border border-gray-300 hover:bg-gray-50"
             }`}
           >
-            {t.label}
+            {tabItem.label}
           </button>
         ))}
         <button
@@ -114,7 +117,7 @@ export default function ClubCustomerDataPage() {
           disabled={loading}
           className="ml-auto px-4 py-2 rounded-lg text-sm font-medium bg-white text-gray-600 border border-gray-300 hover:bg-gray-50 transition disabled:opacity-50"
         >
-          {loading ? "Loading..." : "Refresh"}
+          {loading ? tc("loading") : tc("refresh")}
         </button>
       </div>
 
@@ -125,9 +128,11 @@ export default function ClubCustomerDataPage() {
       )}
 
       {loading ? (
-        <p className="text-gray-500">Loading...</p>
+        <p className="text-gray-500">{tc("loading")}</p>
       ) : tab === "transactions" ? (
         <TransactionsTable
+          t={t}
+          tc={tc}
           transactions={transactions}
           expandedRow={expandedRow}
           setExpandedRow={setExpandedRow}
@@ -138,19 +143,19 @@ export default function ClubCustomerDataPage() {
           cardBrandLabel={cardBrandLabel}
         />
       ) : tab === "products" ? (
-        <ProductsTable products={products} formatDate={formatDate} formatAmount={formatAmount} />
+        <ProductsTable t={t} tc={tc} products={products} formatDate={formatDate} formatAmount={formatAmount} />
       ) : (
-        <CustomersTable customers={customers} formatDate={formatDate} formatAmount={formatAmount} />
+        <CustomersTable t={t} tc={tc} customers={customers} formatDate={formatDate} formatAmount={formatAmount} />
       )}
     </div>
   );
 }
 
-function TransactionsTable({ transactions, expandedRow, setExpandedRow, formatDateTime, formatDate, formatAmount, statusBadge, cardBrandLabel }) {
+function TransactionsTable({ t, tc, transactions, expandedRow, setExpandedRow, formatDateTime, formatDate, formatAmount, statusBadge, cardBrandLabel }) {
   if (transactions.length === 0) {
     return (
       <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-        <p className="text-gray-500">No transactions found</p>
+        <p className="text-gray-500">{t("noTransactions")}</p>
       </div>
     );
   }
@@ -161,21 +166,22 @@ function TransactionsTable({ transactions, expandedRow, setExpandedRow, formatDa
         <table className="w-full">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
-              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-8"></th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Amount</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Payment Method</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Customer</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Description</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Refund</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Links</th>
+              <th className="text-start px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-8"></th>
+              <th className="text-start px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tc("date")}</th>
+              <th className="text-start px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tc("amount")}</th>
+              <th className="text-start px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tc("status")}</th>
+              <th className="text-start px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("paymentMethod")}</th>
+              <th className="text-start px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("customer")}</th>
+              <th className="text-start px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("description")}</th>
+              <th className="text-start px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("refund")}</th>
+              <th className="text-start px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("links")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
             {transactions.map((tx) => (
               <TransactionRow
                 key={tx.id}
+                t={t}
                 tx={tx}
                 isExpanded={expandedRow === tx.id}
                 onToggle={() => setExpandedRow(expandedRow === tx.id ? null : tx.id)}
@@ -193,7 +199,7 @@ function TransactionsTable({ transactions, expandedRow, setExpandedRow, formatDa
   );
 }
 
-function TransactionRow({ tx, isExpanded, onToggle, formatDateTime, formatDate, formatAmount, statusBadge, cardBrandLabel }) {
+function TransactionRow({ t, tx, isExpanded, onToggle, formatDateTime, formatDate, formatAmount, statusBadge, cardBrandLabel }) {
   return (
     <>
       <tr className="hover:bg-gray-50 transition cursor-pointer" onClick={onToggle}>
@@ -233,10 +239,10 @@ function TransactionRow({ tx, isExpanded, onToggle, formatDateTime, formatDate, 
         <td className="px-4 py-4 text-sm whitespace-nowrap">
           <div className="flex gap-2">
             {tx.receiptUrl && (
-              <a href={tx.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline" onClick={(e) => e.stopPropagation()}>Receipt</a>
+              <a href={tx.receiptUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline" onClick={(e) => e.stopPropagation()}>{t("receipt")}</a>
             )}
             {tx.invoiceUrl && (
-              <a href={tx.invoiceUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline" onClick={(e) => e.stopPropagation()}>Invoice</a>
+              <a href={tx.invoiceUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline" onClick={(e) => e.stopPropagation()}>{t("invoice")}</a>
             )}
           </div>
         </td>
@@ -247,34 +253,34 @@ function TransactionRow({ tx, isExpanded, onToggle, formatDateTime, formatDate, 
           <td colSpan={9} className="bg-gray-50 px-6 py-4">
             <div className="grid grid-cols-2 gap-6">
               <div>
-                <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">Details</h4>
+                <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">{t("details")}</h4>
                 <dl className="space-y-2 text-sm">
                   <div className="flex gap-2">
-                    <dt className="text-gray-500 min-w-[140px]">Charge ID:</dt>
+                    <dt className="text-gray-500 min-w-[140px]">{t("chargeId")}</dt>
                     <dd className="text-gray-900 font-mono text-xs">{tx.id}</dd>
                   </div>
                   {tx.paymentIntentId && (
                     <div className="flex gap-2">
-                      <dt className="text-gray-500 min-w-[140px]">PaymentIntent ID:</dt>
+                      <dt className="text-gray-500 min-w-[140px]">{t("paymentIntentId")}</dt>
                       <dd className="text-gray-900 font-mono text-xs">{tx.paymentIntentId}</dd>
                     </div>
                   )}
                   {tx.paymentMethodId && (
                     <div className="flex gap-2">
-                      <dt className="text-gray-500 min-w-[140px]">Payment Method ID:</dt>
+                      <dt className="text-gray-500 min-w-[140px]">{t("paymentMethodId")}</dt>
                       <dd className="text-gray-900 font-mono text-xs">{tx.paymentMethodId}</dd>
                     </div>
                   )}
                   {tx.failureMessage && (
                     <div className="flex gap-2">
-                      <dt className="text-gray-500 min-w-[140px]">Decline Reason:</dt>
+                      <dt className="text-gray-500 min-w-[140px]">{t("declineReason")}</dt>
                       <dd className="text-red-600">{tx.failureMessage} ({tx.failureCode})</dd>
                     </div>
                   )}
                 </dl>
               </div>
               <div>
-                <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">Event Timeline</h4>
+                <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">{t("eventTimeline")}</h4>
                 {tx.events && tx.events.length > 0 ? (
                   <div className="space-y-2">
                     {tx.events.map((evt, i) => (
@@ -297,7 +303,7 @@ function TransactionRow({ tx, isExpanded, onToggle, formatDateTime, formatDate, 
                     ))}
                   </div>
                 ) : (
-                  <p className="text-sm text-gray-400">No events</p>
+                  <p className="text-sm text-gray-400">{t("noEvents")}</p>
                 )}
               </div>
             </div>
@@ -308,11 +314,11 @@ function TransactionRow({ tx, isExpanded, onToggle, formatDateTime, formatDate, 
   );
 }
 
-function ProductsTable({ products, formatDate, formatAmount }) {
+function ProductsTable({ t, tc, products, formatDate, formatAmount }) {
   if (products.length === 0) {
     return (
       <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-        <p className="text-gray-500">No products found</p>
+        <p className="text-gray-500">{t("noProducts")}</p>
       </div>
     );
   }
@@ -322,11 +328,11 @@ function ProductsTable({ products, formatDate, formatAmount }) {
       <table className="w-full">
         <thead>
           <tr className="bg-gray-50 border-b border-gray-200">
-            <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Name</th>
-            <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Price</th>
-            <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
-            <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
-            <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Created</th>
+            <th className="text-start px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tc("name")}</th>
+            <th className="text-start px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("price")}</th>
+            <th className="text-start px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("type")}</th>
+            <th className="text-start px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tc("status")}</th>
+            <th className="text-start px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("created")}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200">
@@ -344,12 +350,12 @@ function ProductsTable({ products, formatDate, formatAmount }) {
                     </>
                   ) : "—"}
                 </td>
-                <td className="px-6 py-4 text-sm text-gray-500">{isRecurring ? "Recurring" : "One-time"}</td>
+                <td className="px-6 py-4 text-sm text-gray-500">{isRecurring ? t("recurring") : t("oneTime")}</td>
                 <td className="px-6 py-4">
                   <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                     prod.active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"
                   }`}>
-                    {prod.active ? "Active" : "Inactive"}
+                    {prod.active ? t("active") : t("inactive")}
                   </span>
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-500">{formatDate(prod.created)}</td>
@@ -362,11 +368,11 @@ function ProductsTable({ products, formatDate, formatAmount }) {
   );
 }
 
-function CustomersTable({ customers, formatDate, formatAmount }) {
+function CustomersTable({ t, tc, customers, formatDate, formatAmount }) {
   if (customers.length === 0) {
     return (
       <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-        <p className="text-gray-500">No customers found</p>
+        <p className="text-gray-500">{t("noCustomers")}</p>
       </div>
     );
   }
@@ -376,11 +382,11 @@ function CustomersTable({ customers, formatDate, formatAmount }) {
       <table className="w-full">
         <thead>
           <tr className="bg-gray-50 border-b border-gray-200">
-            <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Email</th>
-            <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Name</th>
-            <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Phone</th>
-            <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Created</th>
-            <th className="text-left px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Balance</th>
+            <th className="text-start px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tc("email")}</th>
+            <th className="text-start px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tc("name")}</th>
+            <th className="text-start px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tc("phone")}</th>
+            <th className="text-start px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("created")}</th>
+            <th className="text-start px-6 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("balance")}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200">

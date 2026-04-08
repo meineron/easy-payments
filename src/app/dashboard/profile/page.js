@@ -1,8 +1,14 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useTranslations } from "next-intl";
+import { useLocale } from "../layout";
 
 export default function ClubProfilePage() {
+  const t = useTranslations("profile");
+  const tc = useTranslations("common");
+  const { setLocale: updateAppLocale } = useLocale();
+
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -10,6 +16,7 @@ export default function ClubProfilePage() {
   const [name, setName] = useState("");
   const [logoUrl, setLogoUrl] = useState(null);
   const [logoPreview, setLogoPreview] = useState(null);
+  const [language, setLanguage] = useState("en");
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -21,6 +28,7 @@ export default function ClubProfilePage() {
           setName(d.club.name || "");
           setLogoUrl(d.club.logoUrl || null);
           setLogoPreview(d.club.logoUrl || null);
+          setLanguage(d.club.language || "en");
         }
         setLoading(false);
       })
@@ -29,8 +37,8 @@ export default function ClubProfilePage() {
 
   useEffect(() => {
     if (toast) {
-      const t = setTimeout(() => setToast(null), 3000);
-      return () => clearTimeout(t);
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
     }
   }, [toast]);
 
@@ -39,7 +47,7 @@ export default function ClubProfilePage() {
     if (!file) return;
 
     if (file.size > 2 * 1024 * 1024) {
-      setToast({ message: "Logo must be under 2MB", type: "error" });
+      setToast({ message: t("logoSizeError"), type: "error" });
       return;
     }
 
@@ -60,7 +68,7 @@ export default function ClubProfilePage() {
 
   async function handleSave() {
     if (!name.trim()) {
-      setToast({ message: "Club name is required", type: "error" });
+      setToast({ message: t("nameRequired"), type: "error" });
       return;
     }
     setSaving(true);
@@ -68,17 +76,18 @@ export default function ClubProfilePage() {
       const res = await fetch("/api/club/profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), logoUrl }),
+        body: JSON.stringify({ name: name.trim(), logoUrl, language }),
       });
       const data = await res.json();
       if (data.club) {
         setProfile(data.club);
-        setToast({ message: "Profile saved successfully!", type: "success" });
+        updateAppLocale(language);
+        setToast({ message: t("savedSuccess"), type: "success" });
       } else {
-        setToast({ message: data.error || "Failed to save", type: "error" });
+        setToast({ message: data.error || t("saveFailed"), type: "error" });
       }
     } catch {
-      setToast({ message: "Failed to save profile", type: "error" });
+      setToast({ message: t("saveFailed"), type: "error" });
     } finally {
       setSaving(false);
     }
@@ -94,12 +103,12 @@ export default function ClubProfilePage() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold text-gray-900 mb-6">Club Profile</h2>
+      <h2 className="text-2xl font-bold text-gray-900 mb-6">{t("title")}</h2>
 
       <div className="bg-white rounded-xl border shadow-sm max-w-xl">
         {/* Logo Section */}
         <div className="p-6 border-b">
-          <label className="block text-sm font-medium text-gray-700 mb-3">Club Logo</label>
+          <label className="block text-sm font-medium text-gray-700 mb-3">{t("clubLogo")}</label>
           <div className="flex items-center gap-6">
             <div className="w-24 h-24 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden bg-gray-50 flex-shrink-0">
               {logoPreview ? (
@@ -115,43 +124,57 @@ export default function ClubProfilePage() {
                 onChange={handleLogoUpload} className="hidden" />
               <button onClick={() => fileRef.current?.click()}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">
-                {logoPreview ? "Change Logo" : "Upload Logo"}
+                {logoPreview ? t("changeLogo") : t("uploadLogo")}
               </button>
               {logoPreview && (
                 <button onClick={removeLogo}
                   className="px-4 py-2 bg-white border border-red-300 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition">
-                  Remove Logo
+                  {t("removeLogo")}
                 </button>
               )}
-              <p className="text-xs text-gray-400">PNG, JPG, GIF, or SVG. Max 2MB.</p>
+              <p className="text-xs text-gray-400">{t("logoHint")}</p>
             </div>
           </div>
         </div>
 
         {/* Name Section */}
         <div className="p-6 border-b">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Club Name</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">{t("clubName")}</label>
           <input type="text" value={name} onChange={(e) => setName(e.target.value)}
             className="w-full border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            placeholder="Enter club name" />
+            placeholder={t("clubNamePlaceholder")} />
         </div>
 
         {/* Username (read-only) */}
         <div className="p-6 border-b">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">{t("username")}</label>
           <input type="text" value={profile?.username || ""} disabled
             className="w-full border rounded-lg px-3 py-2.5 text-sm bg-gray-50 text-gray-500 cursor-not-allowed" />
-          <p className="text-xs text-gray-400 mt-1">Username cannot be changed.</p>
+          <p className="text-xs text-gray-400 mt-1">{t("usernameHint")}</p>
+        </div>
+
+        {/* Language Section */}
+        <div className="p-6 border-b">
+          <label className="block text-sm font-medium text-gray-700 mb-1">{t("language")}</label>
+          <select
+            value={language}
+            onChange={(e) => setLanguage(e.target.value)}
+            className="w-full border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          >
+            <option value="en">{t("langEnglish")}</option>
+            <option value="he">{t("langHebrew")}</option>
+          </select>
+          <p className="text-xs text-gray-400 mt-1">{t("languageHint")}</p>
         </div>
 
         {/* Save */}
         <div className="p-6 flex items-center justify-between">
           <button onClick={handleSave} disabled={saving}
             className="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition">
-            {saving ? "Saving..." : "Save Profile"}
+            {saving ? tc("saving") : t("saveProfile")}
           </button>
           {logoPreview && (
-            <div className="text-xs text-gray-400">Logo will appear in emails and payment pages</div>
+            <div className="text-xs text-gray-400">{t("logoVisibility")}</div>
           )}
         </div>
       </div>
@@ -159,11 +182,11 @@ export default function ClubProfilePage() {
       {/* Preview */}
       {logoPreview && (
         <div className="mt-8 max-w-xl">
-          <h3 className="text-sm font-semibold text-gray-700 mb-3">Preview — How parents will see it</h3>
+          <h3 className="text-sm font-semibold text-gray-700 mb-3">{t("previewTitle")}</h3>
           <div className="bg-gray-50 rounded-xl border p-8 text-center">
             <img src={logoPreview} alt="Preview" className="h-14 w-auto mx-auto mb-2 object-contain" />
-            <p className="text-lg font-bold text-gray-900">{name || "Club Name"}</p>
-            <p className="text-sm text-gray-500 mt-1">Activity Title</p>
+            <p className="text-lg font-bold text-gray-900">{name || t("previewClubName")}</p>
+            <p className="text-sm text-gray-500 mt-1">{t("previewActivityTitle")}</p>
           </div>
         </div>
       )}

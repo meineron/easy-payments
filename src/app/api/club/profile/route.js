@@ -12,10 +12,10 @@ export async function GET() {
     }
     await dbConnect();
 
-    const club = await Club.findById(session.user.id, "name username logoUrl").lean();
+    const club = await Club.findById(session.user.id, "name username logoUrl language").lean();
     if (!club) return NextResponse.json({ error: "Club not found" }, { status: 404 });
 
-    return NextResponse.json({ club: { name: club.name, username: club.username, logoUrl: club.logoUrl || null } });
+    return NextResponse.json({ club: { name: club.name, username: club.username, logoUrl: club.logoUrl || null, language: club.language || "en" } });
   } catch (error) {
     console.error("Get profile error:", error);
     return NextResponse.json({ error: "Failed to get profile" }, { status: 500 });
@@ -40,10 +40,12 @@ export async function PUT(request) {
     if (body.logoUrl !== undefined) {
       club.logoUrl = body.logoUrl || null;
     }
-
+    if (body.language !== undefined && ["en", "he"].includes(body.language)) {
+      club.language = body.language;
+    }
     await club.save();
 
-    return NextResponse.json({ club: { name: club.name, username: club.username, logoUrl: club.logoUrl || null } });
+    return NextResponse.json({ club: { name: club.name, username: club.username, logoUrl: club.logoUrl || null, language: club.language || "en" } });
   } catch (error) {
     console.error("Update profile error:", error);
     return NextResponse.json({ error: "Failed to update profile" }, { status: 500 });

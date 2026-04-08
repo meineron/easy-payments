@@ -62,6 +62,9 @@ const SubscriptionSchema = new mongoose.Schema({
   dueDateAmountCents: { type: Number, default: 0 },
   maxInstallments: { type: Number, default: 1 },
   firstInstallmentDate: { type: Date, default: null },
+  installmentFeeThreshold: { type: Number, default: 0 },
+  installmentFeePercent: { type: Number, default: 0 },
+  installmentFeeMode: { type: String, enum: ["due_date", "split"], default: "split" },
   months: { type: Number, default: 10 },
   hasReduction: { type: Boolean, default: false },
   reductionSchedule: [ReductionRowSchema],
@@ -90,6 +93,13 @@ const CouponSchema = new mongoose.Schema({
   maxUses: { type: Number, default: null },
   usedCount: { type: Number, default: 0 },
   expiresAt: { type: Date, default: null },
+});
+
+const WaiverSchema = new mongoose.Schema({
+  title: { type: String, required: true, trim: true },
+  contentHtml: { type: String, default: "" },
+  isRequired: { type: Boolean, default: true },
+  order: { type: Number, default: 0 },
 });
 
 const ActivitySchema = new mongoose.Schema({
@@ -124,7 +134,9 @@ const ActivitySchema = new mongoose.Schema({
   formSections: [ActivityFormSectionSchema],
   subscriptions: [SubscriptionSchema],
   coupons: [CouponSchema],
+  waivers: [WaiverSchema],
 
+  passStripeFeeToCustomer: { type: Boolean, default: false },
   afterRegistrationMessage: { type: String, default: "" },
 }, {
   timestamps: true,

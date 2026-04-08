@@ -48,8 +48,8 @@ export async function PUT(request, { params }) {
       "title", "coverImage", "description", "type", "season", "hasPayment",
       "startDate", "endDate", "lastRegisterDate",
       "status", "registrationType", "hiddenLink", "onlyAssignedPlayers", "playerAssignment",
-      "teams", "formSections", "subscriptions", "coupons",
-      "afterRegistrationMessage",
+      "teams", "formSections", "subscriptions", "coupons", "waivers",
+      "passStripeFeeToCustomer", "afterRegistrationMessage",
     ];
 
     for (const key of allowed) {

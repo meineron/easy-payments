@@ -2,9 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 
 export default function ActivitiesPage() {
   const router = useRouter();
+  const t = useTranslations("activities");
+  const tc = useTranslations("common");
   const [activities, setActivities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -64,7 +67,7 @@ export default function ActivitiesPage() {
         router.push(`/dashboard/activities/${data.activity._id}`);
       }
     } catch {
-      alert("Failed to create activity");
+      alert(t("failedToCreate"));
     } finally {
       setCreating(false);
       setShowCreateModal(false);
@@ -83,17 +86,17 @@ export default function ActivitiesPage() {
         prev.map((a) => (a._id === id ? { ...a, status: newStatus } : a))
       );
     } catch {
-      alert("Failed to update status");
+      alert(t("failedToUpdate"));
     }
   }
 
   async function deleteActivity(id) {
-    if (!confirm("Delete this activity? This cannot be undone.")) return;
+    if (!confirm(t("deleteConfirm"))) return;
     try {
       await fetch(`/api/activities/${id}`, { method: "DELETE" });
       setActivities((prev) => prev.filter((a) => a._id !== id));
     } catch {
-      alert("Failed to delete activity");
+      alert(t("failedToDelete"));
     }
   }
 
@@ -103,26 +106,26 @@ export default function ActivitiesPage() {
   }
 
   if (loading) {
-    return <p className="text-gray-500 py-8 text-center">Loading activities...</p>;
+    return <p className="text-gray-500 py-8 text-center">{t("loadingActivities")}</p>;
   }
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-bold text-gray-900">Activities</h2>
+        <h2 className="text-xl font-bold text-gray-900">{t("title")}</h2>
         <button
           onClick={openCreateModal}
           disabled={creating}
           className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
         >
-          {creating ? "Creating..." : "+ Create Activity"}
+          {creating ? tc("creating") : t("createActivity")}
         </button>
       </div>
 
       {activities.length === 0 ? (
         <div className="bg-white rounded-lg border p-12 text-center text-gray-500">
-          <p className="text-lg mb-2">No activities yet</p>
-          <p className="text-sm">Create your first activity to start managing registrations.</p>
+          <p className="text-lg mb-2">{t("noActivities")}</p>
+          <p className="text-sm">{t("noActivitiesDesc")}</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -142,22 +145,22 @@ export default function ActivitiesPage() {
                           : "bg-yellow-100 text-yellow-700"
                       }`}
                     >
-                      {a.status || "draft"}
+                      {a.status === "published" ? t("published") : t("draft")}
                     </span>
                     <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
                       {a.type}
                     </span>
                   </div>
                   <div className="flex items-center gap-4 text-xs text-gray-500">
-                    {a.season && <span>Season: {a.season}</span>}
-                    <span>{a.teams?.length || 0} team(s)</span>
+                    {a.season && <span>{t("season")}: {a.season}</span>}
+                    <span>{a.teams?.length || 0} {t("teams")}</span>
                     <span>{fmtDate(a.startDate)} — {fmtDate(a.endDate)}</span>
                     {a.hasPayment && (
-                      <span className="text-green-600 font-medium">$ Payment</span>
+                      <span className="text-green-600 font-medium">{t("payment")}</span>
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 ml-4">
+                <div className="flex items-center gap-2 ms-4">
                   <button
                     onClick={() => toggleStatus(a._id, a.status)}
                     className={`text-xs px-3 py-1 rounded font-medium ${
@@ -166,13 +169,13 @@ export default function ActivitiesPage() {
                         : "bg-green-50 text-green-700 hover:bg-green-100"
                     }`}
                   >
-                    {a.status === "published" ? "Unpublish" : "Publish"}
+                    {a.status === "published" ? t("unpublish") : t("publish")}
                   </button>
                   <button
                     onClick={() => deleteActivity(a._id)}
                     className="text-xs px-3 py-1 rounded bg-red-50 text-red-600 hover:bg-red-100 font-medium"
                   >
-                    Delete
+                    {tc("delete")}
                   </button>
                 </div>
               </div>
@@ -185,35 +188,35 @@ export default function ActivitiesPage() {
       {showCreateModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setShowCreateModal(false)}>
           <div className="bg-white rounded-xl border border-gray-200 p-6 w-full max-w-md shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-gray-900 mb-4">Create Activity</h3>
+            <h3 className="text-lg font-bold text-gray-900 mb-4">{t("createTitle")}</h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t("titleLabel")}</label>
                 <input
                   type="text"
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
-                  placeholder="e.g. Fall 2026 Season Registration"
+                  placeholder={t("titlePlaceholder")}
                   autoFocus
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-gray-900"
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Season</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{t("seasonLabel")}</label>
                   <select
                     value={newSeason}
                     onChange={(e) => setNewSeason(e.target.value)}
                     className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-gray-900"
                   >
-                    <option value="">No season</option>
+                    <option value="">{t("noSeason")}</option>
                     {seasons.map((s) => (
                       <option key={s} value={s}>{s}</option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Date *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{t("startDate")}</label>
                   <input
                     type="date"
                     value={newStartDate}
@@ -228,14 +231,14 @@ export default function ActivitiesPage() {
                 onClick={() => setShowCreateModal(false)}
                 className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition"
               >
-                Cancel
+                {tc("cancel")}
               </button>
               <button
                 onClick={createActivity}
                 disabled={!newTitle.trim() || !newStartDate || creating}
                 className="flex-1 bg-blue-600 text-white px-4 py-2.5 rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50"
               >
-                {creating ? "Creating..." : "Create"}
+                {creating ? tc("creating") : tc("create")}
               </button>
             </div>
           </div>

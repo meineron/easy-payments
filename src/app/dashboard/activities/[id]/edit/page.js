@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, use } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 
 function Toast({ message, type = "success", onClose }) {
   useEffect(() => {
@@ -10,22 +11,14 @@ function Toast({ message, type = "success", onClose }) {
   }, [onClose]);
   const bg = type === "success" ? "bg-green-600" : type === "error" ? "bg-red-600" : "bg-blue-600";
   return (
-    <div className={`fixed top-4 right-4 z-[100] ${bg} text-white px-5 py-3 rounded-lg shadow-lg text-sm font-medium flex items-center gap-3`}>
+    <div className={`fixed top-4 end-4 z-[100] ${bg} text-white px-5 py-3 rounded-lg shadow-lg text-sm font-medium flex items-center gap-3`}>
       {type === "success" && <span>&#10003;</span>}
       {type === "error" && <span>&#10007;</span>}
       {message}
-      <button onClick={onClose} className="ml-2 opacity-70 hover:opacity-100">×</button>
+      <button onClick={onClose} className="ms-2 opacity-70 hover:opacity-100">×</button>
     </div>
   );
 }
-
-const TABS = [
-  { key: "details", label: "Activity Details" },
-  { key: "teams", label: "Teams" },
-  { key: "form", label: "Registration Form" },
-  { key: "payment", label: "Payment" },
-  { key: "notifications", label: "Notifications" },
-];
 
 const ACTIVITY_TYPES = ["Season Registration", "Tryout", "Camp"];
 const months = Array.from({ length: 12 }, (_, i) => i + 1);
@@ -84,7 +77,7 @@ function PriceInput({ value, onChange, className = "", placeholder = "0.00" }) {
 }
 
 /* ============== TAB 1: Activity Details ============== */
-function TabDetails({ activity, onSave, saving }) {
+function TabDetails({ activity, onSave, saving, t, tc, td }) {
   const [form, setForm] = useState({
     title: "", description: "", type: "Season Registration", season: "",
     hasPayment: false, coverImage: "",
@@ -158,29 +151,29 @@ function TabDetails({ activity, onSave, saving }) {
   return (
     <div className="space-y-6">
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1">{t("titleLabel")}</label>
         <input value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} className="w-full border rounded-lg px-3 py-2 text-sm" />
       </div>
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Cover Image</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1">{td("coverImage")}</label>
         {form.coverImage && <img src={form.coverImage} alt="Cover" className="w-48 h-28 object-cover rounded-lg mb-2" />}
         <input type="file" accept="image/*" onChange={handleImageUpload} className="text-sm" />
       </div>
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1">{td("description")}</label>
         <div contentEditable suppressContentEditableWarning className="w-full border rounded-lg px-3 py-2 text-sm min-h-[120px] focus:outline-none focus:ring-2 focus:ring-blue-500"
           dangerouslySetInnerHTML={{ __html: form.description }} onBlur={(e) => setForm((p) => ({ ...p, description: e.target.innerHTML }))} />
-        <p className="text-xs text-gray-400 mt-1">Supports basic formatting — bold, italic, lists.</p>
+        <p className="text-xs text-gray-400 mt-1">{td("descriptionHint")}</p>
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">{td("type")}</label>
           <select value={form.type} onChange={(e) => setForm((p) => ({ ...p, type: e.target.value }))} className="w-full border rounded-lg px-3 py-2 text-sm">
-            {ACTIVITY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            {ACTIVITY_TYPES.map((at) => <option key={at} value={at}>{at}</option>)}
           </select>
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Season</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">{t("season")}</label>
           <select value={form.season} onChange={(e) => setForm((p) => ({ ...p, season: e.target.value }))} className="w-full border rounded-lg px-3 py-2 text-sm">
             <option value="">No season</option>
             {seasons.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -189,47 +182,47 @@ function TabDetails({ activity, onSave, saving }) {
         </div>
       </div>
       <div className="flex items-center gap-3">
-        <label className="text-sm font-medium text-gray-700">Has Payment?</label>
+        <label className="text-sm font-medium text-gray-700">{td("hasPayment")}</label>
         <button type="button" onClick={() => setForm((p) => ({ ...p, hasPayment: !p.hasPayment }))}
           className={`relative w-11 h-6 rounded-full transition ${form.hasPayment ? "bg-blue-600" : "bg-gray-300"}`}>
           <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.hasPayment ? "translate-x-5" : ""}`} />
         </button>
       </div>
       <div className="bg-gray-50 rounded-lg p-4 space-y-4">
-        <h4 className="font-semibold text-gray-900 text-sm">Publishing Settings</h4>
+        <h4 className="font-semibold text-gray-900 text-sm">{td("publishingSettings")}</h4>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">{tc("status")}</label>
             <select value={form.status} onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))} className="w-full border rounded-lg px-3 py-2 text-sm">
-              <option value="draft">Draft</option><option value="published">Published</option>
+              <option value="draft">{t("draft")}</option><option value="published">{t("published")}</option>
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Registration Type</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">{td("registrationType")}</label>
             <select value={form.registrationType} onChange={(e) => setForm((p) => ({ ...p, registrationType: e.target.value }))} className="w-full border rounded-lg px-3 py-2 text-sm">
-              <option value="public">Public Registration</option><option value="login">Login Registration</option>
+              <option value="public">{td("publicRegistration")}</option><option value="login">{td("loginRegistration")}</option>
             </select>
           </div>
         </div>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={form.hiddenLink} onChange={(e) => setForm((p) => ({ ...p, hiddenLink: e.target.checked }))} className="rounded" />
-          Hidden Link
+          {td("hiddenLink")}
         </label>
       </div>
       <div className="grid grid-cols-3 gap-4">
-        <DateDropdown label="Start Date" parts={startParts} setParts={setStartParts} />
-        <DateDropdown label="End Date" parts={endParts} setParts={setEndParts} />
-        <DateDropdown label="Last Date to Register" parts={lastRegParts} setParts={setLastRegParts} />
+        <DateDropdown label={t("startDate")} parts={startParts} setParts={setStartParts} />
+        <DateDropdown label={td("endDate")} parts={endParts} setParts={setEndParts} />
+        <DateDropdown label={td("lastDateToRegister")} parts={lastRegParts} setParts={setLastRegParts} />
       </div>
       <button onClick={save} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
-        {saving ? "Saving..." : "Save Details"}
+        {saving ? tc("saving") : td("saveDetails")}
       </button>
     </div>
   );
 }
 
 /* ============== TAB 2: Teams ============== */
-function TabTeams({ activity, onSave, saving }) {
+function TabTeams({ activity, onSave, saving, tc, td }) {
   const [settings, setSettings] = useState({ onlyAssignedPlayers: false, playerAssignment: "manual" });
   const [teams, setTeams] = useState([]);
   const [clubTeams, setClubTeams] = useState([]);
@@ -288,10 +281,10 @@ function TabTeams({ activity, onSave, saving }) {
     try {
       const res = await fetch("/api/teams", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: newTeamName.trim(), season: newTeamSeason, gender: newTeamGender }) });
-      const data = await res.json(); const t = data.teams?.[0] || data.team;
-      if (t) {
-        setClubTeams((prev) => [...prev, t]);
-        setTeams((prev) => [...prev, { teamId: t._id, teamName: t.name, teamSeason: t.season || "", teamGender: t.gender || "",
+      const data = await res.json(); const newTeam = data.teams?.[0] || data.team;
+      if (newTeam) {
+        setClubTeams((prev) => [...prev, newTeam]);
+        setTeams((prev) => [...prev, { teamId: newTeam._id, teamName: newTeam.name, teamSeason: newTeam.season || "", teamGender: newTeam.gender || "",
           playerLimit: "", ageLimitType: "none", ageLimitYobMin: "", ageLimitYobMax: "",
           ageLimitDateMin: "", ageLimitDateMax: "", serialNumber: "" }]);
         setNewTeamName(""); setNewTeamSeason(""); setNewTeamGender(""); setShowAddModal(false);
@@ -320,16 +313,16 @@ function TabTeams({ activity, onSave, saving }) {
   return (
     <div className="space-y-6">
       <div className="bg-gray-50 rounded-lg p-4 space-y-4">
-        <h3 className="font-semibold text-gray-900">Player Assignment Settings</h3>
+        <h3 className="font-semibold text-gray-900">{td("playerAssignmentSettings")}</h3>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={settings.onlyAssignedPlayers} onChange={(e) => setSettings((p) => ({ ...p, onlyAssignedPlayers: e.target.checked }))} className="rounded" />
-          Only Assigned Players Can Register
+          {td("onlyAssignedPlayers")}
         </label>
         {!settings.onlyAssignedPlayers && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Player Assignment</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">{td("playerAssignment")}</label>
             <div className="flex gap-4">
-              {[{ v: "auto", l: "Assign Automatically" }, { v: "after_paid", l: "After Fully Paid" }, { v: "manual", l: "Don't Assign Automatically" }].map(({ v, l }) => (
+              {[{ v: "auto", l: td("assignAutomatically") }, { v: "after_paid", l: td("afterFullyPaid") }, { v: "manual", l: td("dontAssignAutomatically") }].map(({ v, l }) => (
                 <label key={v} className="flex items-center gap-2 text-sm">
                   <input type="radio" name="playerAssignment" value={v} checked={settings.playerAssignment === v}
                     onChange={() => setSettings((p) => ({ ...p, playerAssignment: v }))} />{l}
@@ -341,64 +334,64 @@ function TabTeams({ activity, onSave, saving }) {
       </div>
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-gray-900">Teams ({teams.length})</h3>
+          <h3 className="font-semibold text-gray-900">{td("teamsCount", { count: teams.length })}</h3>
           <button onClick={() => { setShowAddModal(true); setSeasonFilter(""); setSelectedExistingTeams([]); }}
-            className="bg-blue-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-blue-700">+ Add Team</button>
+            className="bg-blue-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-blue-700">{td("addTeam")}</button>
         </div>
-        {teams.length === 0 ? <p className="text-gray-400 text-sm p-4 bg-gray-50 rounded text-center">No teams added yet.</p> : (
+        {teams.length === 0 ? <p className="text-gray-400 text-sm p-4 bg-gray-50 rounded text-center">{td("noTeamsAddedYet")}</p> : (
           <div className="space-y-3">
-            {teams.map((t, idx) => (
+            {teams.map((teamRow, idx) => (
               <div key={idx} className="border rounded-lg p-4">
                 <div className="flex items-start justify-between mb-3">
-                  <div><span className="font-medium text-gray-900">{t.teamName}</span><span className="text-xs text-gray-500 ml-2">{t.teamSeason} · {t.teamGender}</span></div>
-                  <button onClick={() => removeTeam(idx)} className="text-red-500 text-xs hover:text-red-700">Remove</button>
+                  <div><span className="font-medium text-gray-900">{teamRow.teamName}</span><span className="text-xs text-gray-500 ms-2">{teamRow.teamSeason} · {teamRow.teamGender}</span></div>
+                  <button onClick={() => removeTeam(idx)} className="text-red-500 text-xs hover:text-red-700">{tc("remove")}</button>
                 </div>
                 <div className="grid grid-cols-3 gap-3">
-                  <div><label className="block text-xs text-gray-500 mb-1">Player Limit</label>
-                    <input type="number" value={t.playerLimit} onChange={(e) => updateTeam(idx, "playerLimit", e.target.value)} placeholder="No limit" className="w-full border rounded px-2 py-1 text-sm" /></div>
-                  <div><label className="block text-xs text-gray-500 mb-1">Age Limit</label>
-                    <select value={t.ageLimitType} onChange={(e) => updateTeam(idx, "ageLimitType", e.target.value)} className="w-full border rounded px-2 py-1 text-sm">
-                      <option value="none">None</option><option value="yob">Year of Birth</option><option value="range">Date Range</option></select></div>
-                  <div><label className="block text-xs text-gray-500 mb-1">Serial Number</label>
-                    <input value={t.serialNumber} onChange={(e) => updateTeam(idx, "serialNumber", e.target.value)} className="w-full border rounded px-2 py-1 text-sm" /></div>
+                  <div><label className="block text-xs text-gray-500 mb-1">{td("playerLimit")}</label>
+                    <input type="number" value={teamRow.playerLimit} onChange={(e) => updateTeam(idx, "playerLimit", e.target.value)} placeholder={td("noLimit")} className="w-full border rounded px-2 py-1 text-sm" /></div>
+                  <div><label className="block text-xs text-gray-500 mb-1">{td("ageLimit")}</label>
+                    <select value={teamRow.ageLimitType} onChange={(e) => updateTeam(idx, "ageLimitType", e.target.value)} className="w-full border rounded px-2 py-1 text-sm">
+                      <option value="none">{td("none")}</option><option value="yob">{td("yearOfBirth")}</option><option value="range">{td("dateRange")}</option></select></div>
+                  <div><label className="block text-xs text-gray-500 mb-1">{td("serialNumber")}</label>
+                    <input value={teamRow.serialNumber} onChange={(e) => updateTeam(idx, "serialNumber", e.target.value)} className="w-full border rounded px-2 py-1 text-sm" /></div>
                 </div>
-                {t.ageLimitType === "yob" && (<div className="grid grid-cols-2 gap-3 mt-3">
-                  <div><label className="block text-xs text-gray-500 mb-1">Min YOB</label><input type="number" value={t.ageLimitYobMin} onChange={(e) => updateTeam(idx, "ageLimitYobMin", e.target.value)} placeholder="e.g. 2010" className="w-full border rounded px-2 py-1 text-sm" /></div>
-                  <div><label className="block text-xs text-gray-500 mb-1">Max YOB</label><input type="number" value={t.ageLimitYobMax} onChange={(e) => updateTeam(idx, "ageLimitYobMax", e.target.value)} placeholder="e.g. 2012" className="w-full border rounded px-2 py-1 text-sm" /></div>
+                {teamRow.ageLimitType === "yob" && (<div className="grid grid-cols-2 gap-3 mt-3">
+                  <div><label className="block text-xs text-gray-500 mb-1">{td("minYOB")}</label><input type="number" value={teamRow.ageLimitYobMin} onChange={(e) => updateTeam(idx, "ageLimitYobMin", e.target.value)} placeholder="e.g. 2010" className="w-full border rounded px-2 py-1 text-sm" /></div>
+                  <div><label className="block text-xs text-gray-500 mb-1">{td("maxYOB")}</label><input type="number" value={teamRow.ageLimitYobMax} onChange={(e) => updateTeam(idx, "ageLimitYobMax", e.target.value)} placeholder="e.g. 2012" className="w-full border rounded px-2 py-1 text-sm" /></div>
                 </div>)}
-                {t.ageLimitType === "range" && (<div className="grid grid-cols-2 gap-3 mt-3">
-                  <div><label className="block text-xs text-gray-500 mb-1">Min Date</label><input type="date" value={t.ageLimitDateMin ? t.ageLimitDateMin.slice(0, 10) : ""} onChange={(e) => updateTeam(idx, "ageLimitDateMin", e.target.value)} className="w-full border rounded px-2 py-1 text-sm" /></div>
-                  <div><label className="block text-xs text-gray-500 mb-1">Max Date</label><input type="date" value={t.ageLimitDateMax ? t.ageLimitDateMax.slice(0, 10) : ""} onChange={(e) => updateTeam(idx, "ageLimitDateMax", e.target.value)} className="w-full border rounded px-2 py-1 text-sm" /></div>
+                {teamRow.ageLimitType === "range" && (<div className="grid grid-cols-2 gap-3 mt-3">
+                  <div><label className="block text-xs text-gray-500 mb-1">{td("minDate")}</label><input type="date" value={teamRow.ageLimitDateMin ? teamRow.ageLimitDateMin.slice(0, 10) : ""} onChange={(e) => updateTeam(idx, "ageLimitDateMin", e.target.value)} className="w-full border rounded px-2 py-1 text-sm" /></div>
+                  <div><label className="block text-xs text-gray-500 mb-1">{td("maxDate")}</label><input type="date" value={teamRow.ageLimitDateMax ? teamRow.ageLimitDateMax.slice(0, 10) : ""} onChange={(e) => updateTeam(idx, "ageLimitDateMax", e.target.value)} className="w-full border rounded px-2 py-1 text-sm" /></div>
                 </div>)}
               </div>
             ))}
           </div>
         )}
       </div>
-      <button onClick={save} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{saving ? "Saving..." : "Save Teams"}</button>
+      <button onClick={save} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{saving ? tc("saving") : td("saveTeams")}</button>
 
       {showAddModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowAddModal(false)}>
           <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="font-semibold text-lg mb-4">Add Team</h3>
+            <h3 className="font-semibold text-lg mb-4">{td("addTeamTitle")}</h3>
             <div className="flex gap-2 mb-4">
-              <button onClick={() => setNewTeamMode("existing")} className={`px-3 py-1 rounded text-sm font-medium ${newTeamMode === "existing" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}>From Existing</button>
-              <button onClick={() => setNewTeamMode("new")} className={`px-3 py-1 rounded text-sm font-medium ${newTeamMode === "new" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}>Create New</button>
+              <button onClick={() => setNewTeamMode("existing")} className={`px-3 py-1 rounded text-sm font-medium ${newTeamMode === "existing" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}>{td("fromExisting")}</button>
+              <button onClick={() => setNewTeamMode("new")} className={`px-3 py-1 rounded text-sm font-medium ${newTeamMode === "new" ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"}`}>{td("createNew")}</button>
             </div>
             {newTeamMode === "existing" ? (
               <div className="space-y-3">
                 <select value={seasonFilter} onChange={(e) => setSeasonFilter(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm">
-                  <option value="">All Seasons</option>
+                  <option value="">{td("allSeasons")}</option>
                   {availableSeasons.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
-                {availableTeams.length === 0 ? <p className="text-sm text-gray-400 text-center py-2">{seasonFilter ? "No teams available for this season." : "All teams are already added."}</p> : (
+                {availableTeams.length === 0 ? <p className="text-sm text-gray-400 text-center py-2">{seasonFilter ? td("noTeamsAvailable") : td("allTeamsAlreadyAdded")}</p> : (
                   <div className="max-h-60 overflow-y-auto border rounded-lg divide-y">
-                    {availableTeams.map((t) => {
-                      const usedBy = teamActivityMap[t._id]; const disabled = !!usedBy;
-                      return (<label key={t._id} className={`flex items-center gap-3 px-3 py-2 text-sm ${disabled ? "opacity-50 cursor-not-allowed bg-gray-50" : "hover:bg-gray-50 cursor-pointer"}`}>
-                        <input type="checkbox" checked={selectedExistingTeams.includes(t._id)} onChange={() => !disabled && toggleExistingTeamSelection(t._id)} disabled={disabled} className="rounded" />
-                        <span className="flex-1"><span className="font-medium">{t.name}</span><span className="text-xs text-gray-400 ml-2">{t.season} · {t.gender}</span>
-                          {disabled && <span className="block text-xs text-orange-600 mt-0.5">Already in: {usedBy}</span>}</span>
+                    {availableTeams.map((teamItem) => {
+                      const usedBy = teamActivityMap[teamItem._id]; const disabled = !!usedBy;
+                      return (<label key={teamItem._id} className={`flex items-center gap-3 px-3 py-2 text-sm ${disabled ? "opacity-50 cursor-not-allowed bg-gray-50" : "hover:bg-gray-50 cursor-pointer"}`}>
+                        <input type="checkbox" checked={selectedExistingTeams.includes(teamItem._id)} onChange={() => !disabled && toggleExistingTeamSelection(teamItem._id)} disabled={disabled} className="rounded" />
+                        <span className="flex-1"><span className="font-medium">{teamItem.name}</span><span className="text-xs text-gray-400 ms-2">{teamItem.season} · {teamItem.gender}</span>
+                          {disabled && <span className="block text-xs text-orange-600 mt-0.5">{td("alreadyIn", { activity: usedBy })}</span>}</span>
                       </label>);
                     })}
                   </div>
@@ -406,19 +399,19 @@ function TabTeams({ activity, onSave, saving }) {
                 {selectedExistingTeams.length > 0 && <p className="text-xs text-blue-600">{selectedExistingTeams.length} selected</p>}
                 <button onClick={addExistingTeams} disabled={selectedExistingTeams.length === 0}
                   className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
-                  Add {selectedExistingTeams.length > 1 ? `${selectedExistingTeams.length} Teams` : "Team"}</button>
+                  {td("addTeamsButton", { count: selectedExistingTeams.length })}</button>
               </div>
             ) : (
               <div className="space-y-3">
-                <input value={newTeamName} onChange={(e) => setNewTeamName(e.target.value)} placeholder="Team name" className="w-full border rounded-lg px-3 py-2 text-sm" />
-                <input value={newTeamSeason} onChange={(e) => setNewTeamSeason(e.target.value)} placeholder="Season (e.g. 26/27)" className="w-full border rounded-lg px-3 py-2 text-sm" />
+                <input value={newTeamName} onChange={(e) => setNewTeamName(e.target.value)} placeholder={td("teamName")} className="w-full border rounded-lg px-3 py-2 text-sm" />
+                <input value={newTeamSeason} onChange={(e) => setNewTeamSeason(e.target.value)} placeholder={td("seasonPlaceholder")} className="w-full border rounded-lg px-3 py-2 text-sm" />
                 <select value={newTeamGender} onChange={(e) => setNewTeamGender(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm">
-                  <option value="">Gender</option><option value="Male">Male</option><option value="Female">Female</option>
+                  <option value="">{td("gender")}</option><option value="Male">{td("male")}</option><option value="Female">{td("female")}</option>
                 </select>
-                <button onClick={createAndAddTeam} disabled={!newTeamName.trim()} className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">Create & Add</button>
+                <button onClick={createAndAddTeam} disabled={!newTeamName.trim()} className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{td("createAndAdd")}</button>
               </div>
             )}
-            <button onClick={() => setShowAddModal(false)} className="w-full mt-3 text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+            <button onClick={() => setShowAddModal(false)} className="w-full mt-3 text-sm text-gray-500 hover:text-gray-700">{tc("cancel")}</button>
           </div>
         </div>
       )}
@@ -435,7 +428,7 @@ const FIELD_TYPES = [
   { value: "email", label: "Email" }, { value: "address", label: "Address" }, { value: "date", label: "Date" },
 ];
 
-function TabForm({ activity, onSave, saving }) {
+function TabForm({ activity, onSave, saving, tc, td }) {
   const [sections, setSections] = useState([]);
   const [editingField, setEditingField] = useState(null);
   const [fieldForm, setFieldForm] = useState({ key: "", type: "input", label: "", description: "", required: false, hidden: false, options: [] });
@@ -445,8 +438,8 @@ function TabForm({ activity, onSave, saving }) {
   useEffect(() => { if (activity?.formSections) setSections(JSON.parse(JSON.stringify(activity.formSections))); }, [activity]);
 
   function toggleCollapse(sIdx) { setCollapsedSections((p) => ({ ...p, [sIdx]: !p[sIdx] })); }
-  function addSection() { const title = prompt("Section title:"); if (!title?.trim()) return; setSections((prev) => [...prev, { key: `custom_${Date.now()}`, title: title.trim(), order: prev.length, isDefault: false, fields: [] }]); }
-  function removeSection(sIdx) { if (sections[sIdx].isDefault) return; if (!confirm("Remove this section?")) return; setSections((prev) => prev.filter((_, i) => i !== sIdx)); }
+  function addSection() { const title = prompt(td("sectionTitle")); if (!title?.trim()) return; setSections((prev) => [...prev, { key: `custom_${Date.now()}`, title: title.trim(), order: prev.length, isDefault: false, fields: [] }]); }
+  function removeSection(sIdx) { if (sections[sIdx].isDefault) return; if (!confirm(td("removeSection"))) return; setSections((prev) => prev.filter((_, i) => i !== sIdx)); }
   function openFieldEditor(sIdx, fIdx) {
     if (fIdx !== null) { const f = sections[sIdx].fields[fIdx]; setFieldForm({ key: f.key, type: f.type, label: f.label || "", description: f.description || "", required: !!f.required, hidden: !!f.hidden, options: [...(f.options || [])] }); }
     else { setFieldForm({ key: `field_${Date.now()}`, type: "input", label: "", description: "", required: false, hidden: false, options: [] }); }
@@ -464,7 +457,6 @@ function TabForm({ activity, onSave, saving }) {
   function toggleFieldHidden(sIdx, fIdx) { setSections((prev) => { const ns = JSON.parse(JSON.stringify(prev)); const f = ns[sIdx].fields[fIdx]; if (f.isMust) return prev; f.hidden = !f.hidden; return ns; }); }
   function toggleFieldRequired(sIdx, fIdx) { setSections((prev) => { const ns = JSON.parse(JSON.stringify(prev)); const f = ns[sIdx].fields[fIdx]; if (f.isMust) return prev; f.required = !f.required; return ns; }); }
   function moveField(sIdx, fIdx, dir) { const newIdx = fIdx + dir; if (newIdx < 0 || newIdx >= sections[sIdx].fields.length) return; setSections((prev) => { const ns = JSON.parse(JSON.stringify(prev)); const fields = ns[sIdx].fields; [fields[fIdx], fields[newIdx]] = [fields[newIdx], fields[fIdx]]; fields.forEach((f, i) => { f.order = i; }); return ns; }); }
-  function addWaiver(sIdx) { setFieldForm({ key: `waiver_${Date.now()}`, type: "multichoice_checkbox", label: "", description: "", required: true, hidden: false, options: ["I agree"] }); setEditingField({ sIdx, fIdx: null }); setNewOptionText(""); }
   function addOption() { if (!newOptionText.trim()) return; setFieldForm((p) => ({ ...p, options: [...p.options, newOptionText.trim()] })); setNewOptionText(""); }
   function removeOption(idx) { setFieldForm((p) => ({ ...p, options: p.options.filter((_, i) => i !== idx) })); }
   function save() { sections.forEach((s, i) => { s.order = i; }); onSave({ formSections: sections }); }
@@ -478,18 +470,17 @@ function TabForm({ activity, onSave, saving }) {
             <div className="flex items-center gap-2">
               <span className="text-gray-400">{collapsedSections[sIdx] ? "▶" : "▼"}</span>
               <h3 className="font-semibold text-gray-900">{section.title}</h3>
-              {section.isDefault && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">Default</span>}
-              <span className="text-xs text-gray-400">({section.fields.length} fields)</span>
+              {section.isDefault && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">{td("default")}</span>}
+              <span className="text-xs text-gray-400">({section.fields.length} {td("fields")})</span>
             </div>
             <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-              {section.key === "waivers" && <button onClick={() => addWaiver(sIdx)} className="text-xs px-2 py-1 bg-purple-50 text-purple-700 rounded hover:bg-purple-100">+ Add Waiver</button>}
-              <button onClick={() => openFieldEditor(sIdx, null)} className="text-xs px-2 py-1 bg-blue-50 text-blue-700 rounded hover:bg-blue-100">+ Add Field</button>
-              {!section.isDefault && <button onClick={() => removeSection(sIdx)} className="text-xs px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100">Remove</button>}
+              <button onClick={() => openFieldEditor(sIdx, null)} className="text-xs px-2 py-1 bg-blue-50 text-blue-700 rounded hover:bg-blue-100">{td("addField")}</button>
+              {!section.isDefault && <button onClick={() => removeSection(sIdx)} className="text-xs px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100">{tc("remove")}</button>}
             </div>
           </div>
           {!collapsedSections[sIdx] && (
             <div className="p-4">
-              {section.fields.length === 0 ? <p className="text-sm text-gray-400 text-center py-2">No fields yet.</p> : (
+              {section.fields.length === 0 ? <p className="text-sm text-gray-400 text-center py-2">{td("noFieldsYet")}</p> : (
                 <div className="space-y-2">
                   {section.fields.map((field, fIdx) => (
                     <div key={field.key} className={`flex items-center gap-3 px-3 py-2 rounded border text-sm ${field.hidden ? "bg-gray-50 opacity-60" : ""}`}>
@@ -499,13 +490,13 @@ function TabForm({ activity, onSave, saving }) {
                       </div>
                       <div className="flex-1">
                         <span className="font-medium" dangerouslySetInnerHTML={{ __html: field.label || "(no label)" }} />
-                        <span className="text-xs text-gray-400 ml-2">{field.type}</span>
-                        {field.isMust && <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded ml-2">Must</span>}
+                        <span className="text-xs text-gray-400 ms-2">{field.type}</span>
+                        {field.isMust && <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded ms-2">Must</span>}
                       </div>
                       <div className="flex items-center gap-2">
-                        <button onClick={() => toggleFieldRequired(sIdx, fIdx)} className={`text-xs px-2 py-0.5 rounded ${field.required ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"} ${field.isMust ? "cursor-not-allowed" : ""}`} disabled={field.isMust}>{field.required ? "Required" : "Optional"}</button>
-                        {!field.isMust && <button onClick={() => toggleFieldHidden(sIdx, fIdx)} className={`text-xs px-2 py-0.5 rounded ${field.hidden ? "bg-yellow-100 text-yellow-700" : "bg-gray-100 text-gray-500"}`}>{field.hidden ? "Hidden" : "Visible"}</button>}
-                        <button onClick={() => openFieldEditor(sIdx, fIdx)} className="text-xs text-blue-600 hover:text-blue-800">Edit</button>
+                        <button onClick={() => toggleFieldRequired(sIdx, fIdx)} className={`text-xs px-2 py-0.5 rounded ${field.required ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"} ${field.isMust ? "cursor-not-allowed" : ""}`} disabled={field.isMust}>{field.required ? tc("required") : tc("optional")}</button>
+                        {!field.isMust && <button onClick={() => toggleFieldHidden(sIdx, fIdx)} className={`text-xs px-2 py-0.5 rounded ${field.hidden ? "bg-yellow-100 text-yellow-700" : "bg-gray-100 text-gray-500"}`}>{field.hidden ? td("hidden") : tc("visible")}</button>}
+                        <button onClick={() => openFieldEditor(sIdx, fIdx)} className="text-xs text-blue-600 hover:text-blue-800">{tc("edit")}</button>
                         {!field.isMust && !field.isDefault && <button onClick={() => removeField(sIdx, fIdx)} className="text-xs text-red-500 hover:text-red-700">×</button>}
                       </div>
                     </div>
@@ -516,29 +507,29 @@ function TabForm({ activity, onSave, saving }) {
           )}
         </div>
       ))}
-      <button onClick={addSection} className="text-sm text-blue-600 hover:text-blue-800 font-medium">+ Add Section</button>
-      <div><button onClick={save} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{saving ? "Saving..." : "Save Form"}</button></div>
+      <button onClick={addSection} className="text-sm text-blue-600 hover:text-blue-800 font-medium">{td("addSection")}</button>
+      <div><button onClick={save} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{saving ? tc("saving") : td("saveForm")}</button></div>
 
       {editingField && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setEditingField(null)}>
           <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <h3 className="font-semibold text-lg mb-4">{editingField.fIdx !== null ? "Edit Field" : "Add Field"}</h3>
+            <h3 className="font-semibold text-lg mb-4">{editingField.fIdx !== null ? td("editField") : td("addField")}</h3>
             <div className="space-y-3">
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">Field Type</label>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">{td("fieldType")}</label>
                 <select value={fieldForm.type} onChange={(e) => setFieldForm((p) => ({ ...p, type: e.target.value }))} className="w-full border rounded-lg px-3 py-2 text-sm">
                   {FIELD_TYPES.map((ft) => <option key={ft.value} value={ft.value}>{ft.label}</option>)}</select></div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">Label</label>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">{td("label")}</label>
                 <div contentEditable suppressContentEditableWarning className="w-full border rounded-lg px-3 py-2 text-sm min-h-[38px] focus:outline-none focus:ring-2 focus:ring-blue-500"
                   dangerouslySetInnerHTML={{ __html: fieldForm.label }} onBlur={(e) => setFieldForm((p) => ({ ...p, label: e.target.innerHTML }))} />
-                <p className="text-xs text-gray-400 mt-1">Supports basic formatting.</p></div>
-              <div><label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                <p className="text-xs text-gray-400 mt-1">{td("labelHint")}</p></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">{td("descriptionLabel")}</label>
                 <div contentEditable suppressContentEditableWarning className="w-full border rounded-lg px-3 py-2 text-sm min-h-[60px] focus:outline-none focus:ring-2 focus:ring-blue-500"
                   dangerouslySetInnerHTML={{ __html: fieldForm.description }} onBlur={(e) => setFieldForm((p) => ({ ...p, description: e.target.innerHTML }))} />
-                <p className="text-xs text-gray-400 mt-1">Supports basic formatting.</p></div>
+                <p className="text-xs text-gray-400 mt-1">{td("labelHint")}</p></div>
               {fieldForm.type !== "title_description" && (
                 <div className="flex items-center gap-4">
-                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={fieldForm.required} onChange={(e) => setFieldForm((p) => ({ ...p, required: e.target.checked }))} className="rounded" />Required</label>
-                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={fieldForm.hidden} onChange={(e) => setFieldForm((p) => ({ ...p, hidden: e.target.checked }))} className="rounded" />Hidden</label>
+                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={fieldForm.required} onChange={(e) => setFieldForm((p) => ({ ...p, required: e.target.checked }))} className="rounded" />{tc("required")}</label>
+                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={fieldForm.hidden} onChange={(e) => setFieldForm((p) => ({ ...p, hidden: e.target.checked }))} className="rounded" />{td("hidden")}</label>
                 </div>
               )}
               {hasChoiceOptions.includes(fieldForm.type) && (
@@ -551,8 +542,8 @@ function TabForm({ activity, onSave, saving }) {
               )}
             </div>
             <div className="flex gap-2 mt-4">
-              <button onClick={saveField} className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">{editingField.fIdx !== null ? "Update Field" : "Add Field"}</button>
-              <button onClick={() => setEditingField(null)} className="flex-1 bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-200">Cancel</button>
+              <button onClick={saveField} className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">{editingField.fIdx !== null ? td("updateField") : td("addField")}</button>
+              <button onClick={() => setEditingField(null)} className="flex-1 bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-200">{tc("cancel")}</button>
             </div>
           </div>
         </div>
@@ -562,14 +553,15 @@ function TabForm({ activity, onSave, saving }) {
 }
 
 /* ============== TAB 4: Payment ============== */
-function TabPayment({ activity, onSave, saving }) {
+function TabPayment({ activity, onSave, saving, t, tc, td }) {
   const [subscriptions, setSubscriptions] = useState([]);
   const [coupons, setCoupons] = useState([]);
+  const [passStripeFee, setPassStripeFee] = useState(false);
   const [expandedSub, setExpandedSub] = useState(null);
   const [teamSearch, setTeamSearch] = useState("");
 
-  const activityTeams = (activity?.teams || []).map((t) => ({
-    teamId: t.teamId?._id || t.teamId, name: t.teamId?.name || "Unknown", season: t.teamId?.season || "",
+  const activityTeams = (activity?.teams || []).map((row) => ({
+    teamId: row.teamId?._id || row.teamId, name: row.teamId?.name || "Unknown", season: row.teamId?.season || "",
   }));
 
   const activityStartDate = activity?.startDate ? new Date(activity.startDate) : null;
@@ -578,11 +570,12 @@ function TabPayment({ activity, onSave, saving }) {
     if (activity) {
       setSubscriptions(JSON.parse(JSON.stringify(activity.subscriptions || [])));
       setCoupons(JSON.parse(JSON.stringify(activity.coupons || [])));
+      setPassStripeFee(!!activity.passStripeFeeToCustomer);
     }
   }, [activity]);
 
   function addSubscription() {
-    const allTeamIds = activityTeams.map((t) => t.teamId);
+    const allTeamIds = activityTeams.map((tm) => tm.teamId);
     setSubscriptions((prev) => [...prev, {
       title: "", description: "", priceCents: 0, dueDateAmountCents: 0,
       maxInstallments: 1, firstInstallmentDate: null, months: 10,
@@ -657,7 +650,7 @@ function TabPayment({ activity, onSave, saving }) {
   function toggleAllTeamsInSub(subIdx, check) {
     setSubscriptions((prev) => {
       const ns = JSON.parse(JSON.stringify(prev));
-      ns[subIdx].includedTeamIds = check ? activityTeams.map((t) => t.teamId) : [];
+      ns[subIdx].includedTeamIds = check ? activityTeams.map((tm) => tm.teamId) : [];
       return ns;
     });
   }
@@ -670,7 +663,7 @@ function TabPayment({ activity, onSave, saving }) {
   function addCoupon() { setCoupons((prev) => [...prev, { name: "", code: "", type: "fixed", amount: 0, duration: "one_time", maxUses: null, usedCount: 0, expiresAt: null }]); }
   function updateCoupon(idx, field, value) { setCoupons((prev) => prev.map((c, i) => (i === idx ? { ...c, [field]: value } : c))); }
   function removeCoupon(idx) { setCoupons((prev) => prev.filter((_, i) => i !== idx)); }
-  function save() { onSave({ subscriptions, coupons }); }
+  function save() { onSave({ subscriptions, coupons, passStripeFeeToCustomer: passStripeFee }); }
 
   function fmtDate(d) {
     if (!d) return "—";
@@ -679,12 +672,25 @@ function TabPayment({ activity, onSave, saving }) {
 
   return (
     <div className="space-y-8">
+      {/* Processing Fee Toggle */}
+      <div className="bg-white border rounded-lg p-4">
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input type="checkbox" checked={passStripeFee}
+            onChange={(e) => setPassStripeFee(e.target.checked)}
+            className="rounded mt-0.5" />
+          <div>
+            <span className="text-sm font-medium text-gray-900">{td("passStripeFee")}</span>
+            <p className="text-xs text-gray-400 mt-0.5">{td("passStripeFeeHint")}</p>
+          </div>
+        </label>
+      </div>
+
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-gray-900">Subscriptions ({subscriptions.length})</h3>
-          <button onClick={addSubscription} className="bg-blue-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-blue-700">+ Add Subscription</button>
+          <h3 className="font-semibold text-gray-900">{`${td("subscriptions")} (${subscriptions.length})`}</h3>
+          <button onClick={addSubscription} className="bg-blue-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-blue-700">{td("addSubscription")}</button>
         </div>
-        {subscriptions.length === 0 ? <p className="text-gray-400 text-sm p-4 bg-gray-50 rounded text-center">No subscriptions yet.</p> : (
+        {subscriptions.length === 0 ? <p className="text-gray-400 text-sm p-4 bg-gray-50 rounded text-center">{td("noSubscriptionsYet")}</p> : (
           <div className="space-y-3">
             {subscriptions.map((sub, sIdx) => {
               const priceLabel = sub.priceCents > 0 ? `$${centsToDisplay(sub.priceCents)}` : "No price set";
@@ -694,37 +700,37 @@ function TabPayment({ activity, onSave, saving }) {
                   <div className="flex items-center justify-between px-4 py-3 bg-gray-50 cursor-pointer" onClick={() => setExpandedSub(expandedSub === sIdx ? null : sIdx)}>
                     <div className="flex items-center gap-2">
                       <span className="text-gray-400">{expandedSub === sIdx ? "▼" : "▶"}</span>
-                      <span className="font-medium text-gray-900">{sub.title || "(Untitled)"}</span>
+                      <span className="font-medium text-gray-900">{sub.title || td("untitled")}</span>
                       <span className="text-xs text-gray-500">{priceLabel}</span>
-                      <span className="text-xs text-gray-400">({teamCount} teams)</span>
+                      <span className="text-xs text-gray-400">({teamCount} {t("teams")})</span>
                     </div>
-                    <button onClick={(e) => { e.stopPropagation(); removeSub(sIdx); }} className="text-xs text-red-500 hover:text-red-700">Remove</button>
+                    <button onClick={(e) => { e.stopPropagation(); removeSub(sIdx); }} className="text-xs text-red-500 hover:text-red-700">{tc("remove")}</button>
                   </div>
                   {expandedSub === sIdx && (
                     <div className="p-4 space-y-5">
                       {/* Title & Description */}
                       <div className="grid grid-cols-2 gap-4">
-                        <div><label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                        <div><label className="block text-sm font-medium text-gray-700 mb-1">{td("title")}</label>
                           <input value={sub.title} onChange={(e) => updateSub(sIdx, "title", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
-                        <div><label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                        <div><label className="block text-sm font-medium text-gray-700 mb-1">{td("description")}</label>
                           <input value={sub.description} onChange={(e) => updateSub(sIdx, "description", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
                       </div>
 
                       {/* Price, Due Date Amount, Months */}
                       <div className="grid grid-cols-3 gap-4">
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Total Price</label>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">{td("totalPrice")}</label>
                           <div className="flex items-center gap-1"><span className="text-sm text-gray-500">$</span>
                             <PriceInput value={sub.priceCents} onChange={(cents) => updateSub(sIdx, "priceCents", cents)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
                         </div>
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Due Date Amount</label>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">{td("dueDateAmount")}</label>
                           <div className="flex items-center gap-1"><span className="text-sm text-gray-500">$</span>
                             <PriceInput value={sub.dueDateAmountCents} onChange={(cents) => updateSub(sIdx, "dueDateAmountCents", cents)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
-                          <p className="text-xs text-gray-400 mt-1">Upfront amount at registration (counts as installment #1)</p>
+                          <p className="text-xs text-gray-400 mt-1">{td("dueDateAmountHint")}</p>
                         </div>
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Months</label>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">{td("months")}</label>
                           <input type="number" value={sub.months} onChange={(e) => updateSub(sIdx, "months", Number(e.target.value))} className="w-full border rounded-lg px-3 py-2 text-sm" min="1" />
                         </div>
                       </div>
@@ -732,38 +738,112 @@ function TabPayment({ activity, onSave, saving }) {
                       {/* Max Installments & First Installment Date */}
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Max Installments</label>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">{td("maxInstallmentsLabel")}</label>
                           <input type="number" value={sub.maxInstallments} onChange={(e) => updateSub(sIdx, "maxInstallments", Number(e.target.value))} className="w-full border rounded-lg px-3 py-2 text-sm" min="1" />
-                          <p className="text-xs text-gray-400 mt-1">Parents can choose 1 to {sub.maxInstallments || 1} installments</p>
+                          <p className="text-xs text-gray-400 mt-1">{td("parentInstallmentHint", { max: sub.maxInstallments || 1 })}</p>
                         </div>
                         <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">First Installment Date</label>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">{td("firstInstallmentDate")}</label>
                           <input type="date" value={sub.firstInstallmentDate ? sub.firstInstallmentDate.slice(0, 10) : ""}
                             onChange={(e) => updateSub(sIdx, "firstInstallmentDate", e.target.value || null)}
                             className="w-full border rounded-lg px-3 py-2 text-sm" />
-                          <p className="text-xs text-gray-400 mt-1">* If a parent pays after this date, installments start on the 1st of next month</p>
+                          <p className="text-xs text-gray-400 mt-1">{td("firstInstallmentDateHint")}</p>
                         </div>
                       </div>
+
+                      {/* Installment Fee */}
+                      {sub.maxInstallments > 1 && (
+                        <div className="border rounded-lg p-4 bg-amber-50/50">
+                          <h4 className="text-sm font-semibold text-gray-700 mb-3">{td("installmentFeeTitle")}</h4>
+                          <div className="grid grid-cols-3 gap-4">
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">{td("feeThreshold")}</label>
+                              <input type="number" value={sub.installmentFeeThreshold || ""} placeholder="0"
+                                onChange={(e) => updateSub(sIdx, "installmentFeeThreshold", Number(e.target.value) || 0)}
+                                className="w-full border rounded-lg px-3 py-2 text-sm" min="0" max={sub.maxInstallments} />
+                              <p className="text-xs text-gray-400 mt-1">{td("feeThresholdHint")}</p>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">{td("feePercent")}</label>
+                              <div className="flex items-center gap-1">
+                                <input type="number" value={sub.installmentFeePercent || ""} placeholder="0" step="0.5"
+                                  onChange={(e) => updateSub(sIdx, "installmentFeePercent", Number(e.target.value) || 0)}
+                                  className="w-full border rounded-lg px-3 py-2 text-sm" min="0" max="100" />
+                                <span className="text-sm text-gray-500">%</span>
+                              </div>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">{td("feeMode")}</label>
+                              <select value={sub.installmentFeeMode || "split"}
+                                onChange={(e) => updateSub(sIdx, "installmentFeeMode", e.target.value)}
+                                className="w-full border rounded-lg px-3 py-2 text-sm">
+                                <option value="split">{td("feeModeSplit")}</option>
+                                <option value="due_date">{td("feeModeDueDate")}</option>
+                              </select>
+                            </div>
+                          </div>
+                          {sub.installmentFeeThreshold > 0 && sub.installmentFeePercent > 0 && sub.priceCents > 0 && (
+                            <p className="text-xs text-amber-700 mt-2 font-medium">
+                              {td("feePreview", {
+                                threshold: sub.installmentFeeThreshold,
+                                percent: sub.installmentFeePercent,
+                                fee: "$" + centsToDisplay(Math.round(sub.priceCents * sub.installmentFeePercent / 100)),
+                                mode: sub.installmentFeeMode === "due_date" ? td("feeModeDueDate").toLowerCase() : td("feeModeSplit").toLowerCase(),
+                              })}
+                            </p>
+                          )}
+                        </div>
+                      )}
 
                       {/* Installment Preview */}
                       {sub.priceCents > 0 && sub.maxInstallments > 1 && sub.dueDateAmountCents > 0 && sub.firstInstallmentDate && (
                         <div className="bg-blue-50 rounded-lg p-4">
-                          <h4 className="text-sm font-semibold text-blue-900 mb-2">Installment Preview (max {sub.maxInstallments})</h4>
+                          <h4 className="text-sm font-semibold text-blue-900 mb-2">{td("installmentPreview", { max: sub.maxInstallments })}</h4>
                           <div className="text-xs text-blue-800 space-y-1">
-                            <div className="flex justify-between"><span>Due at registration (installment #1)</span><span className="font-medium">${centsToDisplay(sub.dueDateAmountCents)}</span></div>
                             {(() => {
-                              const remaining = (sub.priceCents || 0) - (sub.dueDateAmountCents || 0);
+                              const hasFee = sub.installmentFeeThreshold > 0 && sub.installmentFeePercent > 0 && sub.maxInstallments > sub.installmentFeeThreshold;
+                              const feeCents = hasFee ? Math.round(sub.priceCents * sub.installmentFeePercent / 100) : 0;
+                              const effectiveTotal = sub.priceCents + feeCents;
+                              let dueNow = sub.dueDateAmountCents;
+                              let remaining;
+                              if (hasFee && sub.installmentFeeMode === "due_date") {
+                                dueNow = sub.dueDateAmountCents + feeCents;
+                                remaining = Math.max(0, sub.priceCents - sub.dueDateAmountCents);
+                              } else {
+                                remaining = Math.max(0, effectiveTotal - dueNow);
+                              }
                               const numRemaining = (sub.maxInstallments || 1) - 1;
-                              if (remaining <= 0 || numRemaining <= 0) return null;
-                              const perInstallment = Math.round(remaining / numRemaining);
+                              const perInstallment = numRemaining > 0 ? Math.round(remaining / numRemaining) : 0;
                               const firstDate = new Date(sub.firstInstallmentDate);
-                              return Array.from({ length: numRemaining }, (_, i) => {
-                                const d = new Date(firstDate.getFullYear(), firstDate.getMonth() + i, firstDate.getDate());
-                                const amt = i === numRemaining - 1 ? remaining - (perInstallment * (numRemaining - 1)) : perInstallment;
-                                return (<div key={i} className="flex justify-between"><span>{fmtDate(d)} (installment #{i + 2})</span><span className="font-medium">${centsToDisplay(amt)}</span></div>);
-                              });
+                              return (
+                                <>
+                                  <div className="flex justify-between">
+                                    <span>{td("dueAtRegistration")}</span>
+                                    <span className="font-medium">${centsToDisplay(dueNow)}</span>
+                                  </div>
+                                  {hasFee && sub.installmentFeeMode === "due_date" && (
+                                    <div className="flex justify-between text-amber-700">
+                                      <span className="italic">{td("includesFee", { percent: sub.installmentFeePercent })}</span>
+                                      <span className="italic">+${centsToDisplay(feeCents)}</span>
+                                    </div>
+                                  )}
+                                  {numRemaining > 0 && remaining > 0 && Array.from({ length: numRemaining }, (_, i) => {
+                                    const d = new Date(firstDate.getFullYear(), firstDate.getMonth() + i, firstDate.getDate());
+                                    const amt = i === numRemaining - 1 ? remaining - (perInstallment * (numRemaining - 1)) : perInstallment;
+                                    return (<div key={i} className="flex justify-between"><span>{fmtDate(d)} (installment #{i + 2})</span><span className="font-medium">${centsToDisplay(amt)}</span></div>);
+                                  })}
+                                  {hasFee && sub.installmentFeeMode === "split" && (
+                                    <div className="flex justify-between text-amber-700">
+                                      <span className="italic">{td("includesFee", { percent: sub.installmentFeePercent })}</span>
+                                      <span className="italic">+${centsToDisplay(feeCents)}</span>
+                                    </div>
+                                  )}
+                                  <div className="flex justify-between border-t border-blue-200 pt-1 mt-1 font-semibold">
+                                    <span>Total</span><span>${centsToDisplay(effectiveTotal)}</span>
+                                  </div>
+                                </>
+                              );
                             })()}
-                            <div className="flex justify-between border-t border-blue-200 pt-1 mt-1 font-semibold"><span>Total</span><span>${centsToDisplay(sub.priceCents)}</span></div>
                           </div>
                         </div>
                       )}
@@ -772,12 +852,12 @@ function TabPayment({ activity, onSave, saving }) {
                       <div>
                         <label className="flex items-center gap-2 text-sm mb-2">
                           <input type="checkbox" checked={!!sub.hasReduction} onChange={(e) => { updateSub(sIdx, "hasReduction", e.target.checked); if (e.target.checked && (!sub.reductionSchedule || sub.reductionSchedule.length === 0)) generateReductionSchedule(sIdx); }} className="rounded" />
-                          <span className="font-medium text-gray-700">Price Reduction Schedule</span>
+                          <span className="font-medium text-gray-700">{td("priceReductionSchedule")}</span>
                         </label>
                         {sub.hasReduction && (
                           <div className="border rounded-lg overflow-x-auto">
                             <table className="w-full text-sm">
-                              <thead><tr className="bg-gray-50 text-left">
+                              <thead><tr className="bg-gray-50 text-start">
                                 <th className="px-3 py-2 w-8">#</th>
                                 <th className="px-3 py-2">Date</th>
                                 <th className="px-3 py-2">Price ($)</th>
@@ -800,8 +880,8 @@ function TabPayment({ activity, onSave, saving }) {
                               </tbody>
                             </table>
                             <div className="px-3 py-2 bg-gray-50 flex items-center gap-3">
-                              <button onClick={() => addReductionRow(sIdx)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">+ Add Row</button>
-                              <button onClick={() => generateReductionSchedule(sIdx)} className="text-xs text-gray-500 hover:text-gray-700">Auto-generate from start date</button>
+                              <button onClick={() => addReductionRow(sIdx)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">{td("addRow")}</button>
+                              <button onClick={() => generateReductionSchedule(sIdx)} className="text-xs text-gray-500 hover:text-gray-700">{td("autoGenerate")}</button>
                             </div>
                           </div>
                         )}
@@ -810,21 +890,21 @@ function TabPayment({ activity, onSave, saving }) {
                       {/* Included Teams */}
                       <div>
                         <div className="flex items-center justify-between mb-2">
-                          <label className="text-sm font-medium text-gray-700">Included Teams ({(sub.includedTeamIds || []).length}/{activityTeams.length})</label>
+                          <label className="text-sm font-medium text-gray-700">{td("includedTeams", { included: (sub.includedTeamIds || []).length, total: activityTeams.length })}</label>
                           <div className="flex gap-2">
-                            <button onClick={() => toggleAllTeamsInSub(sIdx, true)} className="text-xs text-blue-600 hover:text-blue-800">Check All</button>
-                            <button onClick={() => toggleAllTeamsInSub(sIdx, false)} className="text-xs text-red-500 hover:text-red-700">Uncheck All</button>
+                            <button onClick={() => toggleAllTeamsInSub(sIdx, true)} className="text-xs text-blue-600 hover:text-blue-800">{td("checkAll")}</button>
+                            <button onClick={() => toggleAllTeamsInSub(sIdx, false)} className="text-xs text-red-500 hover:text-red-700">{td("uncheckAll")}</button>
                           </div>
                         </div>
                         {(sub.includedTeamIds || []).length > 0 && (
                           <div className="flex flex-wrap gap-1.5 mb-2">
                             {(sub.includedTeamIds || []).map((tid) => {
-                              const team = activityTeams.find((t) => t.teamId === tid);
+                              const team = activityTeams.find((tm) => tm.teamId === tid);
                               if (!team) return null;
                               return (
                                 <span key={tid} className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2.5 py-0.5 text-xs font-medium">
                                   {team.name}
-                                  <button onClick={() => toggleTeamInSub(sIdx, tid)} className="text-blue-400 hover:text-blue-700 ml-0.5" title="Remove">
+                                  <button onClick={() => toggleTeamInSub(sIdx, tid)} className="text-blue-400 hover:text-blue-700 ms-0.5" title={tc("remove")}>
                                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                                   </button>
                                 </span>
@@ -832,21 +912,21 @@ function TabPayment({ activity, onSave, saving }) {
                             })}
                           </div>
                         )}
-                        {activityTeams.length === 0 ? <p className="text-xs text-gray-400">Add teams in the Teams tab first.</p> : (
+                        {activityTeams.length === 0 ? <p className="text-xs text-gray-400">{td("addTeamsFirst")}</p> : (
                           <>
                             <input type="text" value={teamSearch} onChange={(e) => setTeamSearch(e.target.value)}
-                              placeholder="Search teams..." className="w-full border rounded-lg px-3 py-1.5 text-sm mb-2" />
+                              placeholder={td("searchTeams")} className="w-full border rounded-lg px-3 py-1.5 text-sm mb-2" />
                             <div className="border rounded-lg divide-y max-h-48 overflow-y-auto">
-                              {activityTeams.filter((t) => {
+                              {activityTeams.filter((tm) => {
                                 if (!teamSearch.trim()) return true;
                                 const q = teamSearch.toLowerCase();
-                                return (t.name || "").toLowerCase().includes(q) || (t.season || "").toLowerCase().includes(q);
-                              }).map((t) => {
-                                const included = (sub.includedTeamIds || []).includes(t.teamId);
+                                return (tm.name || "").toLowerCase().includes(q) || (tm.season || "").toLowerCase().includes(q);
+                              }).map((tm) => {
+                                const included = (sub.includedTeamIds || []).includes(tm.teamId);
                                 return (
-                                  <div key={t.teamId} className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50">
-                                    <input type="checkbox" checked={included} onChange={() => toggleTeamInSub(sIdx, t.teamId)} className="rounded" />
-                                    <span className="flex-1 text-sm"><span className="font-medium">{t.name}</span><span className="text-xs text-gray-400 ml-2">{t.season}</span></span>
+                                  <div key={tm.teamId} className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50">
+                                    <input type="checkbox" checked={included} onChange={() => toggleTeamInSub(sIdx, tm.teamId)} className="rounded" />
+                                    <span className="flex-1 text-sm"><span className="font-medium">{tm.name}</span><span className="text-xs text-gray-400 ms-2">{tm.season}</span></span>
                                   </div>
                                 );
                               })}
@@ -858,20 +938,20 @@ function TabPayment({ activity, onSave, saving }) {
                       {/* Items & Discounts */}
                       <div>
                         <div className="flex items-center justify-between mb-2">
-                          <label className="text-sm font-medium text-gray-700">Items & Discounts</label>
+                          <label className="text-sm font-medium text-gray-700">{td("itemsAndDiscounts")}</label>
                           <div className="flex gap-2">
-                            <button onClick={() => addItem(sIdx, false)} className="text-xs text-blue-600 hover:text-blue-800">+ Add Item</button>
-                            <button onClick={() => addItem(sIdx, true)} className="text-xs text-green-600 hover:text-green-800">+ Add Discount</button>
+                            <button onClick={() => addItem(sIdx, false)} className="text-xs text-blue-600 hover:text-blue-800">{td("addItem")}</button>
+                            <button onClick={() => addItem(sIdx, true)} className="text-xs text-green-600 hover:text-green-800">{td("addDiscount")}</button>
                           </div>
                         </div>
-                        {sub.items.length === 0 ? <p className="text-xs text-gray-400 text-center py-2">No items or discounts.</p> : (
+                        {sub.items.length === 0 ? <p className="text-xs text-gray-400 text-center py-2">{td("noItemsOrDiscounts")}</p> : (
                           <div className="space-y-2">
                             {sub.items.map((item, iIdx) => (
                               <div key={iIdx} className={`border rounded-lg p-2.5 ${item.isDiscount ? "bg-red-50/50 border-red-200" : ""}`}>
                                 <div className="flex items-center gap-3">
-                                  {item.isDiscount && <span className="text-red-500 text-xs font-semibold whitespace-nowrap">DISCOUNT</span>}
+                                  {item.isDiscount && <span className="text-red-500 text-xs font-semibold whitespace-nowrap">{td("DISCOUNT")}</span>}
                                   <input value={item.name} onChange={(e) => updateItem(sIdx, iIdx, "name", e.target.value)}
-                                    placeholder={item.isDiscount ? "Discount name" : "Item name"} className="flex-1 border rounded px-2 py-1 text-sm" />
+                                    placeholder={item.isDiscount ? td("discountName") : td("itemNamePlaceholder")} className="flex-1 border rounded px-2 py-1 text-sm" />
                                   <div className="flex items-center gap-1">
                                     {item.isDiscount && <span className="text-xs text-red-500">-$</span>}
                                     {!item.isDiscount && <span className="text-xs text-gray-500">$</span>}
@@ -882,19 +962,19 @@ function TabPayment({ activity, onSave, saving }) {
                                     className="w-14 border rounded px-2 py-1 text-sm" title="Quantity" min="1" />
                                   {!item.isDiscount && (
                                     <label className="flex items-center gap-1 text-xs whitespace-nowrap"><input type="checkbox" checked={item.isRequired}
-                                      onChange={(e) => updateItem(sIdx, iIdx, "isRequired", e.target.checked)} className="rounded" />Req</label>
+                                      onChange={(e) => updateItem(sIdx, iIdx, "isRequired", e.target.checked)} className="rounded" />{td("req")}</label>
                                   )}
                                   <button onClick={() => removeItem(sIdx, iIdx)} className="text-red-400 hover:text-red-600 text-sm">×</button>
                                 </div>
                                 <div className="flex items-center gap-3 mt-1.5">
                                   <label className="flex items-center gap-1.5 text-xs text-gray-500">
-                                    <span>Expires:</span>
+                                    <span>{td("expiresLabel")}</span>
                                     <input type="date" value={item.expiresAt ? (typeof item.expiresAt === "string" ? item.expiresAt.slice(0, 10) : "") : ""}
                                       onChange={(e) => updateItem(sIdx, iIdx, "expiresAt", e.target.value || null)}
                                       className="border rounded px-1.5 py-0.5 text-xs w-36" />
                                   </label>
-                                  {item.expiresAt && <span className="text-[10px] text-gray-400">Will not appear after this date</span>}
-                                  {!item.expiresAt && <span className="text-[10px] text-gray-400">No expiry — always included</span>}
+                                  {item.expiresAt && <span className="text-[10px] text-gray-400">{td("willNotAppearAfter")}</span>}
+                                  {!item.expiresAt && <span className="text-[10px] text-gray-400">{td("noExpiryAlwaysIncluded")}</span>}
                                 </div>
                               </div>
                             ))}
@@ -904,17 +984,20 @@ function TabPayment({ activity, onSave, saving }) {
 
                       {/* Payment Types */}
                       <div>
-                        <label className="text-sm font-medium text-gray-700 block mb-2">Payment Types</label>
-                        <p className="text-xs text-gray-400 mb-2">Messages below will appear after registration for each payment type.</p>
-                        {["card", "bankTransfer", "cash", "check"].map((pt) => (
-                          <div key={pt} className="mb-3">
-                            <label className="flex items-center gap-2 text-sm mb-1">
-                              <input type="checkbox" checked={!!sub.paymentTypes[pt]} onChange={() => togglePaymentType(sIdx, pt)} className="rounded" />
-                              <span className="capitalize font-medium">{pt === "bankTransfer" ? "Bank Transfer" : pt}</span>
-                            </label>
-                            {sub.paymentTypes[pt] && <textarea value={sub.paymentMessages[pt]} onChange={(e) => updatePaymentMessage(sIdx, pt, e.target.value)} placeholder="Message after registration..." className="w-full border rounded px-3 py-1.5 text-sm ml-6" rows={2} />}
-                          </div>
-                        ))}
+                        <label className="text-sm font-medium text-gray-700 block mb-2">{td("paymentTypes")}</label>
+                        <p className="text-xs text-gray-400 mb-2">{td("paymentTypesHint")}</p>
+                        {(() => {
+                          const ptLabels = { card: td("card"), bankTransfer: td("bankTransfer"), cash: td("cash"), check: td("check") };
+                          return ["card", "bankTransfer", "cash", "check"].map((pt) => (
+                            <div key={pt} className="mb-3">
+                              <label className="flex items-center gap-2 text-sm mb-1">
+                                <input type="checkbox" checked={!!sub.paymentTypes[pt]} onChange={() => togglePaymentType(sIdx, pt)} className="rounded" />
+                                <span className="font-medium">{ptLabels[pt]}</span>
+                              </label>
+                              {sub.paymentTypes[pt] && <textarea value={sub.paymentMessages[pt]} onChange={(e) => updatePaymentMessage(sIdx, pt, e.target.value)} placeholder={td("messageAfterRegistration")} className="w-full border rounded px-3 py-1.5 text-sm ms-6" rows={2} />}
+                            </div>
+                          ));
+                        })()}
                       </div>
                     </div>
                   )}
@@ -928,55 +1011,206 @@ function TabPayment({ activity, onSave, saving }) {
       {/* Coupons */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-gray-900">Coupons ({coupons.length})</h3>
-          <button onClick={addCoupon} className="bg-green-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-green-700">+ Add Coupon</button>
+          <h3 className="font-semibold text-gray-900">{`${td("coupons")} (${coupons.length})`}</h3>
+          <button onClick={addCoupon} className="bg-green-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-green-700">{td("addCoupon")}</button>
         </div>
-        {coupons.length === 0 ? <p className="text-gray-400 text-sm p-4 bg-gray-50 rounded text-center">No coupons yet.</p> : (
+        {coupons.length === 0 ? <p className="text-gray-400 text-sm p-4 bg-gray-50 rounded text-center">{td("noCouponsYet")}</p> : (
           <div className="space-y-3">
             {coupons.map((c, cIdx) => (
               <div key={cIdx} className="border rounded-lg p-4">
-                <div className="flex items-start justify-between mb-3"><span className="font-medium text-gray-900">{c.name || "(Untitled)"}</span><button onClick={() => removeCoupon(cIdx)} className="text-xs text-red-500 hover:text-red-700">Remove</button></div>
+                <div className="flex items-start justify-between mb-3"><span className="font-medium text-gray-900">{c.name || "(Untitled)"}</span><button onClick={() => removeCoupon(cIdx)} className="text-xs text-red-500 hover:text-red-700">{tc("remove")}</button></div>
                 <div className="grid grid-cols-3 gap-3">
-                  <div><label className="block text-xs text-gray-500 mb-1">Name</label><input value={c.name} onChange={(e) => updateCoupon(cIdx, "name", e.target.value)} className="w-full border rounded px-2 py-1 text-sm" /></div>
-                  <div><label className="block text-xs text-gray-500 mb-1">Code</label><input value={c.code} onChange={(e) => updateCoupon(cIdx, "code", e.target.value)} className="w-full border rounded px-2 py-1 text-sm" /></div>
-                  <div><label className="block text-xs text-gray-500 mb-1">Type</label><select value={c.type} onChange={(e) => updateCoupon(cIdx, "type", e.target.value)} className="w-full border rounded px-2 py-1 text-sm"><option value="fixed">Fixed Amount</option><option value="percentage">Percentage</option><option value="greater_than">Greater Than Price</option></select></div>
+                  <div><label className="block text-xs text-gray-500 mb-1">{tc("name")}</label><input value={c.name} onChange={(e) => updateCoupon(cIdx, "name", e.target.value)} className="w-full border rounded px-2 py-1 text-sm" /></div>
+                  <div><label className="block text-xs text-gray-500 mb-1">{td("code")}</label><input value={c.code} onChange={(e) => updateCoupon(cIdx, "code", e.target.value)} className="w-full border rounded px-2 py-1 text-sm" /></div>
+                  <div><label className="block text-xs text-gray-500 mb-1">{td("type")}</label><select value={c.type} onChange={(e) => updateCoupon(cIdx, "type", e.target.value)} className="w-full border rounded px-2 py-1 text-sm"><option value="fixed">{td("fixedAmount")}</option><option value="percentage">{td("percentage")}</option><option value="greater_than">{td("greaterThanPrice")}</option></select></div>
                 </div>
                 <div className="grid grid-cols-3 gap-3 mt-3">
-                  <div><label className="block text-xs text-gray-500 mb-1">{c.type === "percentage" ? "Percentage (%)" : "Amount ($)"}</label>
+                  <div><label className="block text-xs text-gray-500 mb-1">{c.type === "percentage" ? td("percentage") + " (%)" : tc("amount") + " ($)"}</label>
                     {c.type === "percentage" ? (
                       <input type="text" inputMode="numeric" value={c.amount} onChange={(e) => { const v = e.target.value; if (v === "" || /^\d*$/.test(v)) updateCoupon(cIdx, "amount", Number(v || 0)); }} className="w-full border rounded px-2 py-1 text-sm" />
                     ) : (
                       <PriceInput value={c.amount} onChange={(cents) => updateCoupon(cIdx, "amount", cents)} className="w-full border rounded px-2 py-1 text-sm" />
                     )}</div>
-                  <div><label className="block text-xs text-gray-500 mb-1">Duration</label><select value={c.duration} onChange={(e) => updateCoupon(cIdx, "duration", e.target.value)} className="w-full border rounded px-2 py-1 text-sm"><option value="one_time">One Time</option><option value="x_times">X Times</option><option value="until_date">Until Date</option><option value="unlimited">Unlimited</option></select></div>
-                  {c.duration === "x_times" && <div><label className="block text-xs text-gray-500 mb-1">Max Uses</label><input type="number" value={c.maxUses || ""} onChange={(e) => updateCoupon(cIdx, "maxUses", Number(e.target.value))} className="w-full border rounded px-2 py-1 text-sm" /></div>}
-                  {c.duration === "until_date" && <div><label className="block text-xs text-gray-500 mb-1">Expires At</label><input type="date" value={c.expiresAt ? c.expiresAt.slice(0, 10) : ""} onChange={(e) => updateCoupon(cIdx, "expiresAt", e.target.value)} className="w-full border rounded px-2 py-1 text-sm" /></div>}
+                  <div><label className="block text-xs text-gray-500 mb-1">{td("duration")}</label><select value={c.duration} onChange={(e) => updateCoupon(cIdx, "duration", e.target.value)} className="w-full border rounded px-2 py-1 text-sm"><option value="one_time">{td("oneTime")}</option><option value="x_times">{td("xTimes")}</option><option value="until_date">{td("untilDate")}</option><option value="unlimited">{td("unlimited")}</option></select></div>
+                  {c.duration === "x_times" && <div><label className="block text-xs text-gray-500 mb-1">{td("maxUses")}</label><input type="number" value={c.maxUses || ""} onChange={(e) => updateCoupon(cIdx, "maxUses", Number(e.target.value))} className="w-full border rounded px-2 py-1 text-sm" /></div>}
+                  {c.duration === "until_date" && <div><label className="block text-xs text-gray-500 mb-1">{td("expiresLabel")}</label><input type="date" value={c.expiresAt ? c.expiresAt.slice(0, 10) : ""} onChange={(e) => updateCoupon(cIdx, "expiresAt", e.target.value)} className="w-full border rounded px-2 py-1 text-sm" /></div>}
                 </div>
               </div>
             ))}
           </div>
         )}
       </div>
-      <button onClick={save} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{saving ? "Saving..." : "Save Payment Settings"}</button>
+      <button onClick={save} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{saving ? tc("saving") : td("savePaymentSettings")}</button>
+    </div>
+  );
+}
+
+/* ============== TAB: Waivers ============== */
+function TabWaivers({ activity, onSave, saving, tc, td }) {
+  const [waivers, setWaivers] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [expandedIdx, setExpandedIdx] = useState(null);
+  const fileInputRef = useRef(null);
+  const activityId = activity?._id;
+
+  useEffect(() => {
+    if (activity?.waivers) {
+      setWaivers(activity.waivers.map((w) => ({
+        _id: w._id || undefined,
+        title: w.title || "",
+        contentHtml: w.contentHtml || "",
+        isRequired: w.isRequired !== false,
+        order: w.order || 0,
+      })));
+    }
+  }, [activity]);
+
+  function addWaiver() {
+    setWaivers((prev) => [...prev, { title: "", contentHtml: "", isRequired: true, order: prev.length }]);
+    setExpandedIdx(waivers.length);
+  }
+
+  function removeWaiver(idx) {
+    setWaivers((prev) => prev.filter((_, i) => i !== idx));
+    setExpandedIdx(null);
+  }
+
+  function updateWaiver(idx, field, value) {
+    setWaivers((prev) => prev.map((w, i) => i === idx ? { ...w, [field]: value } : w));
+  }
+
+  function moveWaiver(idx, dir) {
+    setWaivers((prev) => {
+      const arr = [...prev];
+      const newIdx = idx + dir;
+      if (newIdx < 0 || newIdx >= arr.length) return arr;
+      [arr[idx], arr[newIdx]] = [arr[newIdx], arr[idx]];
+      return arr.map((w, i) => ({ ...w, order: i }));
+    });
+  }
+
+  async function handleDocxUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.name.endsWith(".docx")) {
+      alert("Please upload a .docx file");
+      return;
+    }
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`/api/activities/${activityId}/upload-waiver`, { method: "POST", body: formData });
+      const data = await res.json();
+      if (data.error) { alert(data.error); return; }
+      setWaivers((prev) => [...prev, {
+        title: data.title || file.name.replace(/\.[^/.]+$/, ""),
+        contentHtml: data.html || "",
+        isRequired: true,
+        order: prev.length,
+      }]);
+      setExpandedIdx(waivers.length);
+    } catch { alert("Failed to upload document"); }
+    finally { setUploading(false); if (fileInputRef.current) fileInputRef.current.value = ""; }
+  }
+
+  function save() {
+    onSave({ waivers: waivers.map((w, i) => ({ ...w, order: i })) });
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="font-semibold text-gray-900">{`${td("waivers")} (${waivers.length})`}</h3>
+          <p className="text-xs text-gray-400 mt-0.5">{td("waiversHint")}</p>
+        </div>
+        <div className="flex gap-2">
+          <label className={`cursor-pointer bg-gray-100 text-gray-700 px-3 py-1.5 rounded text-sm font-medium hover:bg-gray-200 transition inline-flex items-center gap-1.5 ${uploading ? "opacity-50 pointer-events-none" : ""}`}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+            {uploading ? td("converting") : td("uploadDocx")}
+            <input ref={fileInputRef} type="file" accept=".docx" onChange={handleDocxUpload} className="hidden" />
+          </label>
+          <button onClick={addWaiver} className="bg-blue-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-blue-700">{td("addWaiver")}</button>
+        </div>
+      </div>
+
+      {waivers.length === 0 ? (
+        <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed">
+          <svg className="w-10 h-10 mx-auto text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          <p className="text-sm text-gray-500 mb-1">{td("noWaiversYet")}</p>
+          <p className="text-xs text-gray-400">{td("noWaiversDesc")}</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {waivers.map((w, idx) => (
+            <div key={idx} className="border rounded-lg overflow-hidden">
+              <div className="flex items-center gap-3 px-4 py-3 bg-gray-50 cursor-pointer hover:bg-gray-100 transition"
+                onClick={() => setExpandedIdx(expandedIdx === idx ? null : idx)}>
+                <div className="flex flex-col gap-0.5">
+                  <button onClick={(e) => { e.stopPropagation(); moveWaiver(idx, -1); }} disabled={idx === 0}
+                    className="text-gray-400 hover:text-gray-600 disabled:opacity-30 text-xs leading-none">▲</button>
+                  <button onClick={(e) => { e.stopPropagation(); moveWaiver(idx, 1); }} disabled={idx === waivers.length - 1}
+                    className="text-gray-400 hover:text-gray-600 disabled:opacity-30 text-xs leading-none">▼</button>
+                </div>
+                <span className="text-sm font-medium text-gray-900 flex-1">{w.title || td("untitledWaiver")}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${w.isRequired ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-500"}`}>
+                  {w.isRequired ? tc("required") : tc("optional")}
+                </span>
+                <svg className={`w-4 h-4 text-gray-400 transition ${expandedIdx === idx ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+              </div>
+
+              {expandedIdx === idx && (
+                <div className="p-4 space-y-4 border-t">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">{td("waiverTitle")}</label>
+                    <input value={w.title} onChange={(e) => updateWaiver(idx, "title", e.target.value)}
+                      className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="e.g., Club Agreement" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">{td("content")}</label>
+                    <p className="text-xs text-gray-400 mb-1">{td("contentHint")}</p>
+                    <div contentEditable suppressContentEditableWarning
+                      className="w-full border rounded-lg px-3 py-2 text-sm min-h-[200px] max-h-[400px] overflow-y-auto focus:outline-none focus:ring-2 focus:ring-blue-500 prose prose-sm"
+                      dangerouslySetInnerHTML={{ __html: w.contentHtml }}
+                      onBlur={(e) => updateWaiver(idx, "contentHtml", e.target.innerHTML)} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={w.isRequired} onChange={(e) => updateWaiver(idx, "isRequired", e.target.checked)} className="rounded" />
+                      <span>{td("requiredWaiver")}</span>
+                    </label>
+                    <button onClick={() => removeWaiver(idx)} className="text-xs text-red-500 hover:text-red-700 font-medium">{td("removeWaiver")}</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <button onClick={save} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+        {saving ? tc("saving") : td("saveWaivers")}
+      </button>
     </div>
   );
 }
 
 /* ============== TAB 5: Notifications ============== */
-function TabNotifications({ activity, onSave, saving }) {
+function TabNotifications({ activity, onSave, saving, tc, td }) {
   const [message, setMessage] = useState("");
   useEffect(() => { if (activity) setMessage(activity.afterRegistrationMessage || ""); }, [activity]);
   function save() { onSave({ afterRegistrationMessage: message }); }
   return (
     <div className="space-y-6">
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">After Registration Message</label>
-        <p className="text-xs text-gray-400 mb-2">This message will be shown to the user after they complete registration.</p>
+        <label className="block text-sm font-medium text-gray-700 mb-1">{td("afterRegistrationMessage")}</label>
+        <p className="text-xs text-gray-400 mb-2">{td("afterRegistrationDesc")}</p>
         <div contentEditable suppressContentEditableWarning className="w-full border rounded-lg px-3 py-2 text-sm min-h-[200px] focus:outline-none focus:ring-2 focus:ring-blue-500"
           dangerouslySetInnerHTML={{ __html: message }} onBlur={(e) => setMessage(e.target.innerHTML)} />
       </div>
-      <div className="bg-gray-50 rounded-lg p-4"><p className="text-sm text-gray-500">More notification types coming soon.</p></div>
-      <button onClick={save} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{saving ? "Saving..." : "Save Notifications"}</button>
+      <div className="bg-gray-50 rounded-lg p-4"><p className="text-sm text-gray-500">{td("moreNotificationsComingSoon")}</p></div>
+      <button onClick={save} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{saving ? tc("saving") : td("saveNotifications")}</button>
     </div>
   );
 }
@@ -987,6 +1221,9 @@ export default function ActivityEditPage({ params }) {
   const activityId = resolvedParams.id;
   const router = useRouter();
   const searchParams = useSearchParams();
+  const t = useTranslations("activities");
+  const tc = useTranslations("common");
+  const td = useTranslations("activityDetail");
   const [activity, setActivity] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -999,7 +1236,7 @@ export default function ActivityEditPage({ params }) {
       const data = await res.json();
       if (data.activity) setActivity(data.activity);
       else { alert("Activity not found"); router.push("/dashboard/activities"); }
-    } catch { alert("Failed to load activity"); }
+    } catch { alert(tc("somethingWentWrong")); }
     finally { setLoading(false); }
   }, [activityId, router]);
 
@@ -1012,37 +1249,46 @@ export default function ActivityEditPage({ params }) {
     try {
       const res = await fetch(`/api/activities/${activityId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
       const result = await res.json();
-      if (result.activity) { setActivity(result.activity); setToast({ message: "Saved successfully!", type: "success" }); }
-      else setToast({ message: result.error || "Failed to save", type: "error" });
-    } catch { setToast({ message: "Failed to save", type: "error" }); }
+      if (result.activity) { setActivity(result.activity); setToast({ message: td("savedSuccessfully"), type: "success" }); }
+      else setToast({ message: result.error || tc("failedToSave"), type: "error" });
+    } catch { setToast({ message: tc("failedToSave"), type: "error" }); }
     finally { setSaving(false); }
   }
 
-  if (loading) return <p className="text-gray-500 py-8 text-center">Loading activity...</p>;
+  if (loading) return <p className="text-gray-500 py-8 text-center">{tc("loading")}</p>;
 
-  const visibleTabs = TABS.filter((t) => !(t.key === "payment" && !activity?.hasPayment));
+  const allTabs = [
+    { key: "details", label: td("activityDetails") },
+    { key: "teams", label: td("teams") },
+    { key: "form", label: td("registrationForm") },
+    { key: "waivers", label: td("waivers") },
+    { key: "payment", label: t("payment") },
+    { key: "notifications", label: td("notifications") },
+  ];
+  const visibleTabs = allTabs.filter((tab) => !(tab.key === "payment" && !activity?.hasPayment));
 
   return (
     <div>
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
       <div className="flex items-center gap-3 mb-6">
-        <button onClick={() => router.push(`/dashboard/activities/${activityId}`)} className="text-gray-400 hover:text-gray-600 text-sm">← Back to Activity</button>
-        <h2 className="text-xl font-bold text-gray-900">Edit: {activity?.title || "Activity"}</h2>
+        <button onClick={() => router.push(`/dashboard/activities/${activityId}`)} className="text-gray-400 hover:text-gray-600 text-sm">{td("backToActivity")}</button>
+        <h2 className="text-xl font-bold text-gray-900">{td("edit")}: {activity?.title || t("activity")}</h2>
       </div>
       <div className="border-b mb-6">
         <div className="flex gap-0">
-          {visibleTabs.map((tab) => (
-            <button key={tab.key} onClick={() => switchTab(tab.key)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition ${currentTab === tab.key ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>{tab.label}</button>
+          {visibleTabs.map((tabItem) => (
+            <button key={tabItem.key} onClick={() => switchTab(tabItem.key)}
+              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition ${currentTab === tabItem.key ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>{tabItem.label}</button>
           ))}
         </div>
       </div>
       <div className="bg-white rounded-lg border p-6">
-        {currentTab === "details" && <TabDetails activity={activity} onSave={saveTab} saving={saving} />}
-        {currentTab === "teams" && <TabTeams activity={activity} onSave={saveTab} saving={saving} />}
-        {currentTab === "form" && <TabForm activity={activity} onSave={saveTab} saving={saving} />}
-        {currentTab === "payment" && <TabPayment activity={activity} onSave={saveTab} saving={saving} />}
-        {currentTab === "notifications" && <TabNotifications activity={activity} onSave={saveTab} saving={saving} />}
+        {currentTab === "details" && <TabDetails activity={activity} onSave={saveTab} saving={saving} t={t} tc={tc} td={td} />}
+        {currentTab === "teams" && <TabTeams activity={activity} onSave={saveTab} saving={saving} tc={tc} td={td} />}
+        {currentTab === "form" && <TabForm activity={activity} onSave={saveTab} saving={saving} tc={tc} td={td} />}
+        {currentTab === "waivers" && <TabWaivers activity={activity} onSave={saveTab} saving={saving} tc={tc} td={td} />}
+        {currentTab === "payment" && <TabPayment activity={activity} onSave={saveTab} saving={saving} t={t} tc={tc} td={td} />}
+        {currentTab === "notifications" && <TabNotifications activity={activity} onSave={saveTab} saving={saving} tc={tc} td={td} />}
       </div>
     </div>
   );

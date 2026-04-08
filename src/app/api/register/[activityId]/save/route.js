@@ -41,6 +41,7 @@ export async function PUT(request, { params }) {
         "formData",
       ];
       fields.forEach((f) => { if (body[f] !== undefined) order[f] = body[f]; });
+      if (body.waiverConsents) order.waiverConsents = body.waiverConsents;
       order.totalCostCents = computeTotal(order);
       await order.save();
 
@@ -78,6 +79,7 @@ export async function PUT(request, { params }) {
       subscriptionTitle: body.subscriptionTitle || "",
       subscriptionPriceCents: body.subscriptionPriceCents || 0,
       items: body.items || [],
+      waiverConsents: body.waiverConsents || [],
       formData: body.formData || {},
       status: "pending",
     };

@@ -2,18 +2,40 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useParams } from "next/navigation";
+import { useTranslations } from "next-intl";
+
+import IntlProvider from "@/components/IntlProvider";
+import { getMessages, getDirection, defaultLocale } from "@/lib/i18n";
 
 function centsToDisplay(c) { return ((c || 0) / 100).toFixed(2); }
 
-function buildPreviewSchedule(totalCostCents, dueDateAmountCents, chosen, firstInstallmentDate) {
-  if (chosen <= 1) {
-    return [{ number: 1, date: new Date(), amountCents: totalCostCents, label: "Due Now — Pay in Full" }];
-  }
-  const dueAmount = dueDateAmountCents || totalCostCents;
-  const remaining = Math.max(0, totalCostCents - dueAmount);
-  const numRemaining = Math.max(0, chosen - 1);
+function computeFee(totalCents, chosen, opts) {
+  const threshold = opts?.installmentFeeThreshold || 0;
+  const percent = opts?.installmentFeePercent || 0;
+  if (threshold <= 0 || percent <= 0 || chosen <= threshold) return 0;
+  return Math.round(totalCents * percent / 100);
+}
 
-  const schedule = [{ number: 1, date: new Date(), amountCents: dueAmount, label: "Due Now" }];
+function buildPreviewSchedule(totalCostCents, dueDateAmountCents, chosen, firstInstallmentDate, labels, opts) {
+  const feeCents = computeFee(totalCostCents, chosen, opts);
+  const feeMode = opts?.installmentFeeMode || "split";
+
+  if (chosen <= 1) {
+    return { schedule: [{ number: 1, date: new Date(), amountCents: totalCostCents, label: labels.payInFull }], feeCents: 0 };
+  }
+
+  let dueNow = dueDateAmountCents || totalCostCents;
+  let remaining;
+  if (feeCents > 0 && feeMode === "due_date") {
+    dueNow = (dueDateAmountCents || totalCostCents) + feeCents;
+    remaining = Math.max(0, totalCostCents - (dueDateAmountCents || totalCostCents));
+  } else {
+    const effectiveTotal = totalCostCents + feeCents;
+    remaining = Math.max(0, effectiveTotal - dueNow);
+  }
+
+  const numRemaining = Math.max(0, chosen - 1);
+  const schedule = [{ number: 1, date: new Date(), amountCents: dueNow, label: labels.dueNow }];
   if (numRemaining > 0 && remaining > 0) {
     const perInstallment = Math.round(remaining / numRemaining);
     const now = new Date();
@@ -27,42 +49,64 @@ function buildPreviewSchedule(totalCostCents, dueDateAmountCents, chosen, firstI
       schedule.push({ number: i + 2, date: d, amountCents: amt });
     }
   }
-  return schedule;
+  return { schedule, feeCents };
 }
 
-export default function PaymentPage() {
-  const { token } = useParams();
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [chosenInstallments, setChosenInstallments] = useState(1);
+function LoadingView() {
+  const tc = useTranslations("common");
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="flex flex-col items-center gap-3">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+        <p className="text-sm text-gray-500">{tc("loading")}</p>
+      </div>
+    </div>
+  );
+}
+
+function PaymentErrorView({ error }) {
+  const t = useTranslations("payment");
+  const isPaid = error === "Already paid";
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+      <div className="bg-white rounded-2xl shadow-lg p-8 max-w-md w-full text-center">
+        <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+          <span className="text-red-600 text-xl">!</span>
+        </div>
+        <h2 className="text-lg font-semibold text-gray-900 mb-2">{isPaid ? t("alreadyPaid") : t("linkNotFound")}</h2>
+        <p className="text-sm text-gray-500">{isPaid ? t("alreadyPaidDesc") : t("linkInvalid")}</p>
+      </div>
+    </div>
+  );
+}
+
+function PaymentPageInner({ data, token }) {
+  const t = useTranslations("payment");
+  const tc = useTranslations("common");
+
+  const [chosenInstallments, setChosenInstallments] = useState(
+    () => (data.installmentOptions?.maxInstallments > 1 ? 1 : 1),
+  );
   const [paying, setPaying] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [waiverConsents, setWaiverConsents] = useState(() => {
+    const existing = {};
+    (data.existingConsents || []).forEach((id) => { existing[id] = true; });
+    return existing;
+  });
 
-  useEffect(() => {
-    fetch(`/api/payment/${token}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.error) { setError(d.error); }
-        else {
-          setData(d);
-          setChosenInstallments(d.installmentOptions?.maxInstallments > 1 ? 1 : 1);
-        }
-        setLoading(false);
-      })
-      .catch(() => { setError("Failed to load payment details"); setLoading(false); });
-  }, [token]);
-
-  const schedule = useMemo(() => {
-    if (!data) return [];
+  const { schedule, feeCents } = useMemo(() => {
+    if (!data) return { schedule: [], feeCents: 0 };
     const { order, installmentOptions } = data;
     return buildPreviewSchedule(
       order.totalCostCents,
       installmentOptions.dueDateAmountCents,
       chosenInstallments,
       installmentOptions.firstInstallmentDate,
+      { payInFull: t("payInFull"), dueNow: t("dueNow") },
+      installmentOptions,
     );
-  }, [data, chosenInstallments]);
+  }, [data, chosenInstallments, t]);
 
   async function handlePay() {
     setPaying(true);
@@ -70,41 +114,19 @@ export default function PaymentPage() {
       const res = await fetch(`/api/payment/${token}/checkout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chosenInstallments }),
+        body: JSON.stringify({ chosenInstallments, waiverConsents: Object.keys(waiverConsents).filter((k) => waiverConsents[k]) }),
       });
       const d = await res.json();
       if (d.url) {
         window.location.href = d.url;
       } else {
-        alert(d.error || "Failed to create checkout");
+        alert(d.error || t("failedToCreateCheckout"));
         setPaying(false);
       }
     } catch {
-      alert("Something went wrong");
+      alert(tc("somethingWentWrong"));
       setPaying(false);
     }
-  }
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-        <div className="bg-white rounded-2xl shadow-lg p-8 max-w-md w-full text-center">
-          <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
-            <span className="text-red-600 text-xl">!</span>
-          </div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-2">{error === "Already paid" ? "Already Paid" : "Link Not Found"}</h2>
-          <p className="text-sm text-gray-500">{error === "Already paid" ? "This invoice has already been paid. Thank you!" : "This payment link is invalid or has expired."}</p>
-        </div>
-      </div>
-    );
   }
 
   const { order, activity, club, installmentOptions } = data;
@@ -134,14 +156,14 @@ export default function PaymentPage() {
         <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
           {/* Player Info */}
           <div className="bg-blue-50 px-6 py-4 border-b border-blue-100">
-            <p className="text-sm text-blue-700 font-medium">Payment for</p>
+            <p className="text-sm text-blue-700 font-medium">{t("paymentFor")}</p>
             <p className="text-lg font-semibold text-blue-900">{order.playerFirstName} {order.playerLastName}</p>
             {order.teamName && <p className="text-xs text-blue-600 mt-0.5">{order.teamName}</p>}
           </div>
 
           {/* Invoice Details */}
           <div className="px-6 py-5 space-y-3">
-            <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Invoice</h3>
+            <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">{t("invoice")}</h3>
 
             {order.subscriptionTitle && (
               <div className="flex justify-between text-sm">
@@ -166,33 +188,40 @@ export default function PaymentPage() {
 
             {fixedDiscount > 0 && (
               <div className="flex justify-between text-sm text-green-700">
-                <span>Discount{order.discountType === "percentage" ? ` (${order.discountValue}%)` : ""}</span>
+                <span>{t("discount")}{order.discountType === "percentage" ? ` (${order.discountValue}%)` : ""}</span>
                 <span>-${centsToDisplay(fixedDiscount)}</span>
               </div>
             )}
 
             {order.couponDiscountCents > 0 && (
               <div className="flex justify-between text-sm text-green-700">
-                <span>Coupon{order.couponCode ? `: ${order.couponCode}` : ""}</span>
+                <span>{order.couponCode ? `${t("coupon")}: ${order.couponCode}` : t("coupon")}</span>
                 <span>-${centsToDisplay(order.couponDiscountCents)}</span>
+              </div>
+            )}
+
+            {club.passStripeFeeToCustomer && (
+              <div className="flex justify-between text-sm text-gray-500 italic">
+                <span>{t("processingFee")}</span>
+                <span>{t("processingFeeAppliedAtCheckout")}</span>
               </div>
             )}
 
             <hr className="border-gray-200" />
 
             <div className="flex justify-between text-base font-bold">
-              <span>Total</span>
+              <span>{tc("total")}</span>
               <span>${centsToDisplay(order.totalCostCents)}</span>
             </div>
 
             {order.paidCents > 0 && (
               <>
                 <div className="flex justify-between text-sm text-gray-500">
-                  <span>Already Paid</span>
+                  <span>{t("alreadyPaid")}</span>
                   <span>-${centsToDisplay(order.paidCents)}</span>
                 </div>
                 <div className="flex justify-between text-base font-bold text-blue-700">
-                  <span>Amount Due</span>
+                  <span>{t("amountDue")}</span>
                   <span>${centsToDisplay(amountDue)}</span>
                 </div>
               </>
@@ -202,22 +231,37 @@ export default function PaymentPage() {
           {/* Installment Picker */}
           {maxInst > 1 && (
             <div className="px-6 py-5 border-t border-gray-100">
-              <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Payment Plan</h3>
+              <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">{t("paymentPlan")}</h3>
               <select
                 value={chosenInstallments}
                 onChange={(e) => setChosenInstallments(Number(e.target.value))}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
-                {Array.from({ length: maxInst }, (_, i) => i + 1).map((n) => (
-                  <option key={n} value={n}>
-                    {n === 1 ? `Pay in Full — $${centsToDisplay(amountDue)}` : `${n} Payments — $${centsToDisplay(installmentOptions.dueDateAmountCents || amountDue)} now + ${n - 1} installments`}
-                  </option>
-                ))}
+                {Array.from({ length: maxInst }, (_, i) => i + 1).map((n) => {
+                  const optFee = computeFee(order.totalCostCents, n, installmentOptions);
+                  const feeTag = optFee > 0 ? ` (+${installmentOptions.installmentFeePercent}% ${t("fee")})` : "";
+                  return (
+                    <option key={n} value={n}>
+                      {n === 1
+                        ? `${t("payFullOption")} — $${centsToDisplay(amountDue)}`
+                        : `${t("paymentsOption", { count: n })} — $${centsToDisplay(installmentOptions.dueDateAmountCents || amountDue)} ${t("nowPlus")} ${n - 1} ${t("installments")}${feeTag}`}
+                    </option>
+                  );
+                })}
               </select>
+
+              {installmentOptions.installmentFeeThreshold > 0 && installmentOptions.installmentFeePercent > 0 && (
+                <p className="text-xs text-amber-700 mt-2">
+                  {t("installmentFeeHint", {
+                    threshold: installmentOptions.installmentFeeThreshold,
+                    percent: installmentOptions.installmentFeePercent,
+                  })}
+                </p>
+              )}
 
               {chosenInstallments > 1 && installmentOptions.firstInstallmentDate && (
                 <p className="text-xs text-gray-500 mt-2">
-                  * If paid after {new Date(installmentOptions.firstInstallmentDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}, installments start on the 1st of the next month.
+                  {t("installmentNote", { date: new Date(installmentOptions.firstInstallmentDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) })}
                 </p>
               )}
 
@@ -226,10 +270,10 @@ export default function PaymentPage() {
                 <div className="mt-4 border rounded-lg overflow-hidden">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="bg-gray-50 text-left">
+                      <tr className="bg-gray-50 text-start">
                         <th className="px-3 py-2 font-medium text-gray-600">#</th>
-                        <th className="px-3 py-2 font-medium text-gray-600">Date</th>
-                        <th className="px-3 py-2 font-medium text-gray-600 text-right">Amount</th>
+                        <th className="px-3 py-2 font-medium text-gray-600">{tc("date")}</th>
+                        <th className="px-3 py-2 font-medium text-gray-600 text-end">{tc("amount")}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
@@ -239,13 +283,49 @@ export default function PaymentPage() {
                           <td className="px-3 py-2 text-gray-700">
                             {s.label || new Date(s.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                           </td>
-                          <td className="px-3 py-2 text-right font-medium">${centsToDisplay(s.amountCents)}</td>
+                          <td className="px-3 py-2 text-end font-medium">${centsToDisplay(s.amountCents)}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
               )}
+
+              {feeCents > 0 && (
+                <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-xs text-amber-800">
+                  {t("installmentFeeNotice", {
+                    percent: installmentOptions.installmentFeePercent,
+                    fee: `$${centsToDisplay(feeCents)}`,
+                    total: `$${centsToDisplay(order.totalCostCents + feeCents)}`,
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Waivers (if not yet agreed) */}
+          {(data.waivers || []).length > 0 && (data.waivers || []).some((w) => !data.existingConsents?.includes(String(w._id))) && (
+            <div className="px-6 py-5 border-t border-gray-100">
+              <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">{t("agreements")}</h3>
+              <div className="space-y-3">
+                {(data.waivers || []).filter((w) => !data.existingConsents?.includes(String(w._id))).map((w) => (
+                  <div key={w._id} className="border rounded-lg overflow-hidden">
+                    <div className="px-3 py-2 bg-gray-50 flex items-center justify-between">
+                      <span className="text-sm font-medium text-gray-900">{w.title}</span>
+                      {w.isRequired && <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">{tc("required")}</span>}
+                    </div>
+                    <div className="px-3 py-2 max-h-48 overflow-y-auto border-b">
+                      <div className="prose prose-sm text-xs text-gray-700" dangerouslySetInnerHTML={{ __html: w.contentHtml }} />
+                    </div>
+                    <label className="flex items-start gap-2.5 px-3 py-2.5 cursor-pointer hover:bg-gray-50">
+                      <input type="checkbox" checked={!!waiverConsents[w._id]}
+                        onChange={(e) => setWaiverConsents((prev) => ({ ...prev, [w._id]: e.target.checked }))}
+                        className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                      <span className="text-xs text-gray-700">{t("agreeToWaiver", { title: w.title })}</span>
+                    </label>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -256,10 +336,16 @@ export default function PaymentPage() {
                 <div className="flex gap-2 items-start">
                   <svg className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                   <div className="text-sm text-amber-800">
-                    <p className="font-semibold mb-1">Recurring Payment Agreement</p>
-                    <p>By proceeding, you authorize <strong>{data?.club?.name || "the club"}</strong> to charge your card <strong>${centsToDisplay(schedule[0]?.amountCents || 0)}</strong> today and <strong>{chosenInstallments - 1} additional payment{chosenInstallments > 2 ? "s" : ""}</strong> of <strong>${centsToDisplay(schedule[1]?.amountCents || 0)}</strong> each, for a total of <strong>${centsToDisplay(amountDue)}</strong>.</p>
+                    <p className="font-semibold mb-1">{t("recurringAgreement")}</p>
+                    <p>{t("recurringDesc", {
+                      club: data?.club?.name || t("clubFallback"),
+                      amount: `$${centsToDisplay(schedule[0]?.amountCents || 0)}`,
+                      count: chosenInstallments - 1,
+                      installmentAmount: `$${centsToDisplay(schedule[1]?.amountCents || 0)}`,
+                      total: `$${centsToDisplay(amountDue)}`,
+                    })}</p>
                     {installmentOptions.firstInstallmentDate && (
-                      <p className="mt-1">Installments will be charged automatically starting <strong>{new Date(installmentOptions.firstInstallmentDate).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</strong>.</p>
+                      <p className="mt-1">{t("installmentsStart", { date: new Date(installmentOptions.firstInstallmentDate).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) })}</p>
                     )}
                   </div>
                 </div>
@@ -267,7 +353,7 @@ export default function PaymentPage() {
               <label className="flex items-start gap-2.5 mt-3 cursor-pointer">
                 <input type="checkbox" checked={agreedToTerms} onChange={(e) => setAgreedToTerms(e.target.checked)}
                   className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                <span className="text-sm text-gray-700">I agree to the recurring payment schedule above and authorize automatic charges to my card.</span>
+                <span className="text-sm text-gray-700">{t("agreeRecurring")}</span>
               </label>
             </div>
           )}
@@ -276,25 +362,78 @@ export default function PaymentPage() {
           <div className="px-6 py-5 border-t border-gray-100">
             <div className="flex items-center gap-2 mb-3 text-sm text-gray-500">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
-              <span>Card payment</span>
+              <span>{t("cardPayment")}</span>
             </div>
             <button
               onClick={handlePay}
-              disabled={paying || amountDue <= 0 || (chosenInstallments > 1 && !agreedToTerms)}
+              disabled={paying || amountDue <= 0 || (chosenInstallments > 1 && !agreedToTerms) || (data.waivers || []).filter((w) => w.isRequired && !data.existingConsents?.includes(String(w._id))).some((w) => !waiverConsents[w._id])}
               className="w-full py-3.5 rounded-xl font-semibold text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-base"
             >
-              {paying ? "Redirecting to payment..." : `Pay $${centsToDisplay(schedule[0]?.amountCents || amountDue)} Now`}
+              {paying ? t("redirecting") : t("payNow", { amount: `$${centsToDisplay(schedule[0]?.amountCents || amountDue)}` })}
             </button>
             {chosenInstallments > 1 && (
               <p className="text-xs text-gray-500 text-center mt-2">
-                First payment of ${centsToDisplay(schedule[0]?.amountCents || 0)} charged now. Remaining {chosenInstallments - 1} payment{chosenInstallments > 2 ? "s" : ""} charged automatically.
+                {t("firstPayment", {
+                  amount: `$${centsToDisplay(schedule[0]?.amountCents || 0)}`,
+                  count: chosenInstallments - 1,
+                })}
               </p>
             )}
           </div>
         </div>
 
-        <p className="text-xs text-gray-400 text-center mt-4">Secure payment powered by Stripe</p>
+        <p className="text-xs text-gray-400 text-center mt-4">{t("securePayment")}</p>
       </div>
     </div>
+  );
+}
+
+export default function PaymentPage() {
+  const { token } = useParams();
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [locale, setLocale] = useState(defaultLocale);
+
+  useEffect(() => {
+    fetch(`/api/payment/${token}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.error) { setError(d.error); }
+        else {
+          setData(d);
+          const lang = d.club?.language || "en";
+          setLocale(lang);
+          document.documentElement.lang = lang;
+          document.documentElement.dir = getDirection(lang);
+        }
+        setLoading(false);
+      })
+      .catch(() => {
+        setError(getMessages(defaultLocale).payment.failedToLoad);
+        setLoading(false);
+      });
+  }, [token]);
+
+  if (loading) {
+    return (
+      <IntlProvider locale={defaultLocale} messages={getMessages(defaultLocale)}>
+        <LoadingView />
+      </IntlProvider>
+    );
+  }
+
+  if (error) {
+    return (
+      <IntlProvider locale={locale} messages={getMessages(locale)}>
+        <PaymentErrorView error={error} />
+      </IntlProvider>
+    );
+  }
+
+  return (
+    <IntlProvider locale={locale} messages={getMessages(locale)}>
+      <PaymentPageInner key={token} data={data} token={token} />
+    </IntlProvider>
   );
 }

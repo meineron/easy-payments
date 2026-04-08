@@ -19,7 +19,7 @@ export async function GET(request, { params }) {
       return NextResponse.json({ error: "Activity not found" }, { status: 404 });
     }
 
-    const club = await Club.findById(activity.clubId, "name logoUrl").lean();
+    const club = await Club.findById(activity.clubId, "name logoUrl language").lean();
 
     const safeActivity = {
       _id: activity._id,
@@ -60,8 +60,12 @@ export async function GET(request, { params }) {
         paymentMessages: s.paymentMessages,
       })),
       formSections: activity.formSections || [],
+      waivers: (activity.waivers || []).map((w) => ({
+        _id: w._id, title: w.title, contentHtml: w.contentHtml, isRequired: w.isRequired, order: w.order,
+      })),
       clubName: club?.name || "",
       clubLogoUrl: club?.logoUrl || null,
+      clubLanguage: club?.language || "en",
     };
 
     if (token) {

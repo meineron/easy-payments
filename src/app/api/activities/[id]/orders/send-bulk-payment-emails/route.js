@@ -34,7 +34,7 @@ export async function POST(request, { params }) {
 
     const [activity, club] = await Promise.all([
       Activity.findById(id, "title").lean(),
-      Club.findById(session.user.id, "name logoUrl").lean(),
+      Club.findById(session.user.id, "name logoUrl language").lean(),
     ]);
 
     if (!activity || !club) {
@@ -89,6 +89,7 @@ export async function POST(request, { params }) {
           paymentUrl,
           totalAmount: formatCents(totalDue > 0 ? totalDue : order.totalCostCents),
           logoUrl: club.logoUrl || null,
+          locale: club.language || "en",
         });
 
         sentCount++;

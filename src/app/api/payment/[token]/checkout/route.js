@@ -5,12 +5,33 @@ import Order from "@/models/Order";
 import Activity from "@/models/Activity";
 import Club from "@/models/Club";
 
-function buildInstallmentSchedule(order, sub) {
-  const chosen = order.chosenInstallments || 1;
-  const dueAmount = sub?.dueDateAmountCents || order.totalCostCents;
-  const remaining = Math.max(0, order.totalCostCents - dueAmount);
-  const numRemaining = Math.max(0, chosen - 1);
+function computeProcessingFee(amountCents) {
+  return Math.round((amountCents + 30) / 0.971) - amountCents;
+}
 
+function computeInstallmentFee(totalCents, chosen, sub) {
+  if (!sub) return 0;
+  const threshold = sub.installmentFeeThreshold || 0;
+  const percent = sub.installmentFeePercent || 0;
+  if (threshold <= 0 || percent <= 0 || chosen <= threshold) return 0;
+  return Math.round(totalCents * percent / 100);
+}
+
+function buildInstallmentSchedule(order, sub, feeCents) {
+  const chosen = order.chosenInstallments || 1;
+  const feeMode = sub?.installmentFeeMode || "split";
+  let dueAmount = sub?.dueDateAmountCents || order.totalCostCents;
+  let remaining;
+
+  if (feeCents > 0 && feeMode === "due_date") {
+    dueAmount += feeCents;
+    remaining = Math.max(0, order.totalCostCents - (sub?.dueDateAmountCents || order.totalCostCents));
+  } else {
+    const effectiveTotal = order.totalCostCents + feeCents;
+    remaining = Math.max(0, effectiveTotal - dueAmount);
+  }
+
+  const numRemaining = Math.max(0, chosen - 1);
   const schedule = [{ number: 1, date: new Date(), amountCents: dueAmount, status: "pending" }];
   if (numRemaining > 0 && remaining > 0) {
     const perInstallment = Math.round(remaining / numRemaining);
@@ -32,7 +53,7 @@ export async function POST(request, { params }) {
   try {
     const { token } = await params;
     const body = await request.json();
-    const { chosenInstallments } = body;
+    const { chosenInstallments, waiverConsents: consentIds } = body;
 
     await dbConnect();
 
@@ -45,7 +66,7 @@ export async function POST(request, { params }) {
     }
 
     const [activity, club] = await Promise.all([
-      Activity.findById(order.activityId, "title clubId subscriptions").lean(),
+      Activity.findById(order.activityId, "title clubId subscriptions passStripeFeeToCustomer").lean(),
       Club.findById(order.clubId, "name hasDirectStripeAccess stripeSecretKey stripeAccountId").lean(),
     ]);
 
@@ -57,8 +78,23 @@ export async function POST(request, { params }) {
     const maxInstallments = actSub?.maxInstallments || 1;
     const chosen = Math.min(Math.max(chosenInstallments || 1, 1), maxInstallments);
 
+    if (consentIds?.length > 0) {
+      const actWaivers = await Activity.findById(order.activityId, "waivers").lean();
+      const existingIds = (order.waiverConsents || []).map((c) => c.waiverId);
+      const newConsents = consentIds.filter((id) => !existingIds.includes(id)).map((id) => {
+        const w = (actWaivers?.waivers || []).find((ww) => String(ww._id) === id);
+        return { waiverId: id, title: w?.title || "", agreedAt: new Date(), agreedByName: `${order.parent1FirstName} ${order.parent1LastName}`.trim(), agreedByEmail: order.parent1Email };
+      });
+      order.waiverConsents = [...(order.waiverConsents || []), ...newConsents];
+    }
+
     order.chosenInstallments = chosen;
-    const schedule = buildInstallmentSchedule(order, actSub);
+    const feeCents = computeInstallmentFee(order.totalCostCents, chosen, actSub);
+    if (feeCents > 0) {
+      order.installmentFeeCents = feeCents;
+      order.totalCostCents += feeCents;
+    }
+    const schedule = buildInstallmentSchedule(order, actSub, feeCents);
     order.installmentSchedule = schedule;
 
     let stripeClient;
@@ -116,6 +152,15 @@ export async function POST(request, { params }) {
         stripeCoupon = await stripeClient.coupons.create({ amount_off: totalDiscount, currency: "usd", duration: "once", name: "Discount" });
       }
 
+      if (activity?.passStripeFeeToCustomer) {
+        const subtotal = lineItems.reduce((s, li) => s + li.price_data.unit_amount * li.quantity, 0) - totalDiscount;
+        const procFee = computeProcessingFee(Math.max(0, subtotal));
+        if (procFee > 0) {
+          lineItems.push({ price_data: { currency: "usd", product_data: { name: "Processing Fee" }, unit_amount: procFee }, quantity: 1 });
+          order.processingFeeCents = procFee;
+        }
+      }
+
       const sessionConfig = {
         mode: "payment",
         line_items: lineItems,
@@ -150,6 +195,14 @@ export async function POST(request, { params }) {
     order.stripeCustomerId = customer.id;
 
     const lineItems = [{ price_data: { currency: "usd", product_data: { name: `${order.subscriptionTitle || "Registration"} — Due Now` }, unit_amount: dueDateAmount }, quantity: 1 }];
+
+    if (activity?.passStripeFeeToCustomer) {
+      const procFee = computeProcessingFee(dueDateAmount);
+      if (procFee > 0) {
+        lineItems.push({ price_data: { currency: "usd", product_data: { name: "Processing Fee" }, unit_amount: procFee }, quantity: 1 });
+        order.processingFeeCents = procFee;
+      }
+    }
 
     const sessionConfig = {
       mode: "payment",

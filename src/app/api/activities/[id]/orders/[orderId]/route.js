@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
+import Stripe from "stripe";
 import { authOptions } from "@/lib/auth";
 import dbConnect from "@/lib/mongodb";
 import Order from "@/models/Order";
 import OrderLog from "@/models/OrderLog";
+import Club from "@/models/Club";
+import Transaction from "@/models/Transaction";
+import PaymentRequest from "@/models/PaymentRequest";
 
 function computeTotal(order) {
   let total = order.subscriptionPriceCents || 0;
@@ -24,6 +28,70 @@ function formatCents(c) {
   return "$" + (c / 100).toFixed(2);
 }
 
+async function getStripeClientForClub(clubId) {
+  const club = await Club.findById(clubId, "hasDirectStripeAccess stripeSecretKey stripeAccountId").lean();
+  if (!club) return null;
+  if (club.hasDirectStripeAccess && club.stripeSecretKey) {
+    return new Stripe(club.stripeSecretKey);
+  }
+  return new Stripe(process.env.STRIPE_SECRET_KEY);
+}
+
+async function syncInstallmentsToStripe(order) {
+  try {
+    const stripeClient = await getStripeClientForClub(order.clubId);
+    if (!stripeClient) return { error: "No Stripe client for club" };
+
+    const sub = await stripeClient.subscriptions.retrieve(order.stripeSubscriptionId);
+    if (sub.status !== "active" && sub.status !== "trialing") {
+      return { skipped: true, reason: `Subscription status: ${sub.status}` };
+    }
+
+    const nextPending = (order.installmentSchedule || []).find((i) => i.status === "pending");
+
+    if (!nextPending) {
+      await stripeClient.subscriptions.cancel(order.stripeSubscriptionId);
+      order.stripeSubscriptionId = "";
+      await order.save();
+      return { cancelled: true };
+    }
+
+    const currentItem = sub.items.data[0];
+    const currentAmount = currentItem.price.unit_amount;
+    const nextChargeSec = Math.floor(new Date(nextPending.date).getTime() / 1000);
+    const currentNextCharge = sub.current_period_end;
+
+    const amountChanged = currentAmount !== nextPending.amountCents;
+    const dateChanged = Math.abs(nextChargeSec - currentNextCharge) > 86400;
+
+    if (!amountChanged && !dateChanged) return { unchanged: true };
+
+    const updateParams = { proration_behavior: "none" };
+
+    if (amountChanged) {
+      const product = typeof currentItem.price.product === "string"
+        ? currentItem.price.product : currentItem.price.product.id;
+      const newPrice = await stripeClient.prices.create({
+        currency: currentItem.price.currency,
+        unit_amount: nextPending.amountCents,
+        recurring: { interval: "month" },
+        product,
+      });
+      updateParams.items = [{ id: currentItem.id, price: newPrice.id }];
+    }
+
+    if (dateChanged) {
+      updateParams.trial_end = nextChargeSec;
+    }
+
+    await stripeClient.subscriptions.update(order.stripeSubscriptionId, updateParams);
+    return { amountUpdated: amountChanged, dateUpdated: dateChanged };
+  } catch (err) {
+    console.error("Stripe installment sync error:", err.message);
+    return { error: err.message };
+  }
+}
+
 export async function GET(request, { params }) {
   try {
     const session = await getServerSession(authOptions);
@@ -41,11 +109,13 @@ export async function GET(request, { params }) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
-    const logs = await OrderLog.find({ orderId })
-      .sort({ createdAt: -1 })
-      .lean();
+    const [logs, transactions, paymentRequests] = await Promise.all([
+      OrderLog.find({ orderId }).sort({ createdAt: -1 }).lean(),
+      Transaction.find({ orderId }).sort({ createdAt: -1 }).lean(),
+      PaymentRequest.find({ orderId, clubId: session.user.id }).sort({ createdAt: -1 }).lean(),
+    ]);
 
-    return NextResponse.json({ order, logs });
+    return NextResponse.json({ order, logs, transactions, paymentRequests });
   } catch (error) {
     console.error("Get order error:", error);
     return NextResponse.json({ error: "Failed to get order" }, { status: 500 });
@@ -55,7 +125,7 @@ export async function GET(request, { params }) {
 const TRACKED_FIELDS = [
   "teamId", "subscriptionId", "subscriptionTitle", "subscriptionPriceCents",
   "items", "discountType", "discountValue", "couponCode", "couponDiscountCents",
-  "paidCents", "refundedCents", "status",
+  "paidCents", "refundedCents", "status", "installmentSchedule",
   "playerFirstName", "playerLastName", "playerDob", "playerGender",
   "playerPhone", "playerEmail",
   "parent1FirstName", "parent1LastName", "parent1Phone", "parent1Email",
@@ -79,6 +149,7 @@ export async function PUT(request, { params }) {
     const body = await request.json();
     const logs = [];
     const userName = session.user.name || session.user.username || "Admin";
+    const changeReason = body._reason || "";
 
     for (const field of TRACKED_FIELDS) {
       if (body[field] === undefined) continue;
@@ -94,6 +165,8 @@ export async function PUT(request, { params }) {
           desc = `Refunded: ${formatCents(order[field])} → ${formatCents(body[field])}`;
         } else if (field === "items") {
           desc = "Items updated";
+        } else if (field === "installmentSchedule") {
+          desc = "Installment schedule updated";
         } else if (field === "discountType" || field === "discountValue") {
           desc = `Discount changed`;
         } else if (field === "status") {
@@ -103,6 +176,7 @@ export async function PUT(request, { params }) {
         } else if (field === "subscriptionId" || field === "subscriptionTitle") {
           desc = `Subscription changed`;
         }
+        if (changeReason) desc += ` — Reason: ${changeReason}`;
         logs.push({
           orderId, activityId: id, clubId: session.user.id,
           userId: session.user.id, userName,
@@ -114,7 +188,7 @@ export async function PUT(request, { params }) {
     const allowed = [
       "teamId", "subscriptionId", "subscriptionTitle", "subscriptionPriceCents",
       "items", "discountType", "discountValue", "couponCode", "couponDiscountCents",
-      "paidCents", "refundedCents", "status",
+      "paidCents", "refundedCents", "status", "installmentSchedule",
       "playerFirstName", "playerLastName", "playerDob", "playerGender",
       "playerPhone", "playerEmail",
       "parent1FirstName", "parent1LastName", "parent1Phone", "parent1Email",
@@ -135,11 +209,16 @@ export async function PUT(request, { params }) {
       await OrderLog.insertMany(logs);
     }
 
+    let stripeSync = null;
+    if (body.installmentSchedule && order.stripeSubscriptionId) {
+      stripeSync = await syncInstallmentsToStripe(order);
+    }
+
     const populated = await Order.findById(order._id)
       .populate("teamId", "name season gender")
       .lean();
 
-    return NextResponse.json({ order: populated });
+    return NextResponse.json({ order: populated, stripeSync });
   } catch (error) {
     console.error("Update order error:", error);
     return NextResponse.json({ error: "Failed to update order" }, { status: 500 });
