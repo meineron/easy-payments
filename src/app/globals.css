@@ -45,6 +45,34 @@ body {
   text-align: left;
 }
 
+[contenteditable] ul,
+[contenteditable] ol {
+  padding-left: 1.5em;
+  margin: 0.5em 0;
+}
+[contenteditable] ul { list-style-type: disc; }
+[contenteditable] ol { list-style-type: decimal; }
+[contenteditable] li { margin: 0.15em 0; }
+
+[contenteditable] .email-button {
+  display: inline-block;
+  padding: 12px 28px;
+  border-radius: 8px;
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 16px;
+  cursor: default;
+}
+
+[contenteditable] img {
+  cursor: pointer;
+}
+[contenteditable] img.img-selected {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
 @keyframes slideInRight {
   from { transform: translateX(100%); }
   to { transform: translateX(0); }

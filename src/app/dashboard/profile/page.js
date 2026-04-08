@@ -17,6 +17,10 @@ export default function ClubProfilePage() {
   const [logoUrl, setLogoUrl] = useState(null);
   const [logoPreview, setLogoPreview] = useState(null);
   const [language, setLanguage] = useState("en");
+  const [smtpHost, setSmtpHost] = useState("");
+  const [smtpPort, setSmtpPort] = useState("587");
+  const [smtpEmail, setSmtpEmail] = useState("");
+  const [smtpPassword, setSmtpPassword] = useState("");
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -29,6 +33,10 @@ export default function ClubProfilePage() {
           setLogoUrl(d.club.logoUrl || null);
           setLogoPreview(d.club.logoUrl || null);
           setLanguage(d.club.language || "en");
+          setSmtpHost(d.club.smtpHost || "");
+          setSmtpPort(String(d.club.smtpPort || 587));
+          setSmtpEmail(d.club.smtpEmail || "");
+          setSmtpPassword(d.club.smtpPassword || "");
         }
         setLoading(false);
       })
@@ -76,7 +84,7 @@ export default function ClubProfilePage() {
       const res = await fetch("/api/club/profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), logoUrl, language }),
+        body: JSON.stringify({ name: name.trim(), logoUrl, language, smtpHost, smtpPort, smtpEmail, smtpPassword }),
       });
       const data = await res.json();
       if (data.club) {
@@ -165,6 +173,50 @@ export default function ClubProfilePage() {
             <option value="he">{t("langHebrew")}</option>
           </select>
           <p className="text-xs text-gray-400 mt-1">{t("languageHint")}</p>
+        </div>
+
+        {/* Email Settings */}
+        <div className="p-6 border-b">
+          <label className="block text-sm font-medium text-gray-700 mb-3">{t("emailSettings")}</label>
+          <p className="text-xs text-gray-400 mb-4">{t("emailSettingsHint")}</p>
+          <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="col-span-2">
+                <label className="block text-xs text-gray-500 mb-1">{t("smtpHost")}</label>
+                <input type="text" value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)}
+                  placeholder="smtp.gmail.com"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">{t("smtpPort")}</label>
+                <input type="number" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)}
+                  placeholder="587"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">{t("smtpEmailLabel")}</label>
+              <input type="email" value={smtpEmail} onChange={(e) => setSmtpEmail(e.target.value)}
+                placeholder="club@gmail.com"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">{t("smtpPasswordLabel")}</label>
+              <input type="password" value={smtpPassword} onChange={(e) => setSmtpPassword(e.target.value)}
+                placeholder={t("smtpPasswordPlaceholder")}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+              <p className="text-xs text-gray-400 mt-1">{t("smtpPasswordHint")}</p>
+            </div>
+            <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <p className="text-xs font-medium text-amber-800 mb-1">{t("gmailHintTitle")}</p>
+              <p className="text-xs text-amber-700">{t("gmailHintBody")}</p>
+              <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-amber-800 font-medium underline hover:text-amber-900 mt-1">
+                {t("gmailHintLink")}
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg>
+              </a>
+            </div>
+          </div>
         </div>
 
         {/* Save */}

@@ -46,6 +46,10 @@ const ClubSchema = new mongoose.Schema({
     enum: ["en", "he"],
     default: "en",
   },
+  smtpHost: { type: String, default: "" },
+  smtpPort: { type: Number, default: 587 },
+  smtpEmail: { type: String, default: "" },
+  smtpPassword: { type: String, default: "" },
 }, {
   timestamps: true,
 });

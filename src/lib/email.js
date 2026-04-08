@@ -23,6 +23,60 @@ const transporter = nodemailer.createTransport({
 
 const FROM = () => `"EasyCoach" <${process.env.EASYCOACH_EMAIL}>`;
 
+export function getClubTransporter(club) {
+  if (club?.smtpEmail && club?.smtpPassword) {
+    return {
+      transport: nodemailer.createTransport({
+        host: club.smtpHost || "smtp.gmail.com",
+        port: parseInt(club.smtpPort || "587", 10),
+        secure: parseInt(club.smtpPort || "587", 10) === 465,
+        auth: { user: club.smtpEmail, pass: club.smtpPassword },
+      }),
+      from: `"${club.name || "Club"}" <${club.smtpEmail}>`,
+    };
+  }
+  return { transport: transporter, from: FROM() };
+}
+
+export async function sendBulkEmail({ club, subject, bodyHtml, bccList, logoUrl }) {
+  const { transport, from } = getClubTransporter(club);
+
+  const attachments = [];
+  let processedBody = bodyHtml;
+
+  const dataUriRegex = /(<img[^>]*\s+src=["'])(data:image\/([a-zA-Z+]+);base64,([^"']+))(["'][^>]*>)/g;
+  let match;
+  let idx = 0;
+  while ((match = dataUriRegex.exec(bodyHtml)) !== null) {
+    const cid = `img${idx}_${Date.now()}@email`;
+    const ext = match[3].replace("+xml", "").replace("jpeg", "jpg");
+    attachments.push({ filename: `image${idx}.${ext}`, content: Buffer.from(match[4], "base64"), cid });
+    processedBody = processedBody.replace(match[2], `cid:${cid}`);
+    idx++;
+  }
+
+  if (logoUrl) {
+    const logo = prepareLogoHeader(logoUrl, club?.name);
+    attachments.push(...logo.attachments);
+    processedBody = `${logo.html}<div style="color:#374151;font-size:14px;line-height:1.6;">${processedBody}</div>`;
+  } else {
+    processedBody = `<div style="color:#374151;font-size:14px;line-height:1.6;">${processedBody}</div>`;
+  }
+
+  const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:600px;margin:0 auto;padding:40px 20px;">${processedBody}</div>`;
+
+  await transport.sendMail({
+    from,
+    to: from,
+    bcc: bccList,
+    subject,
+    html,
+    attachments,
+  });
+
+  return from;
+}
+
 function getDir(locale) { return locale === "he" ? "rtl" : "ltr"; }
 
 function prepareLogoHeader(logoUrl, clubName) {

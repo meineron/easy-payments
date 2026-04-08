@@ -86,39 +86,15 @@ function DashboardLayoutInner({ children }) {
               {t("players")}
             </Link>
             <Link
-              href="/dashboard/transactions"
+              href="/dashboard/messages"
               className={`text-sm font-medium transition ${
-                pathname === "/dashboard/transactions"
+                pathname.startsWith("/dashboard/messages")
                   ? "text-blue-600"
                   : "text-gray-500 hover:text-gray-900"
               }`}
             >
-              {t("transactions")}
+              {t("messages")}
             </Link>
-            {session?.user?.hasDirectStripeAccess && (
-              <>
-                <Link
-                  href="/dashboard/customer-data"
-                  className={`text-sm font-medium transition ${
-                    pathname === "/dashboard/customer-data"
-                      ? "text-blue-600"
-                      : "text-gray-500 hover:text-gray-900"
-                  }`}
-                >
-                  {t("customerData")}
-                </Link>
-                <Link
-                  href="/dashboard/payment-links"
-                  className={`text-sm font-medium transition ${
-                    pathname === "/dashboard/payment-links"
-                      ? "text-blue-600"
-                      : "text-gray-500 hover:text-gray-900"
-                  }`}
-                >
-                  {t("paymentLinks")}
-                </Link>
-              </>
-            )}
           </div>
           <div className="flex items-center gap-4">
             <Link

@@ -12,10 +12,14 @@ export async function GET() {
     }
     await dbConnect();
 
-    const club = await Club.findById(session.user.id, "name username logoUrl language").lean();
+    const club = await Club.findById(session.user.id, "name username logoUrl language smtpHost smtpPort smtpEmail smtpPassword").lean();
     if (!club) return NextResponse.json({ error: "Club not found" }, { status: 404 });
 
-    return NextResponse.json({ club: { name: club.name, username: club.username, logoUrl: club.logoUrl || null, language: club.language || "en" } });
+    return NextResponse.json({ club: {
+      name: club.name, username: club.username, logoUrl: club.logoUrl || null, language: club.language || "en",
+      smtpHost: club.smtpHost || "", smtpPort: club.smtpPort || 587, smtpEmail: club.smtpEmail || "",
+      smtpPassword: club.smtpPassword ? "••••••••" : "",
+    } });
   } catch (error) {
     console.error("Get profile error:", error);
     return NextResponse.json({ error: "Failed to get profile" }, { status: 500 });
@@ -43,9 +47,20 @@ export async function PUT(request) {
     if (body.language !== undefined && ["en", "he"].includes(body.language)) {
       club.language = body.language;
     }
+    if (body.smtpHost !== undefined) club.smtpHost = body.smtpHost.trim();
+    if (body.smtpPort !== undefined) club.smtpPort = parseInt(body.smtpPort, 10) || 587;
+    if (body.smtpEmail !== undefined) club.smtpEmail = body.smtpEmail.trim();
+    if (body.smtpPassword !== undefined && body.smtpPassword !== "••••••••") {
+      club.smtpPassword = body.smtpPassword;
+    }
+
     await club.save();
 
-    return NextResponse.json({ club: { name: club.name, username: club.username, logoUrl: club.logoUrl || null, language: club.language || "en" } });
+    return NextResponse.json({ club: {
+      name: club.name, username: club.username, logoUrl: club.logoUrl || null, language: club.language || "en",
+      smtpHost: club.smtpHost || "", smtpPort: club.smtpPort || 587, smtpEmail: club.smtpEmail || "",
+      smtpPassword: club.smtpPassword ? "••••••••" : "",
+    } });
   } catch (error) {
     console.error("Update profile error:", error);
     return NextResponse.json({ error: "Failed to update profile" }, { status: 500 });
