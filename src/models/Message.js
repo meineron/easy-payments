@@ -1,0 +1,26 @@
+import mongoose from "mongoose";
+
+const RecipientSchema = new mongoose.Schema({
+  type: { type: String, enum: ["player", "parent", "custom"], required: true },
+  id: { type: String, required: true },
+  name: { type: String, required: true },
+  email: { type: String, required: true },
+}, { _id: false });
+
+const MessageSchema = new mongoose.Schema({
+  clubId: { type: mongoose.Schema.Types.ObjectId, ref: "Club", required: true, index: true },
+  subject: { type: String, required: true, trim: true },
+  bodyHtml: { type: String, required: true },
+  recipients: [RecipientSchema],
+  recipientCount: { type: Number, default: 0 },
+  fromEmail: { type: String, default: "" },
+  sentAt: { type: Date, default: Date.now },
+  status: { type: String, enum: ["sent", "failed"], default: "sent" },
+}, {
+  timestamps: true,
+});
+
+if (mongoose.models.Message) {
+  delete mongoose.models.Message;
+}
+export default mongoose.model("Message", MessageSchema);
