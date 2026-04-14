@@ -1,12 +1,27 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import IntlProvider from "@/components/IntlProvider";
 import { getMessages, getDirection, defaultLocale } from "@/lib/i18n";
 
 function centsToDisplay(c) { return ((c || 0) / 100).toFixed(2); }
+
+function buildPRSchedule(totalCents, chosen) {
+  if (chosen <= 1) {
+    return [{ number: 1, date: new Date(), amountCents: totalCents }];
+  }
+  const perInstallment = Math.round(totalCents / chosen);
+  const schedule = [];
+  const now = new Date();
+  for (let i = 0; i < chosen; i++) {
+    const d = i === 0 ? now : new Date(now.getFullYear(), now.getMonth() + i, now.getDate());
+    const amt = i === chosen - 1 ? totalCents - perInstallment * (chosen - 1) : perInstallment;
+    schedule.push({ number: i + 1, date: d, amountCents: amt });
+  }
+  return schedule;
+}
 
 function LoadingView() {
   const tc = useTranslations("common");
@@ -60,6 +75,16 @@ function PaymentRequestInner({ data, token }) {
   const tc = useTranslations("common");
   const tp = useTranslations("payment");
   const [paying, setPaying] = useState(false);
+  const [chosenInstallments, setChosenInstallments] = useState(1);
+
+  const { paymentRequest: pr, order, activity, club } = data;
+  const allowed = pr.allowedInstallments || [1];
+  const hasInstallmentOptions = allowed.length > 1 || (allowed.length === 1 && allowed[0] > 1);
+
+  const schedule = useMemo(
+    () => buildPRSchedule(pr.totalCents, chosenInstallments),
+    [pr.totalCents, chosenInstallments],
+  );
 
   async function handlePay() {
     setPaying(true);
@@ -67,7 +92,7 @@ function PaymentRequestInner({ data, token }) {
       const res = await fetch(`/api/payment/request/${token}/checkout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ chosenInstallments }),
       });
       const d = await res.json();
       if (d.url) {
@@ -82,7 +107,7 @@ function PaymentRequestInner({ data, token }) {
     }
   }
 
-  const { paymentRequest: pr, order, activity, club } = data;
+  const dueNow = schedule[0]?.amountCents || pr.totalCents;
 
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
@@ -126,6 +151,52 @@ function PaymentRequestInner({ data, token }) {
             )}
           </div>
 
+          {hasInstallmentOptions && (
+            <div className="px-6 py-5 border-t border-gray-100">
+              <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">
+                {tp("paymentPlan")}
+              </h3>
+              <select
+                value={chosenInstallments}
+                onChange={(e) => setChosenInstallments(Number(e.target.value))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                {allowed.map((n) => (
+                  <option key={n} value={n}>
+                    {n === 1
+                      ? `${t("payFullOption")} — $${centsToDisplay(pr.totalCents)}`
+                      : `${t("xPayments", { count: n })} — $${centsToDisplay(Math.round(pr.totalCents / n))}/${tp("month")}`}
+                  </option>
+                ))}
+              </select>
+
+              {chosenInstallments > 1 && schedule.length > 0 && (
+                <div className="mt-4 border rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 text-start">
+                        <th className="px-3 py-2 font-medium text-gray-600">#</th>
+                        <th className="px-3 py-2 font-medium text-gray-600">{tc("date")}</th>
+                        <th className="px-3 py-2 font-medium text-gray-600 text-end">{tc("amount")}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {schedule.map((s, idx) => (
+                        <tr key={idx} className={idx === 0 ? "bg-blue-50" : ""}>
+                          <td className="px-3 py-2 text-gray-700">{s.number}</td>
+                          <td className="px-3 py-2 text-gray-700">
+                            {idx === 0 ? t("dueNow") : new Date(s.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                          </td>
+                          <td className="px-3 py-2 text-end font-medium">${centsToDisplay(s.amountCents)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="px-6 py-5 border-t border-gray-100">
             <div className="flex items-center gap-2 mb-3 text-sm text-gray-500">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
@@ -136,8 +207,13 @@ function PaymentRequestInner({ data, token }) {
               disabled={paying}
               className="w-full py-3.5 rounded-xl font-semibold text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-base"
             >
-              {paying ? tp("redirecting") : t("payAmount", { amount: `$${centsToDisplay(pr.totalCents)}` })}
+              {paying ? tp("redirecting") : t("payAmount", { amount: `$${centsToDisplay(dueNow)}` })}
             </button>
+            {chosenInstallments > 1 && (
+              <p className="text-xs text-gray-500 text-center mt-2">
+                {t("firstOfPayments", { amount: `$${centsToDisplay(dueNow)}`, count: chosenInstallments })}
+              </p>
+            )}
           </div>
         </div>
 

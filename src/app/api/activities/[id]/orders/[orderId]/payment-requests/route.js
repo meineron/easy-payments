@@ -8,6 +8,7 @@ import PaymentRequest from "@/models/PaymentRequest";
 import Activity from "@/models/Activity";
 import Club from "@/models/Club";
 import { sendPaymentLink } from "@/lib/email";
+import { sendSMS, toE164 } from "@/lib/sms";
 
 export async function GET(request, { params }) {
   try {
@@ -39,7 +40,7 @@ export async function POST(request, { params }) {
     }
     const { id, orderId } = await params;
     const body = await request.json();
-    const { items, sendMethod, recipientEmail, recipientName, note } = body;
+    const { items, sendMethod, recipientEmail, recipientName, note, allowedInstallments } = body;
 
     if (!items?.length) {
       return NextResponse.json({ error: "Select at least one item" }, { status: 400 });
@@ -69,11 +70,19 @@ export async function POST(request, { params }) {
 
     let email = "";
     let name = "";
+    let phone = "";
+    const isSMS = sendMethod === "sms_parent1" || sendMethod === "sms_parent2";
     if (sendMethod === "parent1") {
       email = order.parent1Email || "";
       name = `${order.parent1FirstName} ${order.parent1LastName}`.trim();
     } else if (sendMethod === "parent2") {
       email = order.parent2Email || "";
+      name = `${order.parent2FirstName} ${order.parent2LastName}`.trim();
+    } else if (sendMethod === "sms_parent1") {
+      phone = order.parent1Phone || "";
+      name = `${order.parent1FirstName} ${order.parent1LastName}`.trim();
+    } else if (sendMethod === "sms_parent2") {
+      phone = order.parent2Phone || "";
       name = `${order.parent2FirstName} ${order.parent2LastName}`.trim();
     } else if (sendMethod === "custom") {
       email = recipientEmail || "";
@@ -81,6 +90,10 @@ export async function POST(request, { params }) {
     }
 
     const paymentToken = crypto.randomUUID();
+    const validInstallments = (Array.isArray(allowedInstallments) && allowedInstallments.length > 0)
+      ? [...new Set(allowedInstallments.map(Number).filter((n) => n >= 1 && n <= 10))].sort((a, b) => a - b)
+      : [1];
+
     const pr = await PaymentRequest.create({
       orderId,
       clubId: session.user.id,
@@ -92,14 +105,26 @@ export async function POST(request, { params }) {
       recipientName: name,
       sendMethod: sendMethod || "copy_only",
       paymentToken,
+      allowedInstallments: validInstallments,
       note: note || "",
-      sentAt: sendMethod !== "copy_only" && email ? new Date() : null,
+      sentAt: (sendMethod !== "copy_only" && (email || isSMS)) ? new Date() : null,
     });
 
     const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
     const paymentUrl = `${baseUrl}/payment/request/${paymentToken}`;
 
-    if (sendMethod !== "copy_only" && email) {
+    if (isSMS && phone) {
+      try {
+        const pfx = sendMethod === "sms_parent2" ? (order.parent2PhonePrefix || "+1") : (order.parent1PhonePrefix || "+1");
+        const e164 = toE164(pfx, phone);
+        if (e164) {
+          const totalAmount = "$" + (totalCents / 100).toFixed(2);
+          await sendSMS({ to: e164, message: `Payment of ${totalAmount} requested. Pay here: ${paymentUrl}` });
+        }
+      } catch (smsErr) {
+        console.error("Failed to send payment request SMS:", smsErr.message);
+      }
+    } else if (sendMethod !== "copy_only" && email) {
       try {
         const [activity, club] = await Promise.all([
           Activity.findById(id, "title").lean(),

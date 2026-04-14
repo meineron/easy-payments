@@ -5,6 +5,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import InvoiceSlideOver from "@/components/InvoiceSlideOver";
+import SendBulkLinksModal from "@/components/SendBulkLinksModal";
+import SendMessageModal from "@/components/SendMessageModal";
+import PhonePrefixInput from "@/components/PhonePrefixInput";
 
 function centsToDisplay(c) { return ((c || 0) / 100).toFixed(2); }
 function displayToCents(v) { return Math.round(parseFloat(v || 0) * 100); }
@@ -97,6 +100,9 @@ function TabParticipants({ activityId, activity, tc, td }) {
   const [bulkModal, setBulkModal] = useState(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
+  const [showRegModal, setShowRegModal] = useState(false);
+  const [sendMessageTarget, setSendMessageTarget] = useState(null);
+  const [sendLinkModal, setSendLinkModal] = useState(null);
   const [headerActionsOpen, setHeaderActionsOpen] = useState(false);
   const headerActionsRef = useRef(null);
 
@@ -104,6 +110,7 @@ function TabParticipants({ activityId, activity, tc, td }) {
   const [editForm, setEditForm] = useState(null);
   const [editLogs, setEditLogs] = useState([]);
   const [editTab, setEditTab] = useState("invoice");
+  const [playerCardData, setPlayerCardData] = useState(null);
 
   const teamFilterRef = useRef(null);
 
@@ -169,6 +176,33 @@ function TabParticipants({ activityId, activity, tc, td }) {
     return Math.max(0, total);
   }
 
+  async function handleInlineTeamChange(orderId, newTeamId) {
+    const body = { teamId: newTeamId || null };
+    if (newTeamId) {
+      const sub = activitySubs.find((s) => (s.includedTeamIds || []).map(String).includes(String(newTeamId)));
+      if (sub) {
+        body.subscriptionId = sub.id;
+        body.subscriptionTitle = sub.title;
+        body.subscriptionPriceCents = sub.priceCents;
+      }
+    } else {
+      body.subscriptionId = "";
+      body.subscriptionTitle = "";
+      body.subscriptionPriceCents = 0;
+    }
+    try {
+      const res = await fetch(`/api/activities/${activityId}/orders/${orderId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        fetchOrders();
+        setToast({ message: td("invoiceSaved"), type: "success" });
+      }
+    } catch { /* ignore */ }
+  }
+
   const effectiveFilterTeams = (() => {
     let teams = activityTeams;
     if (filterTeamType) teams = teams.filter((team) => team.teamType === filterTeamType);
@@ -196,7 +230,8 @@ function TabParticipants({ activityId, activity, tc, td }) {
 
   let statExpected = 0, statCollected = 0, statFullyPaid = 0, statPartialPaid = 0;
   filteredRows.forEach((r) => {
-    const total = r._isExpected ? (r.totalCostCents || 0) : computeRowTotal(r);
+    if (r._isExpected) return;
+    const total = computeRowTotal(r);
     statExpected += total;
     statCollected += r.paidCents || 0;
     if ((r.paidCents || 0) >= total && total > 0) statFullyPaid++;
@@ -214,11 +249,11 @@ function TabParticipants({ activityId, activity, tc, td }) {
       body: JSON.stringify({
         playerFirstName: ep.playerFirstName, playerLastName: ep.playerLastName,
         playerDob: ep.playerDob, playerGender: ep.playerGender,
-        playerPhone: ep.playerPhone || "", playerEmail: ep.playerEmail || "",
+        playerPhonePrefix: ep.playerPhonePrefix || "+1", playerPhone: ep.playerPhone || "", playerEmail: ep.playerEmail || "",
         parent1FirstName: ep.parent1FirstName || "", parent1LastName: ep.parent1LastName || "",
-        parent1Phone: ep.parent1Phone || "", parent1Email: ep.parent1Email || "",
+        parent1PhonePrefix: ep.parent1PhonePrefix || "+1", parent1Phone: ep.parent1Phone || "", parent1Email: ep.parent1Email || "",
         parent2FirstName: ep.parent2FirstName || "", parent2LastName: ep.parent2LastName || "",
-        parent2Phone: ep.parent2Phone || "", parent2Email: ep.parent2Email || "",
+        parent2PhonePrefix: ep.parent2PhonePrefix || "+1", parent2Phone: ep.parent2Phone || "", parent2Email: ep.parent2Email || "",
         teamId, playerId: ep.playerId || null,
         subscriptionId: ep.subscriptionId || sub?.id || "", subscriptionTitle: ep.subscriptionTitle || sub?.title || "",
         subscriptionPriceCents: price,
@@ -449,6 +484,87 @@ function TabParticipants({ activityId, activity, tc, td }) {
     finally { setSaving(false); }
   }
 
+  async function sendRegistrationLinkVia(orderId, channel) {
+    setActionBusy(orderId);
+    try {
+      const res = await fetch(`/api/activities/${activityId}/orders/${orderId}/send-registration-link`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setToast({ message: channel === "sms" ? td("regLinkCopied") : td("regLinkCopied"), type: "success" });
+      } else setToast({ message: data.error || tc("somethingWentWrong"), type: "error" });
+    } catch { setToast({ message: tc("somethingWentWrong"), type: "error" }); }
+    finally { setActionBusy(null); }
+  }
+
+  async function sendPaymentLinkVia(orderId, channel) {
+    setActionBusy(orderId);
+    try {
+      const res = await fetch(`/api/activities/${activityId}/orders/${orderId}/send-payment-link`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setOrders((prev) => prev.map((o) => o._id === orderId ? { ...o, paymentLinkSentAt: data.paymentLinkSentAt } : o));
+        setToast({ message: td("paymentLinkCopied"), type: "success" });
+      } else setToast({ message: data.error || tc("somethingWentWrong"), type: "error" });
+    } catch { setToast({ message: tc("somethingWentWrong"), type: "error" }); }
+    finally { setActionBusy(null); }
+  }
+
+  function openSendMessage(row) {
+    const pfx = row.parent1PhonePrefix || row.playerPhonePrefix || "+1";
+    const email = row.parent1Email || row.playerEmail || "";
+    const phone = row.parent1Phone || row.playerPhone || "";
+    const recipient = {
+      type: "parent",
+      id: row.playerId || row._id,
+      name: row.parent1FirstName ? `${row.parent1FirstName} ${row.parent1LastName}` : `${row.playerFirstName} ${row.playerLastName}`,
+      email,
+      phone: phone ? `${pfx}${phone}` : "",
+    };
+    setSendMessageTarget(recipient);
+  }
+
+  async function openPlayerCard(playerId, orderRow) {
+    if (!playerId) {
+      if (orderRow) {
+        setPlayerCardData({
+          _fromOrder: true,
+          orderId: orderRow._id,
+          playerFirstName: orderRow.playerFirstName,
+          playerLastName: orderRow.playerLastName,
+          playerDob: orderRow.playerDob,
+          playerGender: orderRow.playerGender || "",
+          playerPhonePrefix: orderRow.playerPhonePrefix || "+1",
+          playerPhone: orderRow.playerPhone || "",
+          playerEmail: orderRow.playerEmail || "",
+          parents: [
+            orderRow.parent1FirstName ? {
+              firstName: orderRow.parent1FirstName, lastName: orderRow.parent1LastName,
+              email: orderRow.parent1Email, phonePrefix: orderRow.parent1PhonePrefix || "+1",
+              phone: orderRow.parent1Phone,
+            } : null,
+            orderRow.parent2FirstName ? {
+              firstName: orderRow.parent2FirstName, lastName: orderRow.parent2LastName,
+              email: orderRow.parent2Email, phonePrefix: orderRow.parent2PhonePrefix || "+1",
+              phone: orderRow.parent2Phone,
+            } : null,
+          ].filter(Boolean),
+        });
+      }
+      return;
+    }
+    try {
+      const res = await fetch(`/api/players/${playerId}`);
+      const data = await res.json();
+      if (data.player) setPlayerCardData(data.player);
+    } catch { /* ignore */ }
+  }
+
   function copyPublicLink() {
     const url = `${window.location.origin}/register/${activityId}`;
     navigator.clipboard.writeText(url).then(() => setToast({ message: td("publicLinkCopied"), type: "success" }));
@@ -557,10 +673,14 @@ function TabParticipants({ activityId, activity, tc, td }) {
                   className="w-full text-start px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
                   {td("sendPaymentLinks")}
                 </button>
+                <button onClick={() => { setShowRegModal(true); setHeaderActionsOpen(false); }}
+                  className="w-full text-start px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                  {td("sendRegistrationLinks")}
+                </button>
                 {activity?.registrationType === "public" && (
                   <button onClick={() => { copyPublicRegistrationLink(); setHeaderActionsOpen(false); }}
                     className="w-full text-start px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                    {td("sendRegistrationLinks")}
+                    {td("copyPublicLink")} (Registration)
                   </button>
                 )}
               </div>
@@ -627,7 +747,7 @@ function TabParticipants({ activityId, activity, tc, td }) {
       </div>
 
       {/* STATS */}
-      <div className="grid grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-5 gap-3 mb-5">
         <div className="bg-gray-50 rounded-lg p-3 text-center">
           <p className="text-xs text-gray-500">{td("totalExpected")}</p>
           <p className="text-lg font-bold text-gray-900">${centsToDisplay(statExpected)}</p>
@@ -635,6 +755,10 @@ function TabParticipants({ activityId, activity, tc, td }) {
         <div className="bg-green-50 rounded-lg p-3 text-center">
           <p className="text-xs text-gray-500">{td("totalCollected")}</p>
           <p className="text-lg font-bold text-green-700">${centsToDisplay(statCollected)}</p>
+        </div>
+        <div className="bg-red-50 rounded-lg p-3 text-center">
+          <p className="text-xs text-gray-500">{td("totalUncollected")}</p>
+          <p className="text-lg font-bold text-red-600">${centsToDisplay(statExpected - statCollected)}</p>
         </div>
         <div className="bg-blue-50 rounded-lg p-3 text-center">
           <p className="text-xs text-gray-500">{td("fullyPaid")}</p>
@@ -691,6 +815,7 @@ function TabParticipants({ activityId, activity, tc, td }) {
               <tr className="border-b text-start text-gray-500 text-xs uppercase tracking-wider">
                 <th className="pb-2 px-2 w-8"><input type="checkbox" checked={filteredRows.length > 0 && selected.size === filteredRows.length} onChange={toggleSelectAll} className="rounded" /></th>
                 <th className="pb-2 px-2 font-medium">{td("player")}</th>
+                <th className="pb-2 px-2 font-medium">{td("team")}</th>
                 <th className="pb-2 px-2 font-medium">{td("regDate")}</th>
                 {detailed && <th className="pb-2 px-2 font-medium">{td("parent1")}</th>}
                 {detailed && <th className="pb-2 px-2 font-medium">{td("parent2")}</th>}
@@ -726,7 +851,23 @@ function TabParticipants({ activityId, activity, tc, td }) {
                     <td className="py-2.5 px-2 w-8"><input type="checkbox" checked={selected.has(rowId)} onChange={() => toggleSelect(rowId)} className="rounded" /></td>
                     <td className="py-2.5 px-2">
                       <div className={`font-medium ${isExpected ? "text-gray-700" : "text-gray-900"}`}>{r.playerFirstName} {r.playerLastName}</div>
-                      <div className="text-xs text-gray-400 truncate">{r.teamId?.name || "—"}{r.subscriptionTitle ? ` · ${r.subscriptionTitle}` : ""}</div>
+                      <div className="text-xs text-gray-400 truncate">{r.subscriptionTitle || ""}</div>
+                    </td>
+                    <td className="py-2.5 px-2">
+                      {isExpected ? (
+                        <span className="text-xs text-gray-400">{r.teamId?.name || "—"}</span>
+                      ) : (
+                        <select
+                          value={r.teamId?._id || r.teamId || ""}
+                          onChange={(e) => handleInlineTeamChange(r._id, e.target.value)}
+                          className={`text-xs px-2 py-1 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500 ${!r.teamId ? "border-orange-300 bg-orange-50 text-orange-700" : "border-gray-200 text-gray-700"}`}
+                        >
+                          <option value="">{td("unassigned")}</option>
+                          {activityTeams.map((at) => (
+                            <option key={at.teamId} value={at.teamId}>{at.name}</option>
+                          ))}
+                        </select>
+                      )}
                     </td>
                     <td className="py-2.5 px-2 text-gray-500 text-xs">{regDate ? fmtDate(regDate) : "—"}</td>
                     {detailed && (
@@ -735,7 +876,7 @@ function TabParticipants({ activityId, activity, tc, td }) {
                           <div>
                             <div className="text-xs font-medium text-gray-900">{r.parent1FirstName} {r.parent1LastName}</div>
                             {r.parent1Email && <div className="text-[10px] text-gray-400 truncate">{r.parent1Email}</div>}
-                            {r.parent1Phone && <div className="text-[10px] text-gray-400">{r.parent1Phone}</div>}
+                            {r.parent1Phone && <div className="text-[10px] text-gray-400" dir="ltr">{r.parent1PhonePrefix || "+1"} {r.parent1Phone}</div>}
                           </div>
                         ) : <span className="text-gray-400 text-xs">—</span>}
                       </td>
@@ -746,7 +887,7 @@ function TabParticipants({ activityId, activity, tc, td }) {
                           <div>
                             <div className="text-xs font-medium text-gray-900">{r.parent2FirstName} {r.parent2LastName}</div>
                             {r.parent2Email && <div className="text-[10px] text-gray-400 truncate">{r.parent2Email}</div>}
-                            {r.parent2Phone && <div className="text-[10px] text-gray-400">{r.parent2Phone}</div>}
+                            {r.parent2Phone && <div className="text-[10px] text-gray-400" dir="ltr">{r.parent2PhonePrefix || "+1"} {r.parent2Phone}</div>}
                           </div>
                         ) : <span className="text-gray-400 text-xs">—</span>}
                       </td>
@@ -772,39 +913,73 @@ function TabParticipants({ activityId, activity, tc, td }) {
                         </button>
                         {actionsOpen === rowId && (
                           <div className="absolute right-0 top-full mt-1 bg-white border rounded-lg shadow-lg z-20 py-1 min-w-[180px]">
-                            {isExpected ? (
+                            {(() => {
+                              const hasAnyContact = r.parent1Email || r.parent1Phone || r.playerEmail || r.playerPhone || r.parent2Email || r.parent2Phone;
+                              if (isExpected) return (
                               <>
                                 <button onClick={() => { setActionsOpen(null); openInvoiceForExpected(r); }}
-                                  className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("viewInvoice")}</button>
-                                {r.parent1Email && (
-                                  <button onClick={() => { setActionsOpen(null); sendPaymentLinkForExpected(r); }}
-                                    className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("copyPaymentLink")}</button>
+                                  className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("editInvoice")}</button>
+                                {r.playerId && (
+                                  <button onClick={() => { setActionsOpen(null); openPlayerCard(r.playerId); }}
+                                    className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("playerCard")}</button>
                                 )}
                                 <button onClick={() => { setActionsOpen(null); copyRegistrationLinkForExpected(r); }}
                                   className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("copyRegistrationLink")}</button>
+                                {hasAnyContact && !r.registrationCompletedAt && (
+                                  <button onClick={async () => { setActionsOpen(null); const order = await ensureOrder(r); if (order) setSendLinkModal({ type: "registration", orderId: order._id, row: { ...r, _id: order._id } }); }}
+                                    className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("sendRegistrationLink")}</button>
+                                )}
+                                {hasAnyContact && (
+                                  <button onClick={async () => { setActionsOpen(null); const order = await ensureOrder(r); if (order) setSendLinkModal({ type: "payment", orderId: order._id, row: { ...r, _id: order._id } }); }}
+                                    className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("sendPaymentLink")}</button>
+                                )}
+                                <button onClick={() => { setActionsOpen(null); sendPaymentLinkForExpected(r); }}
+                                  className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("copyPaymentLink")}</button>
                                 <button onClick={() => { setActionsOpen(null); payFromAdminForExpected(r); }}
                                   className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("payFromAdmin")}</button>
+                                {hasAnyContact && (
+                                  <button onClick={() => { setActionsOpen(null); openSendMessage(r); }}
+                                    className="w-full text-start px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50">{td("sendMessage")}</button>
+                                )}
                               </>
-                            ) : (
+                              );
+                              return (
                               <>
                                 <button onClick={() => { setActionsOpen(null); openInvoiceModal(r); }}
-                                  className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("viewInvoice")}</button>
-                                {r.parent1Email && r.status !== "paid" && (
-                                  <button onClick={() => { setActionsOpen(null); sendPaymentLink(r._id); }}
+                                  className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("editInvoice")}</button>
+                                <button onClick={() => { setActionsOpen(null); openPlayerCard(r.playerId || null, r); }}
+                                  className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("playerCard")}</button>
+                                {!r.registrationCompletedAt && (
+                                  <button onClick={() => { setActionsOpen(null); copyRegistrationLink(r._id); }}
                                     className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-                                    {td("copyPaymentLink")}
+                                    {td("copyRegistrationLink")}
                                   </button>
                                 )}
-                                <button onClick={() => { setActionsOpen(null); copyRegistrationLink(r._id); }}
-                                  className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-                                  {td("copyRegistrationLink")}
-                                </button>
+                                {!r.registrationCompletedAt && hasAnyContact && (
+                                  <button onClick={() => { setActionsOpen(null); setSendLinkModal({ type: "registration", orderId: r._id, row: r }); }}
+                                    className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("sendRegistrationLink")}</button>
+                                )}
+                                {r.status !== "paid" && hasAnyContact && (
+                                  <button onClick={() => { setActionsOpen(null); setSendLinkModal({ type: "payment", orderId: r._id, row: r }); }}
+                                    className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("sendPaymentLink")}</button>
+                                )}
                                 {r.status !== "paid" && (
-                                  <button onClick={() => { setActionsOpen(null); payFromAdmin(r._id); }}
-                                    className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("payFromAdmin")}</button>
+                                  <>
+                                    <button onClick={() => { setActionsOpen(null); sendPaymentLink(r._id); }}
+                                      className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
+                                      {td("copyPaymentLink")}
+                                    </button>
+                                    <button onClick={() => { setActionsOpen(null); payFromAdmin(r._id); }}
+                                      className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("payFromAdmin")}</button>
+                                  </>
+                                )}
+                                {hasAnyContact && (
+                                  <button onClick={() => { setActionsOpen(null); openSendMessage(r); }}
+                                    className="w-full text-start px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 border-t mt-1 pt-1.5">{td("sendMessage")}</button>
                                 )}
                               </>
-                            )}
+                              );
+                            })()}
                           </div>
                         )}
                       </div>
@@ -832,9 +1007,10 @@ function TabParticipants({ activityId, activity, tc, td }) {
         />
       )}
 
-      {/* SEND PAYMENT EMAILS MODAL */}
+      {/* SEND PAYMENT LINKS MODAL */}
       {showEmailModal && (
-        <SendPaymentEmailsModal
+        <SendBulkLinksModal
+          type="payment"
           activityId={activityId}
           activity={activity}
           orders={orders}
@@ -842,8 +1018,29 @@ function TabParticipants({ activityId, activity, tc, td }) {
           onClose={() => setShowEmailModal(false)}
           onDone={(msg) => { setShowEmailModal(false); setToast({ message: msg, type: "success" }); refreshList(); }}
           onError={(msg) => setToast({ message: msg, type: "error" })}
-          tc={tc}
-          td={td}
+        />
+      )}
+
+      {/* SEND REGISTRATION LINKS MODAL */}
+      {showRegModal && (
+        <SendBulkLinksModal
+          type="registration"
+          activityId={activityId}
+          activity={activity}
+          orders={orders}
+          expectedPlayers={expectedPlayers}
+          onClose={() => setShowRegModal(false)}
+          onDone={(msg) => { setShowRegModal(false); setToast({ message: msg, type: "success" }); refreshList(); }}
+          onError={(msg) => setToast({ message: msg, type: "error" })}
+        />
+      )}
+
+      {/* SEND MESSAGE MODAL */}
+      {sendMessageTarget && (
+        <SendMessageModal
+          recipient={sendMessageTarget}
+          onClose={() => setSendMessageTarget(null)}
+          onSent={(msg) => setToast({ message: msg, type: "success" })}
         />
       )}
 
@@ -869,6 +1066,681 @@ function TabParticipants({ activityId, activity, tc, td }) {
       {/* CREATE ORDER MODAL */}
       {showCreate && <CreateOrderModal activityTeams={activityTeams} activitySubs={activitySubs} saving={saving} onCreate={createOrder} onClose={() => setShowCreate(false)}
         prefill={typeof showCreate === "object" ? showCreate : null} tc={tc} td={td} />}
+
+      {/* SEND LINK MODAL */}
+      {sendLinkModal && (
+        <SendLinkRecipientModal
+          type={sendLinkModal.type}
+          orderId={sendLinkModal.orderId}
+          row={sendLinkModal.row}
+          activityId={activityId}
+          onClose={() => setSendLinkModal(null)}
+          onDone={(msg) => { setSendLinkModal(null); setToast({ message: msg, type: "success" }); fetchOrders(); }}
+          onError={(msg) => setToast({ message: msg, type: "error" })}
+          tc={tc}
+          td={td}
+        />
+      )}
+
+      {/* PLAYER CARD MODAL */}
+      {playerCardData && (
+        <PlayerCardModal
+          player={playerCardData}
+          activityId={activityId}
+          onClose={() => setPlayerCardData(null)}
+          onUpdated={() => { fetchOrders(); }}
+          tc={tc}
+          td={td}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ============== SEND LINK RECIPIENT MODAL ============== */
+function SendLinkRecipientModal({ type, orderId, row, activityId, onClose, onDone, onError, tc, td }) {
+  const [selections, setSelections] = useState({});
+  const [sending, setSending] = useState(false);
+
+  const targets = [
+    {
+      key: "player",
+      label: td("player"),
+      name: `${row.playerFirstName || ""} ${row.playerLastName || ""}`.trim(),
+      email: row.playerEmail || "",
+      phone: row.playerPhone || "",
+      phonePrefix: row.playerPhonePrefix || "+1",
+    },
+    {
+      key: "parent1",
+      label: td("parent1Title"),
+      name: `${row.parent1FirstName || ""} ${row.parent1LastName || ""}`.trim(),
+      email: row.parent1Email || "",
+      phone: row.parent1Phone || "",
+      phonePrefix: row.parent1PhonePrefix || "+1",
+    },
+    {
+      key: "parent2",
+      label: td("parent2Title"),
+      name: `${row.parent2FirstName || ""} ${row.parent2LastName || ""}`.trim(),
+      email: row.parent2Email || "",
+      phone: row.parent2Phone || "",
+      phonePrefix: row.parent2PhonePrefix || "+1",
+    },
+  ].filter((t) => t.name && (t.email || t.phone));
+
+  function toggle(targetKey, channel) {
+    setSelections((prev) => {
+      const k = `${targetKey}_${channel}`;
+      return { ...prev, [k]: !prev[k] };
+    });
+  }
+
+  const selectedCount = Object.values(selections).filter(Boolean).length;
+
+  async function handleSend() {
+    const recipients = [];
+    for (const t of targets) {
+      if (selections[`${t.key}_email`] && t.email) recipients.push({ target: t.key, channel: "email" });
+      if (selections[`${t.key}_sms`] && t.phone) recipients.push({ target: t.key, channel: "sms" });
+    }
+    if (recipients.length === 0) { onError(td("selectAtLeastOneRecipient")); return; }
+
+    setSending(true);
+    try {
+      const endpoint = type === "registration"
+        ? `/api/activities/${activityId}/orders/${orderId}/send-registration-link`
+        : `/api/activities/${activityId}/orders/${orderId}/send-payment-link`;
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipients }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        const r = data.results || {};
+        let msg = td("linksSent", { count: r.sent || recipients.length });
+        if (r.failed > 0) msg += ` (${td("failedCount", { count: r.failed })})`;
+        onDone(msg);
+      } else {
+        onError(data.error || tc("somethingWentWrong"));
+      }
+    } catch {
+      onError(tc("somethingWentWrong"));
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const title = type === "registration" ? td("sendRegistrationLink") : td("sendPaymentLink");
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b flex items-center justify-between">
+          <h3 className="font-bold text-gray-900">{title}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg">×</button>
+        </div>
+        <div className="p-6">
+          <p className="text-sm text-gray-500 mb-4">{td("selectRecipientsAndChannels")}</p>
+          <div className="space-y-3">
+            {targets.map((t) => (
+              <div key={t.key} className="border rounded-lg p-3">
+                <p className="text-sm font-medium text-gray-900 mb-2">{t.label} — {t.name}</p>
+                <div className="flex flex-wrap gap-3">
+                  {t.email ? (
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={!!selections[`${t.key}_email`]} onChange={() => toggle(t.key, "email")} className="rounded text-blue-600" />
+                      <span className="text-sm text-gray-700 flex items-center gap-1">
+                        <svg className="w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                        {t.email}
+                      </span>
+                    </label>
+                  ) : (
+                    <span className="text-xs text-gray-400">{td("noEmail")}</span>
+                  )}
+                  {t.phone ? (
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={!!selections[`${t.key}_sms`]} onChange={() => toggle(t.key, "sms")} className="rounded text-blue-600" />
+                      <span className="text-sm text-gray-700 flex items-center gap-1" dir="ltr">
+                        <svg className="w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+                        {t.phonePrefix} {t.phone}
+                      </span>
+                    </label>
+                  ) : (
+                    <span className="text-xs text-gray-400">{td("noPhone")}</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          {targets.length === 0 && (
+            <p className="text-sm text-gray-400 text-center py-4">{td("noContactInfo")}</p>
+          )}
+        </div>
+        <div className="px-6 py-4 border-t flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">{tc("cancel")}</button>
+          <button onClick={handleSend} disabled={sending || selectedCount === 0}
+            className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+            {sending ? td("sending") : td("sendSelected", { count: selectedCount })}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============== PLAYER CARD MODAL ============== */
+function PlayerCardModal({ player, activityId, onClose, onUpdated, tc, td }) {
+  const isFromOrder = player._fromOrder;
+  const [editingParentIdx, setEditingParentIdx] = useState(null);
+  const [parentForm, setParentForm] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [confirmAction, setConfirmAction] = useState(null);
+  const [editingPlayer, setEditingPlayer] = useState(false);
+  const [playerForm, setPlayerForm] = useState(null);
+
+  const [addingParent, setAddingParent] = useState(false);
+  const [parentSearchQuery, setParentSearchQuery] = useState("");
+  const [parentSearchResults, setParentSearchResults] = useState([]);
+  const [parentSearchLoading, setParentSearchLoading] = useState(false);
+  const [newParentMode, setNewParentMode] = useState(false);
+  const [newParentForm, setNewParentForm] = useState({ firstName: "", lastName: "", email: "", phonePrefix: "+1", phone: "" });
+
+  function startEditPlayer() {
+    if (isFromOrder) {
+      setPlayerForm({
+        firstName: player.playerFirstName || "",
+        lastName: player.playerLastName || "",
+        dateOfBirth: player.playerDob ? new Date(player.playerDob).toISOString().split("T")[0] : "",
+        gender: player.playerGender || "",
+        phonePrefix: player.playerPhonePrefix || "+1",
+        phoneNumber: player.playerPhone || "",
+        email: player.playerEmail || "",
+      });
+    } else {
+      setPlayerForm({
+        firstName: player.firstName || "",
+        lastName: player.lastName || "",
+        dateOfBirth: player.dateOfBirth ? new Date(player.dateOfBirth).toISOString().split("T")[0] : "",
+        gender: player.gender || "",
+        phonePrefix: player.phonePrefix || "+1",
+        phoneNumber: player.phoneNumber || "",
+        email: player.email || "",
+      });
+    }
+    setEditingPlayer(true);
+    setError("");
+  }
+
+  async function savePlayerEdit() {
+    setSaving(true);
+    setError("");
+    try {
+      if (isFromOrder) {
+        const res = await fetch(`/api/activities/${activityId}/orders/${player.orderId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            playerFirstName: playerForm.firstName,
+            playerLastName: playerForm.lastName,
+            playerDob: playerForm.dateOfBirth || null,
+            playerGender: playerForm.gender,
+            playerPhonePrefix: playerForm.phonePrefix,
+            playerPhone: playerForm.phoneNumber,
+            playerEmail: playerForm.email,
+          }),
+        });
+        if (!res.ok) { setError(tc("failedToSave")); return; }
+      } else {
+        const res = await fetch(`/api/players/${player._id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(playerForm),
+        });
+        if (!res.ok) { setError(tc("failedToSave")); return; }
+      }
+      setEditingPlayer(false);
+      onUpdated();
+      onClose();
+    } catch {
+      setError(tc("somethingWentWrong"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function startEditParent(idx) {
+    const p = isFromOrder ? player.parents[idx] : player.parents[idx];
+    if (!p) return;
+    setParentForm({
+      firstName: p.firstName || "",
+      lastName: p.lastName || "",
+      email: p.email || "",
+      phonePrefix: p.phonePrefix || "+1",
+      phone: p.phone || "",
+    });
+    setEditingParentIdx(idx);
+    setError("");
+    setConfirmAction(null);
+  }
+
+  async function saveParentEdit(action) {
+    if (!parentForm) return;
+    setSaving(true);
+    setError("");
+    try {
+      if (isFromOrder) {
+        const field = editingParentIdx === 0 ? "parent1" : "parent2";
+        const body = {};
+        body[`${field}FirstName`] = parentForm.firstName;
+        body[`${field}LastName`] = parentForm.lastName;
+        body[`${field}Email`] = parentForm.email;
+        body[`${field}PhonePrefix`] = parentForm.phonePrefix;
+        body[`${field}Phone`] = parentForm.phone;
+        const res = await fetch(`/api/activities/${activityId}/orders/${player.orderId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) { setError(tc("failedToSave")); setSaving(false); return; }
+      } else {
+        const parentDoc = player.parents[editingParentIdx];
+        if (!parentDoc?._id) { setError(tc("failedToSave")); setSaving(false); return; }
+
+        if (action === "edit") {
+          const res = await fetch(`/api/parents/${parentDoc._id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(parentForm),
+          });
+          if (!res.ok) { setError(tc("failedToSave")); setSaving(false); return; }
+        } else if (action === "replace") {
+          const res = await fetch(`/api/parents`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ...parentForm,
+              phone: parentForm.phone || "0000000000",
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok) { setError(data.error || tc("failedToSave")); setSaving(false); return; }
+          const newParentId = data.parent._id;
+          const newParentIds = player.parents.map((p, i) =>
+            i === editingParentIdx ? newParentId : (p._id || p)
+          );
+          await fetch(`/api/players/${player._id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ parentIds: newParentIds }),
+          });
+        }
+      }
+      setEditingParentIdx(null);
+      setParentForm(null);
+      setConfirmAction(null);
+      onUpdated();
+      onClose();
+    } catch {
+      setError(tc("somethingWentWrong"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleSaveParentClick() {
+    if (isFromOrder) {
+      saveParentEdit("edit");
+      return;
+    }
+    setConfirmAction(true);
+  }
+
+  const searchTimerRef = useRef(null);
+  function handleParentSearch(q) {
+    setParentSearchQuery(q);
+    setNewParentMode(false);
+    clearTimeout(searchTimerRef.current);
+    if (!q.trim()) { setParentSearchResults([]); return; }
+    searchTimerRef.current = setTimeout(async () => {
+      setParentSearchLoading(true);
+      try {
+        const res = await fetch(`/api/parents?search=${encodeURIComponent(q.trim())}`);
+        const data = await res.json();
+        const existingIds = (player.parents || []).map((p) => p._id?.toString?.() || p.toString());
+        setParentSearchResults((data.parents || []).filter((p) => !existingIds.includes(p._id)));
+      } catch { setParentSearchResults([]); }
+      setParentSearchLoading(false);
+    }, 300);
+  }
+
+  async function linkExistingParent(parentDoc) {
+    setSaving(true);
+    setError("");
+    try {
+      if (isFromOrder) {
+        const slot = !player.parents?.length ? "parent1" : "parent2";
+        const body = {};
+        body[`${slot}FirstName`] = parentDoc.firstName;
+        body[`${slot}LastName`] = parentDoc.lastName;
+        body[`${slot}Email`] = parentDoc.email;
+        body[`${slot}PhonePrefix`] = parentDoc.phonePrefix || "+1";
+        body[`${slot}Phone`] = parentDoc.phone;
+        const res = await fetch(`/api/activities/${activityId}/orders/${player.orderId}`, {
+          method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        });
+        if (!res.ok) { setError(tc("failedToSave")); setSaving(false); return; }
+      } else {
+        const newIds = [...(player.parents || []).map((p) => p._id || p), parentDoc._id];
+        const res = await fetch(`/api/players/${player._id}`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ parentIds: newIds }),
+        });
+        if (!res.ok) { setError(tc("failedToSave")); setSaving(false); return; }
+      }
+      setAddingParent(false);
+      setParentSearchQuery("");
+      setParentSearchResults([]);
+      onUpdated();
+      onClose();
+    } catch { setError(tc("somethingWentWrong")); }
+    setSaving(false);
+  }
+
+  async function createAndLinkParent() {
+    if (!newParentForm.firstName || !newParentForm.lastName || !newParentForm.email || !newParentForm.phone) {
+      setError(tc("required")); return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const createRes = await fetch("/api/parents", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newParentForm),
+      });
+      const createData = await createRes.json();
+      if (!createRes.ok) { setError(createData.error || tc("failedToSave")); setSaving(false); return; }
+      await linkExistingParent(createData.parent);
+    } catch { setError(tc("somethingWentWrong")); setSaving(false); }
+  }
+
+  const pName = isFromOrder
+    ? `${player.playerFirstName} ${player.playerLastName}`
+    : `${player.firstName} ${player.lastName}`;
+  const pDob = isFromOrder ? player.playerDob : player.dateOfBirth;
+  const pGender = isFromOrder ? player.playerGender : player.gender;
+  const pPhone = isFromOrder ? player.playerPhone : player.phoneNumber;
+  const pPhonePrefix = isFromOrder ? player.playerPhonePrefix : player.phonePrefix;
+  const pEmail = isFromOrder ? player.playerEmail : player.email;
+  const parents = player.parents || [];
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b flex items-center justify-between">
+          <h3 className="font-bold text-gray-900">{td("playerCard")}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg">×</button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {/* Player Details */}
+          <div className="bg-gray-50 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-semibold text-gray-700">{td("playerDetails")}</h4>
+              {!editingPlayer && (
+                <button onClick={startEditPlayer} className="text-gray-400 hover:text-blue-600 transition" title={tc("edit")}>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                </button>
+              )}
+            </div>
+            {editingPlayer && playerForm ? (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">{tc("firstName")}</label>
+                    <input value={playerForm.firstName} onChange={(e) => setPlayerForm((p) => ({ ...p, firstName: e.target.value }))}
+                      className="w-full border rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">{tc("lastName")}</label>
+                    <input value={playerForm.lastName} onChange={(e) => setPlayerForm((p) => ({ ...p, lastName: e.target.value }))}
+                      className="w-full border rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">{td("dateOfBirth")}</label>
+                    <input type="date" value={playerForm.dateOfBirth} onChange={(e) => setPlayerForm((p) => ({ ...p, dateOfBirth: e.target.value }))}
+                      className="w-full border rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">{td("gender")}</label>
+                    <select value={playerForm.gender} onChange={(e) => setPlayerForm((p) => ({ ...p, gender: e.target.value }))}
+                      className="w-full border rounded-lg px-3 py-2 text-sm">
+                      <option value="">—</option><option value="Male">{td("male")}</option><option value="Female">{td("female")}</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">{tc("phone")}</label>
+                    <PhonePrefixInput prefix={playerForm.phonePrefix} phone={playerForm.phoneNumber}
+                      onPrefixChange={(v) => setPlayerForm((p) => ({ ...p, phonePrefix: v }))}
+                      onPhoneChange={(v) => setPlayerForm((p) => ({ ...p, phoneNumber: v }))} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">{tc("email")}</label>
+                    <input type="email" value={playerForm.email} onChange={(e) => setPlayerForm((p) => ({ ...p, email: e.target.value }))}
+                      className="w-full border rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button onClick={() => { setEditingPlayer(false); setPlayerForm(null); }}
+                    className="flex-1 px-3 py-1.5 text-sm text-gray-600 border rounded-lg hover:bg-gray-50">{tc("cancel")}</button>
+                  <button onClick={savePlayerEdit} disabled={saving}
+                    className="flex-1 px-3 py-1.5 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                    {saving ? tc("saving") : tc("save")}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-1 text-sm">
+                <p className="font-semibold text-gray-900 text-base">{pName}</p>
+                {pDob && <p className="text-gray-500">{td("dateOfBirth")}: {fmtDate(pDob)}</p>}
+                {pGender && <p className="text-gray-500">{td("gender")}: {pGender}</p>}
+                {pPhone && <p className="text-gray-500" dir="ltr">{tc("phone")}: {pPhonePrefix} {pPhone}</p>}
+                {pEmail && <p className="text-gray-500">{tc("email")}: {pEmail}</p>}
+              </div>
+            )}
+          </div>
+
+          {/* Parents */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-semibold text-gray-700">{td("parents")} ({parents.length})</h4>
+              {parents.length < 2 && !addingParent && editingParentIdx === null && (
+                <button onClick={() => { setAddingParent(true); setNewParentMode(false); setParentSearchQuery(""); setParentSearchResults([]); setError(""); }}
+                  className="text-xs font-medium text-blue-600 hover:text-blue-800">+ {td("addParent")}</button>
+              )}
+            </div>
+            {parents.length === 0 && !addingParent ? (
+              <p className="text-sm text-gray-400">{td("noParentsOnRecord")}</p>
+            ) : (
+              <div className="space-y-3">
+                {parents.map((parent, idx) => (
+                  <div key={idx} className="border rounded-lg p-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-medium text-gray-500 uppercase">
+                        {idx === 0 ? td("parent1Title") : td("parent2Title")}
+                      </span>
+                      {editingParentIdx !== idx && (
+                        <button onClick={() => startEditParent(idx)} className="text-gray-400 hover:text-blue-600 transition" title={tc("edit")}>
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                        </button>
+                      )}
+                    </div>
+                    {editingParentIdx === idx && parentForm ? (
+                      <div className="space-y-3 mt-2">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">{tc("firstName")}</label>
+                            <input value={parentForm.firstName} onChange={(e) => setParentForm((p) => ({ ...p, firstName: e.target.value }))}
+                              className="w-full border rounded-lg px-3 py-2 text-sm" />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">{tc("lastName")}</label>
+                            <input value={parentForm.lastName} onChange={(e) => setParentForm((p) => ({ ...p, lastName: e.target.value }))}
+                              className="w-full border rounded-lg px-3 py-2 text-sm" />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">{tc("phone")}</label>
+                            <PhonePrefixInput prefix={parentForm.phonePrefix} phone={parentForm.phone}
+                              onPrefixChange={(v) => setParentForm((p) => ({ ...p, phonePrefix: v }))}
+                              onPhoneChange={(v) => setParentForm((p) => ({ ...p, phone: v }))} />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">{tc("email")}</label>
+                            <input type="email" value={parentForm.email} onChange={(e) => setParentForm((p) => ({ ...p, email: e.target.value }))}
+                              className="w-full border rounded-lg px-3 py-2 text-sm" />
+                          </div>
+                        </div>
+
+                        {confirmAction ? (
+                          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                            <p className="text-sm font-medium text-gray-900 mb-2">{td("parentEditConfirm")}</p>
+                            <div className="flex flex-col gap-2">
+                              <button onClick={() => saveParentEdit("edit")} disabled={saving}
+                                className="w-full px-3 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                                {td("editCurrentParent")}
+                              </button>
+                              <button onClick={() => saveParentEdit("replace")} disabled={saving}
+                                className="w-full px-3 py-2 text-sm text-gray-700 bg-white border rounded-lg hover:bg-gray-50 disabled:opacity-50">
+                                {td("replaceWithNewParent")}
+                              </button>
+                              <button onClick={() => { setConfirmAction(null); }}
+                                className="w-full px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700">{tc("cancel")}</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex gap-2 pt-1">
+                            <button onClick={() => { setEditingParentIdx(null); setParentForm(null); setConfirmAction(null); }}
+                              className="flex-1 px-3 py-1.5 text-sm text-gray-600 border rounded-lg hover:bg-gray-50">{tc("cancel")}</button>
+                            <button onClick={handleSaveParentClick} disabled={saving}
+                              className="flex-1 px-3 py-1.5 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                              {saving ? tc("saving") : tc("save")}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-sm">
+                        <p className="font-medium text-gray-900">{parent.firstName} {parent.lastName}</p>
+                        {parent.email && <p className="text-xs text-gray-500 mt-0.5">{parent.email}</p>}
+                        {parent.phone && <p className="text-xs text-gray-500" dir="ltr">{parent.phonePrefix || "+1"} {parent.phone}</p>}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {addingParent && (
+              <div className="mt-3 border rounded-lg p-3 bg-blue-50/50">
+                {!newParentMode ? (
+                  <div className="space-y-3">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={parentSearchQuery}
+                        onChange={(e) => handleParentSearch(e.target.value)}
+                        placeholder={td("searchParentPlaceholder")}
+                        className="w-full border rounded-lg px-3 py-2 text-sm pr-8"
+                        autoFocus
+                      />
+                      {parentSearchLoading && (
+                        <span className="absolute right-3 top-2.5 text-xs text-gray-400">...</span>
+                      )}
+                    </div>
+
+                    {parentSearchQuery.trim() && parentSearchResults.length > 0 && (
+                      <div className="border rounded-lg bg-white max-h-48 overflow-y-auto divide-y">
+                        {parentSearchResults.map((p) => (
+                          <div key={p._id} className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
+                            <div className="text-sm min-w-0">
+                              <p className="font-medium text-gray-900 truncate">{p.firstName} {p.lastName}</p>
+                              <p className="text-xs text-gray-500 truncate">{p.email}{p.phone ? ` · ${p.phone}` : ""}</p>
+                            </div>
+                            <button onClick={() => linkExistingParent(p)} disabled={saving}
+                              className="shrink-0 ml-2 px-2.5 py-1 text-xs font-medium text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 disabled:opacity-50">
+                              {td("linkParent")}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {parentSearchQuery.trim() && !parentSearchLoading && parentSearchResults.length === 0 && (
+                      <p className="text-xs text-gray-400 text-center py-2">{td("noParentsFound")}</p>
+                    )}
+
+                    <div className="flex gap-2 pt-1">
+                      <button onClick={() => { setAddingParent(false); setParentSearchQuery(""); setParentSearchResults([]); }}
+                        className="flex-1 px-3 py-1.5 text-sm text-gray-600 border rounded-lg hover:bg-gray-50">{tc("cancel")}</button>
+                      <button onClick={() => { setNewParentMode(true); setNewParentForm({ firstName: "", lastName: "", email: "", phonePrefix: "+1", phone: "" }); }}
+                        className="flex-1 px-3 py-1.5 text-sm text-white bg-green-600 rounded-lg hover:bg-green-700">
+                        + {td("createNewParent")}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-xs font-semibold text-gray-600 uppercase">{td("createNewParent")}</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">{tc("firstName")} *</label>
+                        <input value={newParentForm.firstName} onChange={(e) => setNewParentForm((p) => ({ ...p, firstName: e.target.value }))}
+                          className="w-full border rounded-lg px-3 py-2 text-sm" />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">{tc("lastName")} *</label>
+                        <input value={newParentForm.lastName} onChange={(e) => setNewParentForm((p) => ({ ...p, lastName: e.target.value }))}
+                          className="w-full border rounded-lg px-3 py-2 text-sm" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">{tc("phone")} *</label>
+                        <PhonePrefixInput prefix={newParentForm.phonePrefix} phone={newParentForm.phone}
+                          onPrefixChange={(v) => setNewParentForm((p) => ({ ...p, phonePrefix: v }))}
+                          onPhoneChange={(v) => setNewParentForm((p) => ({ ...p, phone: v }))} />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">{tc("email")} *</label>
+                        <input type="email" value={newParentForm.email} onChange={(e) => setNewParentForm((p) => ({ ...p, email: e.target.value }))}
+                          className="w-full border rounded-lg px-3 py-2 text-sm" />
+                      </div>
+                    </div>
+                    <div className="flex gap-2 pt-1">
+                      <button onClick={() => setNewParentMode(false)}
+                        className="flex-1 px-3 py-1.5 text-sm text-gray-600 border rounded-lg hover:bg-gray-50">{tc("back")}</button>
+                      <button onClick={createAndLinkParent} disabled={saving}
+                        className="flex-1 px-3 py-1.5 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                        {saving ? tc("saving") : tc("save")}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {error && <div className="bg-red-50 text-red-600 text-sm px-4 py-2.5 rounded-lg border border-red-200">{error}</div>}
+        </div>
+      </div>
     </div>
   );
 }
@@ -878,9 +1750,9 @@ function CreateOrderModal({ activityTeams, activitySubs, saving, onCreate, onClo
   const [form, setForm] = useState(() => {
     const defaults = {
       playerFirstName: "", playerLastName: "", playerDob: "", playerGender: "",
-      playerPhone: "", playerEmail: "",
-      parent1FirstName: "", parent1LastName: "", parent1Phone: "", parent1Email: "",
-      parent2FirstName: "", parent2LastName: "", parent2Phone: "", parent2Email: "",
+      playerPhonePrefix: "+1", playerPhone: "", playerEmail: "",
+      parent1FirstName: "", parent1LastName: "", parent1PhonePrefix: "+1", parent1Phone: "", parent1Email: "",
+      parent2FirstName: "", parent2LastName: "", parent2PhonePrefix: "+1", parent2Phone: "", parent2Email: "",
       teamId: "", subscriptionId: "", subscriptionTitle: "", subscriptionPriceCents: 0,
       items: [], paidCents: 0, status: "pending", playerId: null,
     };
@@ -940,7 +1812,7 @@ function CreateOrderModal({ activityTeams, activitySubs, saving, onCreate, onClo
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("phone")}</label>
-                  <input value={form.playerPhone} onChange={(e) => update("playerPhone", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+                  <PhonePrefixInput prefix={form.playerPhonePrefix} phone={form.playerPhone} onPrefixChange={(v) => update("playerPhonePrefix", v)} onPhoneChange={(v) => update("playerPhone", v)} /></div>
                 <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("email")}</label>
                   <input value={form.playerEmail} onChange={(e) => update("playerEmail", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
               </div>
@@ -959,7 +1831,8 @@ function CreateOrderModal({ activityTeams, activitySubs, saving, onCreate, onClo
                   <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("lastName")}</label><input value={form.parent1LastName} onChange={(e) => update("parent1LastName", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
                 </div>
                 <div className="grid grid-cols-2 gap-4 mt-3">
-                  <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("phone")}</label><input value={form.parent1Phone} onChange={(e) => update("parent1Phone", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+                  <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("phone")}</label>
+                    <PhonePrefixInput prefix={form.parent1PhonePrefix} phone={form.parent1Phone} onPrefixChange={(v) => update("parent1PhonePrefix", v)} onPhoneChange={(v) => update("parent1Phone", v)} /></div>
                   <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("email")}</label><input value={form.parent1Email} onChange={(e) => update("parent1Email", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
                 </div>
               </div>
@@ -970,7 +1843,8 @@ function CreateOrderModal({ activityTeams, activitySubs, saving, onCreate, onClo
                   <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("lastName")}</label><input value={form.parent2LastName} onChange={(e) => update("parent2LastName", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
                 </div>
                 <div className="grid grid-cols-2 gap-4 mt-3">
-                  <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("phone")}</label><input value={form.parent2Phone} onChange={(e) => update("parent2Phone", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
+                  <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("phone")}</label>
+                    <PhonePrefixInput prefix={form.parent2PhonePrefix} phone={form.parent2Phone} onPrefixChange={(v) => update("parent2PhonePrefix", v)} onPhoneChange={(v) => update("parent2Phone", v)} /></div>
                   <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("email")}</label><input value={form.parent2Email} onChange={(e) => update("parent2Email", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
                 </div>
               </div>
@@ -1327,7 +2201,6 @@ function TabActivityTeams({ activityId, activity, tc, td }) {
       if (o.paidCents >= total && total > 0) fullyPaid++;
       else if (o.paidCents > 0) partialPaid++;
     });
-    teamExpected.forEach((ep) => { expectedRevenue += ep.totalCostCents || 0; });
     return { members, registered, expectedCount: teamExpected.length, expectedRevenue, collected, fullyPaid, partialPaid };
   }
 
@@ -1353,7 +2226,7 @@ function TabActivityTeams({ activityId, activity, tc, td }) {
                     {s.expectedCount > 0 && <span className="text-xs text-orange-600">({s.registered} {td("registered")} · {s.expectedCount} {td("expected")})</span>}
                   </div>
                 </div>
-                <div className="grid grid-cols-4 gap-4 text-center">
+                <div className="grid grid-cols-5 gap-4 text-center">
                   <div className="bg-gray-50 rounded-lg p-3">
                     <p className="text-xs text-gray-500">{td("expectedRevenue")}</p>
                     <p className="text-lg font-bold text-gray-900">${centsToDisplay(s.expectedRevenue)}</p>
@@ -1361,6 +2234,10 @@ function TabActivityTeams({ activityId, activity, tc, td }) {
                   <div className="bg-green-50 rounded-lg p-3">
                     <p className="text-xs text-gray-500">{td("collected")}</p>
                     <p className="text-lg font-bold text-green-700">${centsToDisplay(s.collected)}</p>
+                  </div>
+                  <div className="bg-red-50 rounded-lg p-3">
+                    <p className="text-xs text-gray-500">{td("totalUncollected")}</p>
+                    <p className="text-lg font-bold text-red-600">${centsToDisplay(s.expectedRevenue - s.collected)}</p>
                   </div>
                   <div className="bg-blue-50 rounded-lg p-3">
                     <p className="text-xs text-gray-500">{td("fullyPaid")}</p>
@@ -1415,6 +2292,367 @@ function TabLogs({ activityId, tc, td }) {
   );
 }
 
+/* ============== REQUESTS TAB ============== */
+function TabRequests({ activityId, tc, td }) {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [respondTo, setRespondTo] = useState(null);
+
+  useEffect(() => {
+    fetch(`/api/registration-requests?activityId=${activityId}`)
+      .then((r) => r.json())
+      .then((d) => { if (d.requests) setRequests(d.requests); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [activityId]);
+
+  async function updateStatus(reqId, status) {
+    const res = await fetch(`/api/registration-requests/${reqId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    const d = await res.json();
+    if (d.request) {
+      setRequests((prev) => prev.map((r) => r._id === reqId ? d.request : r));
+    }
+  }
+
+  if (loading) return <p className="text-gray-500 text-center py-8">{tc("loading")}</p>;
+
+  return (
+    <div>
+      <h3 className="text-lg font-bold mb-4">{td("requestsTab", { count: requests.length })}</h3>
+
+      {requests.length === 0 ? (
+        <p className="text-gray-400 text-sm text-center py-8">{td("noRequests")}</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-start">
+                <th className="px-3 py-2 font-medium text-gray-600">{td("requestFrom")}</th>
+                <th className="px-3 py-2 font-medium text-gray-600">{td("requestPlayer")}</th>
+                <th className="px-3 py-2 font-medium text-gray-600">{td("requestSubject")}</th>
+                <th className="px-3 py-2 font-medium text-gray-600">{td("requestStatus")}</th>
+                <th className="px-3 py-2 font-medium text-gray-600">{td("requestDate")}</th>
+                <th className="px-3 py-2 font-medium text-gray-600">{tc("actions")}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {requests.map((req) => (
+                <tr key={req._id} className="hover:bg-gray-50">
+                  <td className="px-3 py-2">
+                    <div className="font-medium text-gray-900">{req.parentName}</div>
+                    <div className="text-xs text-gray-400">{req.parentEmail}</div>
+                    {req.parentPhone && <div className="text-xs text-gray-400">{req.parentPhone}</div>}
+                  </td>
+                  <td className="px-3 py-2 text-gray-700">{req.playerName}</td>
+                  <td className="px-3 py-2">
+                    <div className="font-medium text-gray-900">{req.subject}</div>
+                    <div className="text-xs text-gray-500 mt-0.5 max-w-xs truncate">{req.message}</div>
+                  </td>
+                  <td className="px-3 py-2">
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                      req.status === "open" ? "bg-yellow-100 text-yellow-700" :
+                      req.status === "responded" ? "bg-blue-100 text-blue-700" :
+                      "bg-gray-100 text-gray-600"
+                    }`}>
+                      {td(`request${req.status.charAt(0).toUpperCase() + req.status.slice(1)}`)}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">
+                    {new Date(req.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setRespondTo(req)}
+                        className="text-xs bg-blue-50 text-blue-600 px-2.5 py-1 rounded font-medium hover:bg-blue-100"
+                      >
+                        {td("respondToRequest")}
+                      </button>
+                      {req.status === "open" && (
+                        <button
+                          onClick={() => updateStatus(req._id, "responded")}
+                          className="text-xs bg-gray-50 text-gray-600 px-2 py-1 rounded font-medium hover:bg-gray-100"
+                        >
+                          {td("markResponded")}
+                        </button>
+                      )}
+                      {req.status !== "closed" && (
+                        <button
+                          onClick={() => updateStatus(req._id, "closed")}
+                          className="text-xs bg-gray-50 text-gray-500 px-2 py-1 rounded font-medium hover:bg-gray-100"
+                        >
+                          {td("markClosed")}
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {respondTo && (
+        <RespondModal
+          request={respondTo}
+          onClose={() => setRespondTo(null)}
+          onSent={(msg) => {
+            updateStatus(respondTo._id, "responded");
+            setRespondTo(null);
+          }}
+          tc={tc}
+          td={td}
+        />
+      )}
+    </div>
+  );
+}
+
+function RespondModal({ request, onClose, onSent, tc, td }) {
+  const t = useTranslations("messages");
+
+  const recipients = [];
+  if (request.parentEmail) {
+    recipients.push({ key: "parent", label: `${request.parentName} (${request.parentEmail})`, type: "parent", name: request.parentName, email: request.parentEmail, phone: request.parentPhone || "", phonePrefix: "" });
+  }
+
+  const [selected, setSelected] = useState(() => recipients.map((r) => r.key));
+  const [channel, setChannel] = useState("email");
+  const [subject, setSubject] = useState(`Re: ${request.subject}`);
+  const [bodyHtml, setBodyHtml] = useState("");
+  const [bodyText, setBodyText] = useState("");
+  const [smsNotification, setSmsNotification] = useState(false);
+  const [smsNotificationText, setSmsNotificationText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [toast, setToast] = useState(null);
+  const bodyRef = useRef(null);
+  const imgInputRef = useRef(null);
+
+  function execCmd(cmd, val = null) {
+    bodyRef.current?.focus();
+    document.execCommand(cmd, false, val);
+  }
+
+  function insertLink() {
+    const url = prompt(t("enterUrl"));
+    if (url) execCmd("createLink", url);
+  }
+
+  function handleImageUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file || !file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      bodyRef.current?.focus();
+      document.execCommand("insertImage", false, reader.result);
+      const imgs = bodyRef.current?.querySelectorAll("img");
+      if (imgs) imgs.forEach((img) => { img.style.maxWidth = "100%"; img.style.width = "100%"; img.style.height = "auto"; img.style.display = "block"; img.style.borderRadius = "8px"; img.style.margin = "8px 0"; });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  }
+
+  function toggleRecipient(key) {
+    setSelected((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
+  }
+
+  async function handleSend() {
+    const chosenRecipients = recipients.filter((r) => selected.includes(r.key));
+    if (chosenRecipients.length === 0) { setToast({ message: td("selectAtLeastOneRecipient"), type: "error" }); return; }
+
+    if (channel === "email") {
+      const html = bodyRef.current?.innerHTML || bodyHtml;
+      if (!subject.trim()) { setToast({ message: t("subjectRequired"), type: "error" }); return; }
+      if (!html.trim() || html === "<br>") { setToast({ message: t("bodyRequired"), type: "error" }); return; }
+
+      setSending(true);
+      try {
+        const payload = {
+          channel: "email",
+          subject: subject.trim(),
+          bodyHtml: html,
+          recipients: chosenRecipients.map((r) => ({ type: r.type, name: r.name, email: r.email })),
+        };
+        if (smsNotification) {
+          payload.smsNotification = true;
+          const rawText = smsNotificationText || `${t("smsNotificationPrefix")}\n${t("smsNotificationSubjectLabel")} {email_subject}`;
+          payload.smsText = rawText.replace(/\{email_subject\}/g, subject.trim());
+        }
+        const res = await fetch("/api/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const d = await res.json();
+        if (d.message?.status === "sent") {
+          if (onSent) onSent(t("sentSuccess"));
+          onClose();
+        } else {
+          setToast({ message: d.error || t("sentFailed"), type: "error" });
+        }
+      } catch {
+        setToast({ message: t("sentFailed"), type: "error" });
+      }
+      setSending(false);
+    } else {
+      if (!bodyText.trim()) { setToast({ message: t("smsBodyRequired"), type: "error" }); return; }
+
+      setSending(true);
+      try {
+        const res = await fetch("/api/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            channel: "sms",
+            subject: "SMS",
+            bodyText: bodyText.trim(),
+            recipients: chosenRecipients.map((r) => ({ type: r.type, name: r.name, email: r.email, phonePrefix: r.phonePrefix, phone: r.phone })),
+          }),
+        });
+        const d = await res.json();
+        if (d.message?.status === "sent") {
+          if (onSent) onSent(t("smsSentSuccess"));
+          onClose();
+        } else {
+          setToast({ message: d.error || t("smsSendFailed"), type: "error" });
+        }
+      } catch {
+        setToast({ message: t("smsSendFailed"), type: "error" });
+      }
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b flex items-center justify-between">
+          <h3 className="font-bold text-gray-900">{td("respondToRequest")}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg">×</button>
+        </div>
+        <div className="p-6 space-y-4">
+          {/* Original request summary */}
+          <div className="bg-gray-50 rounded-lg p-3 text-sm space-y-1">
+            <div><span className="font-medium text-gray-500">{td("requestFrom")}:</span> <span className="text-gray-900">{request.parentName}</span></div>
+            <div><span className="font-medium text-gray-500">{td("requestSubject")}:</span> <span className="text-gray-900">{request.subject}</span></div>
+            <p className="text-gray-600 text-xs mt-1">{request.message}</p>
+          </div>
+
+          {/* Recipient checkboxes */}
+          <div>
+            <p className="text-sm font-medium text-gray-700 mb-2">{td("respondDesc")}</p>
+            <div className="space-y-1.5">
+              {recipients.map((r) => (
+                <label key={r.key} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                  <input type="checkbox" checked={selected.includes(r.key)} onChange={() => toggleRecipient(r.key)}
+                    className="rounded border-gray-300 text-blue-600" />
+                  {r.label}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Channel */}
+          <div className="flex items-center gap-3">
+            <div className="flex bg-gray-100 rounded-lg p-0.5">
+              <button type="button" onClick={() => setChannel("email")}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${channel === "email" ? "bg-white shadow text-blue-600" : "text-gray-500"}`}>
+                {t("channelEmail")}
+              </button>
+              <button type="button" onClick={() => setChannel("sms")}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${channel === "sms" ? "bg-white shadow text-blue-600" : "text-gray-500"}`}>
+                {t("channelSMS")}
+              </button>
+            </div>
+          </div>
+
+          {channel === "email" && (
+            <>
+              <input type="text" value={subject} onChange={(e) => setSubject(e.target.value)}
+                placeholder={t("subjectPlaceholder")}
+                className="w-full border rounded-lg px-3 py-2 text-sm" />
+
+              <div className="border rounded-lg overflow-hidden">
+                <div className="flex items-center gap-0.5 px-2 py-1.5 bg-gray-50 border-b flex-wrap">
+                  <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("bold"); }} className="px-2 py-1 rounded text-sm font-bold hover:bg-gray-200" title={td("bold")}>{td("bold")}</button>
+                  <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("italic"); }} className="px-2 py-1 rounded text-sm italic hover:bg-gray-200" title={td("italic")}>{td("italic")}</button>
+                  <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("underline"); }} className="px-2 py-1 rounded text-sm underline hover:bg-gray-200" title={td("underline")}>{td("underline")}</button>
+                  <div className="w-px h-5 bg-gray-300 mx-1" />
+                  <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("insertUnorderedList"); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200" title={td("bulletList")}>{td("bulletList")}</button>
+                  <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("insertOrderedList"); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200" title={td("numberedList")}>{td("numberedList")}</button>
+                  <div className="w-px h-5 bg-gray-300 mx-1" />
+                  <button type="button" onMouseDown={(e) => { e.preventDefault(); insertLink(); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200 text-blue-600" title={td("link")}>{td("link")}</button>
+                  <button type="button" onMouseDown={(e) => { e.preventDefault(); imgInputRef.current?.click(); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200" title={td("image")}>{td("image")}</button>
+                  <input ref={imgInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+                  <div className="w-px h-5 bg-gray-300 mx-1" />
+                  <select onChange={(e) => { if (e.target.value) { execCmd("fontSize", "7"); const sel = window.getSelection(); if (sel.rangeCount) { const span = sel.anchorNode?.parentElement; if (span && span.style) span.style.fontSize = e.target.value; } } e.target.value = ""; }}
+                    className="text-xs border-0 bg-transparent py-1 pr-1 text-gray-600 cursor-pointer hover:bg-gray-200 rounded" defaultValue="">
+                    <option value="" disabled>{td("size")}</option>
+                    <option value="12px">{td("small")}</option>
+                    <option value="16px">{td("normal")}</option>
+                    <option value="20px">{td("large")}</option>
+                    <option value="24px">{td("xl")}</option>
+                  </select>
+                </div>
+                <div ref={bodyRef} contentEditable suppressContentEditableWarning
+                  onBlur={() => { if (bodyRef.current) setBodyHtml(bodyRef.current.innerHTML); }}
+                  className="px-3 py-2 text-sm min-h-[150px] focus:outline-none prose prose-sm max-w-none"
+                  style={{ overflowY: "auto", maxHeight: "250px" }}
+                />
+              </div>
+
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={smsNotification} onChange={(e) => {
+                  setSmsNotification(e.target.checked);
+                  if (e.target.checked && !smsNotificationText) {
+                    setSmsNotificationText(`${t("smsNotificationPrefix")}\n${t("smsNotificationSubjectLabel")} {email_subject}`);
+                  }
+                }} className="rounded" />
+                <span className="text-sm text-gray-700">{t("smsNotification")}</span>
+              </label>
+              {smsNotification && (
+                <>
+                  <textarea value={smsNotificationText} onChange={(e) => setSmsNotificationText(e.target.value)}
+                    rows={2} className="w-full border rounded-lg px-3 py-2 text-sm resize-none" />
+                  <p className="text-xs text-gray-400">{t("smsVariableHint")}</p>
+                </>
+              )}
+            </>
+          )}
+
+          {channel === "sms" && (
+            <>
+              <textarea value={bodyText} onChange={(e) => setBodyText(e.target.value)}
+                placeholder={t("smsBodyPlaceholder")}
+                rows={5} className="w-full border rounded-lg px-3 py-2 text-sm resize-none" />
+              <p className="text-xs text-gray-400">{t("smsCharCount", { count: bodyText.length })}</p>
+            </>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">{tc("cancel")}</button>
+          <button onClick={handleSend} disabled={sending || selected.length === 0}
+            className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+            {sending ? t("sending") : t("send")}
+          </button>
+        </div>
+
+        {toast && (
+          <div className={`fixed bottom-6 right-6 px-5 py-3 rounded-lg shadow-lg text-sm font-medium z-[60] ${
+            toast.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"
+          }`} onClick={() => setToast(null)}>{toast.message}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ============== MAIN PAGE ============== */
 export default function ActivityPage({ params }) {
   const resolvedParams = use(params);
@@ -1428,6 +2666,7 @@ export default function ActivityPage({ params }) {
   const OVERVIEW_TABS = [
     { key: "participants", label: td("participants") },
     { key: "teams", label: td("teams") },
+    { key: "requests", label: td("requests") },
     { key: "logs", label: td("logs") },
   ];
   const [activity, setActivity] = useState(null);
@@ -1480,6 +2719,7 @@ export default function ActivityPage({ params }) {
       <div className="bg-white rounded-lg border p-6">
         {currentTab === "participants" && <TabParticipants activityId={activityId} activity={activity} tc={tc} td={td} />}
         {currentTab === "teams" && <TabActivityTeams activityId={activityId} activity={activity} tc={tc} td={td} />}
+        {currentTab === "requests" && <TabRequests activityId={activityId} tc={tc} td={td} />}
         {currentTab === "logs" && <TabLogs activityId={activityId} tc={tc} td={td} />}
       </div>
     </div>

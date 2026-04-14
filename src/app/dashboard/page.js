@@ -449,7 +449,7 @@ function RecordsTable({ stats, filters, t }) {
                     <div className="text-sm text-gray-700">
                       {row.parent1FirstName} {row.parent1LastName}
                     </div>
-                    <div className="text-xs text-gray-400">{row.parent1Phone || row.parent1Email}</div>
+                    <div className="text-xs text-gray-400" dir="ltr">{row.parent1Phone ? `${row.parent1PhonePrefix || "+1"} ${row.parent1Phone}` : row.parent1Email}</div>
                   </td>
                   <td className="px-4 py-2.5 text-sm text-gray-700">
                     {cents(tab === "transactions" ? row.amount : row.totalCostCents)}

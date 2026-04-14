@@ -12,11 +12,12 @@ export async function GET() {
     }
     await dbConnect();
 
-    const club = await Club.findById(session.user.id, "name username logoUrl language smtpHost smtpPort smtpEmail smtpPassword").lean();
+    const club = await Club.findById(session.user.id, "name username logoUrl language supportEmail smtpHost smtpPort smtpEmail smtpPassword").lean();
     if (!club) return NextResponse.json({ error: "Club not found" }, { status: 404 });
 
     return NextResponse.json({ club: {
       name: club.name, username: club.username, logoUrl: club.logoUrl || null, language: club.language || "en",
+      supportEmail: club.supportEmail || "",
       smtpHost: club.smtpHost || "", smtpPort: club.smtpPort || 587, smtpEmail: club.smtpEmail || "",
       smtpPassword: club.smtpPassword ? "••••••••" : "",
     } });
@@ -47,6 +48,7 @@ export async function PUT(request) {
     if (body.language !== undefined && ["en", "he"].includes(body.language)) {
       club.language = body.language;
     }
+    if (body.supportEmail !== undefined) club.supportEmail = body.supportEmail.trim();
     if (body.smtpHost !== undefined) club.smtpHost = body.smtpHost.trim();
     if (body.smtpPort !== undefined) club.smtpPort = parseInt(body.smtpPort, 10) || 587;
     if (body.smtpEmail !== undefined) club.smtpEmail = body.smtpEmail.trim();
@@ -58,6 +60,7 @@ export async function PUT(request) {
 
     return NextResponse.json({ club: {
       name: club.name, username: club.username, logoUrl: club.logoUrl || null, language: club.language || "en",
+      supportEmail: club.supportEmail || "",
       smtpHost: club.smtpHost || "", smtpPort: club.smtpPort || 587, smtpEmail: club.smtpEmail || "",
       smtpPassword: club.smtpPassword ? "••••••••" : "",
     } });

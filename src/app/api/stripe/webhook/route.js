@@ -205,6 +205,13 @@ export async function POST(request) {
               console.error("Failed to send invoice email:", emailErr.message);
             }
 
+            try {
+              const { sendRegistrationPDFEmail } = await import("@/lib/registration-email");
+              await sendRegistrationPDFEmail(order);
+            } catch (pdfErr) {
+              console.error("Failed to send registration PDF:", pdfErr.message);
+            }
+
             console.log(`Activity order ${activityOrderId} updated: paid ${session.amount_total}`);
           }
         } catch (orderErr) {

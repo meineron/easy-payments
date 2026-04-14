@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import dbConnect from "@/lib/mongodb";
 import Order from "@/models/Order";
 import Activity from "@/models/Activity";
+import Player from "@/models/Player";
+import Parent from "@/models/Parent";
 
 function computeTotal(order) {
   let total = order.subscriptionPriceCents || 0;
@@ -13,6 +15,95 @@ function computeTotal(order) {
   else if (order.discountType === "percentage") total -= Math.round(total * (order.discountValue || 0) / 100);
   total -= order.couponDiscountCents || 0;
   return Math.max(0, total);
+}
+
+async function findOrCreateParent(clubId, firstName, lastName, email, phone, phonePrefix) {
+  if (!firstName || !lastName || !email) return null;
+  let parent = await Parent.findOne({ clubId, email: email.trim().toLowerCase() });
+  if (parent) {
+    parent.firstName = firstName.trim();
+    parent.lastName = lastName.trim();
+    if (phone) {
+      parent.phone = phone.trim();
+      parent.phonePrefix = phonePrefix || "+1";
+    }
+    await parent.save();
+    return parent;
+  }
+  parent = await Parent.create({
+    clubId,
+    firstName: firstName.trim(),
+    lastName: lastName.trim(),
+    email: email.trim().toLowerCase(),
+    phonePrefix: phonePrefix || "+1",
+    phone: (phone || "").trim() || "0000000000",
+  });
+  return parent;
+}
+
+async function findOrCreatePlayer(clubId, body) {
+  const playerQuery = {
+    clubId,
+    firstName: body.playerFirstName.trim(),
+    lastName: body.playerLastName.trim(),
+  };
+  if (body.playerDob) playerQuery.dateOfBirth = new Date(body.playerDob);
+  else playerQuery.dateOfBirth = null;
+
+  let player = await Player.findOne(playerQuery).collation({ locale: "en", strength: 2 });
+
+  if (!player) {
+    const teamEntries = [];
+    if (body.teamId) {
+      const Team = (await import("@/models/Team")).default;
+      const teamDoc = await Team.findById(body.teamId).lean();
+      if (teamDoc) teamEntries.push({ teamId: body.teamId, season: teamDoc.season || "" });
+    }
+    player = await Player.create({
+      clubId,
+      firstName: body.playerFirstName.trim(),
+      lastName: body.playerLastName.trim(),
+      dateOfBirth: body.playerDob || null,
+      gender: body.playerGender || "",
+      phonePrefix: body.playerPhonePrefix || "+1",
+      phoneNumber: (body.playerPhone || "").trim(),
+      email: (body.playerEmail || "").trim().toLowerCase(),
+      teams: teamEntries,
+      registrationTeamId: body.teamId || null,
+      parents: [],
+    });
+  }
+
+  const parentIds = [];
+  const p1 = await findOrCreateParent(clubId, body.parent1FirstName, body.parent1LastName, body.parent1Email, body.parent1Phone, body.parent1PhonePrefix);
+  if (p1) parentIds.push(p1._id);
+  const p2 = await findOrCreateParent(clubId, body.parent2FirstName, body.parent2LastName, body.parent2Email, body.parent2Phone, body.parent2PhonePrefix);
+  if (p2) parentIds.push(p2._id);
+
+  if (parentIds.length > 0) {
+    const existingParentIds = player.parents.map((p) => String(p));
+    const newParentIds = parentIds.filter((pid) => !existingParentIds.includes(String(pid)));
+    if (newParentIds.length > 0) {
+      await Player.updateOne({ _id: player._id }, { $addToSet: { parents: { $each: newParentIds } } });
+      await Parent.updateMany({ _id: { $in: newParentIds } }, { $addToSet: { players: player._id } });
+    }
+  }
+
+  return player._id;
+}
+
+async function syncParentsToPlayer(clubId, playerId, orderData) {
+  if (!playerId) return;
+  const parentIds = [];
+  const p1 = await findOrCreateParent(clubId, orderData.parent1FirstName, orderData.parent1LastName, orderData.parent1Email, orderData.parent1Phone, orderData.parent1PhonePrefix);
+  if (p1) parentIds.push(p1._id);
+  const p2 = await findOrCreateParent(clubId, orderData.parent2FirstName, orderData.parent2LastName, orderData.parent2Email, orderData.parent2Phone, orderData.parent2PhonePrefix);
+  if (p2) parentIds.push(p2._id);
+
+  if (parentIds.length > 0) {
+    await Player.updateOne({ _id: playerId }, { parents: parentIds });
+    await Parent.updateMany({ _id: { $in: parentIds } }, { $addToSet: { players: playerId } });
+  }
 }
 
 export async function PUT(request, { params }) {
@@ -34,16 +125,39 @@ export async function PUT(request, { params }) {
 
       const fields = [
         "playerFirstName", "playerLastName", "playerDob", "playerGender",
-        "playerPhone", "playerEmail",
-        "parent1FirstName", "parent1LastName", "parent1Phone", "parent1Email",
-        "parent2FirstName", "parent2LastName", "parent2Phone", "parent2Email",
+        "playerPhonePrefix", "playerPhone", "playerEmail",
+        "parent1FirstName", "parent1LastName", "parent1PhonePrefix", "parent1Phone", "parent1Email",
+        "parent2FirstName", "parent2LastName", "parent2PhonePrefix", "parent2Phone", "parent2Email",
         "teamId", "subscriptionId", "subscriptionTitle", "subscriptionPriceCents",
         "formData",
       ];
       fields.forEach((f) => { if (body[f] !== undefined) order[f] = body[f]; });
       if (body.waiverConsents) order.waiverConsents = body.waiverConsents;
       order.totalCostCents = computeTotal(order);
+
+      if (!order.playerId && order.playerFirstName && order.playerLastName) {
+        try {
+          order.playerId = await findOrCreatePlayer(order.clubId, order);
+        } catch (e) { console.error("Player creation in token save:", e); }
+      }
+
       await order.save();
+
+      if (order.playerId) {
+        try {
+          await syncParentsToPlayer(order.clubId, order.playerId, order);
+        } catch (e) { console.error("Parent sync in token save:", e); }
+      }
+
+      if (!activity.hasPayment || order.totalCostCents === 0) {
+        order.registrationCompletedAt = order.registrationCompletedAt || new Date();
+        order.status = "paid";
+        await order.save();
+        try {
+          const { sendRegistrationPDFEmail } = await import("@/lib/registration-email");
+          await sendRegistrationPDFEmail(order);
+        } catch (e) { console.error("Registration PDF email (token):", e); }
+      }
 
       const populated = await Order.findById(order._id).populate("teamId", "name season gender").lean();
       return NextResponse.json({ order: populated });
@@ -57,21 +171,30 @@ export async function PUT(request, { params }) {
       return NextResponse.json({ error: "Player name is required" }, { status: 400 });
     }
 
+    let playerId = null;
+    try {
+      playerId = await findOrCreatePlayer(activity.clubId, body);
+    } catch (e) { console.error("Player creation in public save:", e); }
+
     const orderData = {
       activityId,
       clubId: activity.clubId,
+      playerId,
       playerFirstName: body.playerFirstName,
       playerLastName: body.playerLastName,
       playerDob: body.playerDob || null,
       playerGender: body.playerGender || "",
+      playerPhonePrefix: body.playerPhonePrefix || "+1",
       playerPhone: body.playerPhone || "",
       playerEmail: body.playerEmail || "",
       parent1FirstName: body.parent1FirstName || "",
       parent1LastName: body.parent1LastName || "",
+      parent1PhonePrefix: body.parent1PhonePrefix || "+1",
       parent1Phone: body.parent1Phone || "",
       parent1Email: body.parent1Email || "",
       parent2FirstName: body.parent2FirstName || "",
       parent2LastName: body.parent2LastName || "",
+      parent2PhonePrefix: body.parent2PhonePrefix || "+1",
       parent2Phone: body.parent2Phone || "",
       parent2Email: body.parent2Email || "",
       teamId: body.teamId || null,
@@ -86,6 +209,17 @@ export async function PUT(request, { params }) {
     orderData.totalCostCents = computeTotal(orderData);
 
     const order = await Order.create(orderData);
+
+    if (!activity.hasPayment || orderData.totalCostCents === 0) {
+      order.registrationCompletedAt = new Date();
+      order.status = "paid";
+      await order.save();
+      try {
+        const { sendRegistrationPDFEmail } = await import("@/lib/registration-email");
+        await sendRegistrationPDFEmail(order);
+      } catch (e) { console.error("Registration PDF email:", e); }
+    }
+
     const populated = await Order.findById(order._id).populate("teamId", "name season gender").lean();
     return NextResponse.json({ order: populated }, { status: 201 });
   } catch (error) {

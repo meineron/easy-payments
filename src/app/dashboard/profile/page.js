@@ -17,6 +17,7 @@ export default function ClubProfilePage() {
   const [logoUrl, setLogoUrl] = useState(null);
   const [logoPreview, setLogoPreview] = useState(null);
   const [language, setLanguage] = useState("en");
+  const [supportEmail, setSupportEmail] = useState("");
   const [smtpHost, setSmtpHost] = useState("");
   const [smtpPort, setSmtpPort] = useState("587");
   const [smtpEmail, setSmtpEmail] = useState("");
@@ -33,6 +34,7 @@ export default function ClubProfilePage() {
           setLogoUrl(d.club.logoUrl || null);
           setLogoPreview(d.club.logoUrl || null);
           setLanguage(d.club.language || "en");
+          setSupportEmail(d.club.supportEmail || "");
           setSmtpHost(d.club.smtpHost || "");
           setSmtpPort(String(d.club.smtpPort || 587));
           setSmtpEmail(d.club.smtpEmail || "");
@@ -84,7 +86,7 @@ export default function ClubProfilePage() {
       const res = await fetch("/api/club/profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), logoUrl, language, smtpHost, smtpPort, smtpEmail, smtpPassword }),
+        body: JSON.stringify({ name: name.trim(), logoUrl, language, supportEmail, smtpHost, smtpPort, smtpEmail, smtpPassword }),
       });
       const data = await res.json();
       if (data.club) {
@@ -173,6 +175,15 @@ export default function ClubProfilePage() {
             <option value="he">{t("langHebrew")}</option>
           </select>
           <p className="text-xs text-gray-400 mt-1">{t("languageHint")}</p>
+        </div>
+
+        {/* Support Email */}
+        <div className="p-6 border-b">
+          <label className="block text-sm font-medium text-gray-700 mb-1">{t("supportEmail")}</label>
+          <p className="text-xs text-gray-400 mb-2">{t("supportEmailHint")}</p>
+          <input type="email" value={supportEmail} onChange={(e) => setSupportEmail(e.target.value)}
+            placeholder="support@club.com"
+            className="w-full border rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
         </div>
 
         {/* Email Settings */}

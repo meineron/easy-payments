@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import PhonePrefixInput from "@/components/PhonePrefixInput";
 
 const US_STATES = [
   "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
@@ -92,7 +93,7 @@ export default function TeamDetailPage() {
     return {
       firstName: "", lastName: "", dateOfBirth: "", gender: "",
       primaryPosition: "", secondaryPosition: "", school: "",
-      phoneNumber: "", email: "", address: "", city: "", state: "", zip: "",
+      phonePrefix: "+1", phoneNumber: "", email: "", address: "", city: "", state: "", zip: "",
     };
   }
 
@@ -160,7 +161,7 @@ export default function TeamDetailPage() {
         gender: p.gender || "—",
         dob: p.dateOfBirth ? new Date(p.dateOfBirth).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "—",
         email: p.email || "—",
-        phone: p.phoneNumber || "—",
+        phone: p.phoneNumber ? `${p.phonePrefix || "+1"} ${p.phoneNumber}` : "—",
         address: [p.address, p.city, p.state, p.zip].filter(Boolean).join(", ") || "—",
         position: [p.primaryPosition, p.secondaryPosition].filter(Boolean).join(" / ") || "—",
         school: p.school || "—",
@@ -456,6 +457,7 @@ export default function TeamDetailPage() {
       primaryPosition: player.primaryPosition || "",
       secondaryPosition: player.secondaryPosition || "",
       school: player.school || "",
+      phonePrefix: player.phonePrefix || "+1",
       phoneNumber: player.phoneNumber || "",
       email: player.email || "",
       parent1: p1 || null,
@@ -578,7 +580,7 @@ export default function TeamDetailPage() {
                         ) : "—"}
                       </td>
                     )}
-                    {visibleCols.has("phone") && <td className="px-4 py-3 text-gray-700 text-xs">{row.phoneNumber || "—"}</td>}
+                    {visibleCols.has("phone") && <td className="px-4 py-3 text-gray-700 text-xs" dir="ltr">{row.phoneNumber ? `${row.phonePrefix || "+1"} ${row.phoneNumber}` : "—"}</td>}
                     {visibleCols.has("email") && <td className="px-4 py-3 text-gray-700 text-xs">{row.email || "—"}</td>}
                     <td className="px-4 py-3">
                       {row.parent1 ? (
@@ -894,8 +896,7 @@ export default function TeamDetailPage() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                      <input type="tel" value={newPlayer.phoneNumber} onChange={(e) => setNewPlayer({ ...newPlayer, phoneNumber: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 outline-none focus:ring-2 focus:ring-blue-500" />
+                      <PhonePrefixInput prefix={newPlayer.phonePrefix} phone={newPlayer.phoneNumber} onPrefixChange={(v) => setNewPlayer({ ...newPlayer, phonePrefix: v })} onPhoneChange={(v) => setNewPlayer({ ...newPlayer, phoneNumber: v })} />
                     </div>
                   </div>
                   <div>

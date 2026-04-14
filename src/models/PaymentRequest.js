@@ -24,13 +24,16 @@ const PaymentRequestSchema = new mongoose.Schema({
   recipientName: { type: String, default: "" },
   sendMethod: {
     type: String,
-    enum: ["parent1", "parent2", "custom", "copy_only"],
+    enum: ["parent1", "parent2", "sms_parent1", "sms_parent2", "custom", "copy_only"],
     default: "copy_only",
   },
 
   paymentToken: { type: String, default: null, unique: true, sparse: true },
   stripeSessionId: { type: String, default: "" },
   stripePaymentIntentId: { type: String, default: "" },
+
+  allowedInstallments: { type: [Number], default: [1] },
+  chosenInstallments: { type: Number, default: 1 },
 
   note: { type: String, default: "" },
   sentAt: { type: Date, default: null },

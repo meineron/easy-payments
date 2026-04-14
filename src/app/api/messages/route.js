@@ -4,7 +4,10 @@ import { authOptions } from "@/lib/auth";
 import dbConnect from "@/lib/mongodb";
 import Message from "@/models/Message";
 import Club from "@/models/Club";
+import Parent from "@/models/Parent";
+import Player from "@/models/Player";
 import { sendBulkEmail } from "@/lib/email";
+import { sendBulkSMS, toE164 } from "@/lib/sms";
 
 export async function GET(request) {
   try {
@@ -22,7 +25,7 @@ export async function GET(request) {
     const filter = { clubId: session.user.id };
 
     const [messages, total] = await Promise.all([
-      Message.find(filter, "subject recipientCount sentAt status fromEmail")
+      Message.find(filter, "subject recipientCount sentAt status fromEmail channel bodyText")
         .sort({ sentAt: -1 })
         .skip(skip)
         .limit(limit)
@@ -37,6 +40,46 @@ export async function GET(request) {
   }
 }
 
+async function resolvePhoneNumbers(recipients, clubId) {
+  const phones = [];
+
+  for (const r of recipients) {
+    if (r.phonePrefix && r.phone) {
+      const e164 = toE164(r.phonePrefix, r.phone);
+      if (e164) phones.push(e164);
+      continue;
+    }
+    if (r.phone) {
+      const e164 = toE164("", r.phone);
+      if (e164) { phones.push(e164); continue; }
+    }
+  }
+
+  const unresolvedParentIds = recipients.filter((r) => r.type === "parent" && !r.phone).map((r) => r.id);
+  const unresolvedPlayerIds = recipients.filter((r) => r.type === "player" && !r.phone).map((r) => r.id);
+
+  if (unresolvedParentIds.length > 0) {
+    const parents = await Parent.find({ _id: { $in: unresolvedParentIds }, clubId }, "phonePrefix phone").lean();
+    for (const p of parents) {
+      const e164 = toE164(p.phonePrefix, p.phone);
+      if (e164) phones.push(e164);
+    }
+  }
+  if (unresolvedPlayerIds.length > 0) {
+    const players = await Player.find({ _id: { $in: unresolvedPlayerIds }, clubId }, "parents").lean();
+    const allParentIds = players.flatMap((p) => p.parents || []);
+    if (allParentIds.length > 0) {
+      const parents = await Parent.find({ _id: { $in: allParentIds }, clubId }, "phonePrefix phone").lean();
+      for (const p of parents) {
+        const e164 = toE164(p.phonePrefix, p.phone);
+        if (e164) phones.push(e164);
+      }
+    }
+  }
+
+  return [...new Set(phones)];
+}
+
 export async function POST(request) {
   try {
     const session = await getServerSession(authOptions);
@@ -46,14 +89,8 @@ export async function POST(request) {
     await dbConnect();
 
     const body = await request.json();
-    const { subject, bodyHtml, recipients } = body;
+    const { channel = "email", subject, bodyHtml, bodyText, recipients, smsNotification, smsText } = body;
 
-    if (!subject?.trim()) {
-      return NextResponse.json({ error: "Subject is required" }, { status: 400 });
-    }
-    if (!bodyHtml?.trim()) {
-      return NextResponse.json({ error: "Message body is required" }, { status: 400 });
-    }
     if (!recipients?.length) {
       return NextResponse.json({ error: "At least one recipient is required" }, { status: 400 });
     }
@@ -63,47 +100,107 @@ export async function POST(request) {
       return NextResponse.json({ error: "Club not found" }, { status: 404 });
     }
 
-    const bccList = [...new Set(recipients.map((r) => r.email).filter(Boolean))];
-
     let fromEmail = "";
     let status = "sent";
     let errorReason = "";
 
-    try {
-      fromEmail = await sendBulkEmail({
-        club,
+    if (channel === "email") {
+      if (!subject?.trim()) {
+        return NextResponse.json({ error: "Subject is required" }, { status: 400 });
+      }
+      if (!bodyHtml?.trim()) {
+        return NextResponse.json({ error: "Message body is required" }, { status: 400 });
+      }
+
+      const bccList = [...new Set(recipients.map((r) => r.email).filter(Boolean))];
+
+      try {
+        fromEmail = await sendBulkEmail({
+          club,
+          subject: subject.trim(),
+          bodyHtml,
+          bccList,
+          logoUrl: club.logoUrl,
+        });
+      } catch (err) {
+        console.error("Send bulk email error:", err);
+        status = "failed";
+        fromEmail = club.smtpEmail || process.env.EASYCOACH_EMAIL || "";
+        if (err.code === "EAUTH") errorReason = "auth";
+        else if (err.code === "ECONNREFUSED" || err.code === "ESOCKET") errorReason = "connection";
+        else errorReason = "unknown";
+      }
+
+      if (smsNotification && status === "sent") {
+        try {
+          const phoneNumbers = await resolvePhoneNumbers(recipients, session.user.id);
+          if (phoneNumbers.length > 0) {
+            const text = (smsText || `You have received an email from us. Subject: ${subject.trim()}`).replace(/\{email_subject\}/g, subject.trim());
+            await sendBulkSMS({ phoneNumbers, message: text });
+          }
+        } catch (err) {
+          console.error("SMS notification error:", err);
+        }
+      }
+
+      const message = await Message.create({
+        clubId: session.user.id,
+        channel: "email",
         subject: subject.trim(),
         bodyHtml,
-        bccList,
-        logoUrl: club.logoUrl,
+        recipients,
+        recipientCount: [...new Set(recipients.map((r) => r.email).filter(Boolean))].length,
+        fromEmail,
+        status,
+        smsNotification: !!smsNotification,
+        smsNotificationText: smsText || "",
       });
-    } catch (err) {
-      console.error("Send bulk email error:", err);
-      status = "failed";
-      fromEmail = club.smtpEmail || process.env.EASYCOACH_EMAIL || "";
 
-      if (err.code === "EAUTH") {
-        errorReason = "auth";
-      } else if (err.code === "ECONNREFUSED" || err.code === "ESOCKET") {
-        errorReason = "connection";
-      } else {
-        errorReason = "unknown";
+      return NextResponse.json({
+        message: { _id: message._id, status: message.status, errorReason },
+      }, { status: 201 });
+    } else {
+      if (!bodyText?.trim()) {
+        return NextResponse.json({ error: "SMS message is required" }, { status: 400 });
       }
+
+      const phoneNumbers = await resolvePhoneNumbers(recipients, session.user.id);
+      console.log("SMS resolved phone numbers:", phoneNumbers);
+
+      if (phoneNumbers.length === 0) {
+        status = "failed";
+        errorReason = "no_phones";
+        console.error("SMS send: no phone numbers resolved from recipients");
+      } else {
+        try {
+          const smsResult = await sendBulkSMS({ phoneNumbers, message: bodyText.trim() });
+          console.log("SMS send result:", smsResult);
+          if (smsResult.sent === 0 && smsResult.failed > 0) {
+            status = "failed";
+            errorReason = "sms";
+            console.error("SMS send: all messages failed:", smsResult.errors);
+          }
+        } catch (err) {
+          console.error("Send bulk SMS error:", err);
+          status = "failed";
+          errorReason = "sms";
+        }
+      }
+
+      const message = await Message.create({
+        clubId: session.user.id,
+        channel: "sms",
+        subject: subject?.trim() || "SMS",
+        bodyText: bodyText.trim(),
+        recipients,
+        recipientCount: phoneNumbers.length,
+        status,
+      });
+
+      return NextResponse.json({
+        message: { _id: message._id, status: message.status, errorReason },
+      }, { status: 201 });
     }
-
-    const message = await Message.create({
-      clubId: session.user.id,
-      subject: subject.trim(),
-      bodyHtml,
-      recipients,
-      recipientCount: bccList.length,
-      fromEmail,
-      status,
-    });
-
-    return NextResponse.json({
-      message: { _id: message._id, status: message.status, errorReason },
-    }, { status: 201 });
   } catch (error) {
     console.error("Send message error:", error);
     return NextResponse.json({ error: "Failed to send message" }, { status: 500 });

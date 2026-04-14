@@ -105,7 +105,8 @@ function TabDetails({ activity, onSave, saving, t, tc, td }) {
 
   useEffect(() => {
     fetch("/api/teams").then((r) => r.json()).then((d) => {
-      setSeasons([...new Set((d.teams || []).map((t) => t.season))].sort().reverse());
+      const fromTeams = (d.teams || []).map((t) => t.season);
+      setSeasons([...new Set(["26/27", "25/26", ...fromTeams])].sort().reverse());
     }).catch(() => {});
   }, []);
 

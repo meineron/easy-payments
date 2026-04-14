@@ -8,6 +8,7 @@ import Order from "@/models/Order";
 import Activity from "@/models/Activity";
 import Club from "@/models/Club";
 import { sendCustomPaymentEmail } from "@/lib/email";
+import { sendSMS, toE164 } from "@/lib/sms";
 
 function formatCents(c) { return "$" + ((c || 0) / 100).toFixed(2); }
 
@@ -21,11 +22,8 @@ export async function POST(request, { params }) {
     }
     const { id } = await params;
     const body = await request.json();
-    const { teamIds, subject, bodyHtml } = body;
+    const { teamIds, subject, bodyHtml, channel = "email", smsText, smsNotification } = body;
 
-    if (!subject?.trim() || !bodyHtml?.trim()) {
-      return NextResponse.json({ error: "Subject and message are required" }, { status: 400 });
-    }
     if (!teamIds?.length) {
       return NextResponse.json({ error: "Select at least one team" }, { status: 400 });
     }
@@ -54,21 +52,14 @@ export async function POST(request, { params }) {
     const orders = await Order.find(filter);
 
     if (orders.length === 0) {
-      console.log("Bulk email: no orders matched. Filter:", JSON.stringify(filter));
       return NextResponse.json({ error: "No unpaid orders with parent emails found for selected teams" }, { status: 404 });
     }
-    console.log(`Bulk email: found ${orders.length} matching orders`);
 
     const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
-    const TEST_MODE = true;
-    const TEST_EMAIL = "shlomi@easycoach.club";
-
     let sentCount = 0;
     let errorCount = 0;
 
     for (const order of orders) {
-      if (TEST_MODE && sentCount >= 1) break;
-
       try {
         if (!order.paymentToken) {
           order.paymentToken = crypto.randomUUID();
@@ -77,24 +68,36 @@ export async function POST(request, { params }) {
         await order.save();
 
         const paymentUrl = `${baseUrl}/payment/${order.paymentToken}`;
-        const recipient = TEST_MODE ? TEST_EMAIL : order.parent1Email;
         const totalDue = order.totalCostCents - (order.paidCents || 0);
 
-        await sendCustomPaymentEmail(recipient, {
-          subject,
-          bodyHtml,
-          playerName: `${order.playerFirstName} ${order.playerLastName}`,
-          clubName: club.name || "",
-          activityTitle: activity.title || "",
-          paymentUrl,
-          totalAmount: formatCents(totalDue > 0 ? totalDue : order.totalCostCents),
-          logoUrl: club.logoUrl || null,
-          locale: club.language || "en",
-        });
+        const orderPhoneE164 = toE164(order.parent1PhonePrefix || "+1", order.parent1Phone);
+
+        if (channel === "sms") {
+          if (orderPhoneE164) {
+            const text = (smsText || "").replace("{link}", paymentUrl);
+            await sendSMS({ to: orderPhoneE164, message: text });
+          }
+        } else {
+          await sendCustomPaymentEmail(order.parent1Email, {
+            subject: subject || `${activity.title} — Payment`,
+            bodyHtml: bodyHtml || "<p>Please complete your payment.</p>",
+            playerName: `${order.playerFirstName} ${order.playerLastName}`,
+            clubName: club.name || "",
+            activityTitle: activity.title || "",
+            paymentUrl,
+            totalAmount: formatCents(totalDue > 0 ? totalDue : order.totalCostCents),
+            logoUrl: club.logoUrl || null,
+            locale: club.language || "en",
+          });
+
+          if (smsNotification && orderPhoneE164) {
+            const smsBody = (body.smsText || `You have received an email. Subject: ${subject}`).replace(/\{email_subject\}/g, subject);
+            try { await sendSMS({ to: orderPhoneE164, message: smsBody }); } catch { /* best effort */ }
+          }
+        }
 
         sentCount++;
-
-        if (!TEST_MODE && sentCount % 5 === 0) await sleep(500);
+        if (sentCount % 5 === 0) await sleep(500);
       } catch (err) {
         console.error(`Failed to send to ${order.parent1Email}:`, err.message);
         errorCount++;

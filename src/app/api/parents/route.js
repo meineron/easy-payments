@@ -5,7 +5,7 @@ import dbConnect from "@/lib/mongodb";
 import Parent from "@/models/Parent";
 import Player from "@/models/Player";
 
-export async function GET() {
+export async function GET(request) {
   try {
     const session = await getServerSession(authOptions);
     if (!session || session.user.role !== "club") {
@@ -13,12 +13,27 @@ export async function GET() {
     }
 
     await dbConnect();
-    // Force Player model registration so populate works
     void Player;
 
-    const parents = await Parent.find({ clubId: session.user.id })
+    const { searchParams } = new URL(request.url);
+    const search = searchParams.get("search")?.trim();
+
+    const query = { clubId: session.user.id };
+    if (search) {
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = { $regex: escaped, $options: "i" };
+      query.$or = [
+        { firstName: re },
+        { lastName: re },
+        { email: re },
+        { phone: re },
+      ];
+    }
+
+    const parents = await Parent.find(query)
       .populate("players", "firstName lastName dateOfBirth gender primaryPosition")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .limit(search ? 20 : 0);
 
     return NextResponse.json({ parents });
   } catch (error) {

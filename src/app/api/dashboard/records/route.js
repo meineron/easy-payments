@@ -87,10 +87,12 @@ async function getRegistrations(match, params) {
       _id: o._id,
       playerFirstName: o.playerFirstName,
       playerLastName: o.playerLastName,
+      playerPhonePrefix: o.playerPhonePrefix || "+1",
       playerPhone: o.playerPhone,
       playerEmail: o.playerEmail,
       parent1FirstName: o.parent1FirstName,
       parent1LastName: o.parent1LastName,
+      parent1PhonePrefix: o.parent1PhonePrefix || "+1",
       parent1Phone: o.parent1Phone,
       parent1Email: o.parent1Email,
       teamName: o.teamId?.name || "",
@@ -134,7 +136,7 @@ async function getTransactions(clubId, seasonActivities, params) {
       .populate({
         path: "orderId",
         select:
-          "playerFirstName playerLastName parent1FirstName parent1LastName parent1Phone parent1Email teamId activityId subscriptionTitle totalCostCents paidCents installmentSchedule",
+          "playerFirstName playerLastName parent1FirstName parent1LastName parent1PhonePrefix parent1Phone parent1Email teamId activityId subscriptionTitle totalCostCents paidCents installmentSchedule",
         populate: [
           { path: "teamId", select: "name" },
           { path: "activityId", select: "title" },
@@ -179,6 +181,7 @@ async function getTransactions(clubId, seasonActivities, params) {
         playerLastName: order?.playerLastName || "",
         parent1FirstName: order?.parent1FirstName || "",
         parent1LastName: order?.parent1LastName || "",
+        parent1PhonePrefix: order?.parent1PhonePrefix || "+1",
         parent1Phone: order?.parent1Phone || "",
         parent1Email: order?.parent1Email || tx.customerEmail || "",
         teamName: order?.teamId?.name || "",
@@ -247,6 +250,7 @@ async function getLateDue(match, params) {
         playerLastName: o.playerLastName,
         parent1FirstName: o.parent1FirstName,
         parent1LastName: o.parent1LastName,
+        parent1PhonePrefix: o.parent1PhonePrefix || "+1",
         parent1Phone: o.parent1Phone,
         parent1Email: o.parent1Email,
         teamName: o.teamId?.name || "",

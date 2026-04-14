@@ -31,6 +31,7 @@ export async function GET(request, { params }) {
         totalCents: pr.totalCents,
         note: pr.note,
         status: pr.status,
+        allowedInstallments: pr.allowedInstallments || [1],
       },
       order: {
         playerFirstName: order?.playerFirstName || "",

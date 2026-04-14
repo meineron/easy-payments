@@ -2,7 +2,9 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 
-export default function RecipientPicker({ open, onClose, onConfirm, t }) {
+const PHONE_PREFIXES = ["+1", "+44", "+972", "+61", "+49", "+33", "+34", "+39", "+81", "+86"];
+
+export default function RecipientPicker({ open, onClose, onConfirm, channel = "email", t }) {
   const [players, setPlayers] = useState([]);
   const [parents, setParents] = useState([]);
   const [teams, setTeams] = useState([]);
@@ -11,6 +13,8 @@ export default function RecipientPicker({ open, onClose, onConfirm, t }) {
   const [season, setSeason] = useState("all");
   const [selected, setSelected] = useState(new Set());
   const [expanded, setExpanded] = useState(new Set());
+
+  const isSms = channel === "sms";
 
   useEffect(() => {
     if (!open) return;
@@ -22,8 +26,18 @@ export default function RecipientPicker({ open, onClose, onConfirm, t }) {
       .finally(() => setLoading(false));
   }, [open]);
 
-  const updatePlayerEmail = useCallback((playerId, email) => {
-    setPlayers((prev) => prev.map((p) => String(p._id) === String(playerId) ? { ...p, email } : p));
+  const updatePlayerField = useCallback((playerId, updates) => {
+    setPlayers((prev) => prev.map((p) => String(p._id) === String(playerId) ? { ...p, ...updates } : p));
+  }, []);
+
+  const updateParentField = useCallback((parentId, updates) => {
+    setParents((prev) => prev.map((p) => String(p._id) === String(parentId) ? { ...p, ...updates } : p));
+    setPlayers((prev) => prev.map((pl) => ({
+      ...pl,
+      parents: (pl.parents || []).map((par) =>
+        typeof par === "object" && String(par._id) === String(parentId) ? { ...par, ...updates } : par
+      ),
+    })));
   }, []);
 
   const seasons = useMemo(() => {
@@ -49,7 +63,7 @@ export default function RecipientPicker({ open, onClose, onConfirm, t }) {
         result[tid].players.push(p);
         for (const par of (p.parents || [])) {
           const parObj = typeof par === "object" ? par : null;
-          if (parObj?.email && !result[tid].parentIds.has(String(parObj._id))) {
+          if (parObj && !result[tid].parentIds.has(String(parObj._id))) {
             result[tid].parentIds.add(String(parObj._id));
             result[tid].parents.push(parObj);
           }
@@ -60,8 +74,7 @@ export default function RecipientPicker({ open, onClose, onConfirm, t }) {
   }, [players, filteredTeamIds]);
 
   const allPlayers = useMemo(() => players, [players]);
-  const allPlayersWithEmail = useMemo(() => players.filter((p) => p.email), [players]);
-  const filteredParents = useMemo(() => parents.filter((p) => p.email), [parents]);
+  const filteredParents = useMemo(() => parents, [parents]);
 
   const noTeamPlayers = useMemo(() => {
     return players.filter((p) => {
@@ -71,9 +84,16 @@ export default function RecipientPicker({ open, onClose, onConfirm, t }) {
   }, [players, filteredTeamIds, season]);
 
   const lc = search.toLowerCase();
-  function matches(name, email) {
+  function matches(name, extra) {
     if (!lc) return true;
-    return name.toLowerCase().includes(lc) || (email || "").toLowerCase().includes(lc);
+    return name.toLowerCase().includes(lc) || (extra || "").toLowerCase().includes(lc);
+  }
+
+  function hasContact(person, type) {
+    if (type === "player") {
+      return isSms ? !!(person.phonePrefix && person.phoneNumber) : !!person.email;
+    }
+    return isSms ? !!(person.phonePrefix && person.phone) : !!person.email;
   }
 
   function mk(type, id) { return `${type}:${id}`; }
@@ -95,16 +115,16 @@ export default function RecipientPicker({ open, onClose, onConfirm, t }) {
     setExpanded((prev) => { const n = new Set(prev); if (n.has(group)) n.delete(group); else n.add(group); return n; });
   }
 
-  function visiblePlayerKeys(list) {
-    return list.filter((p) => p.email && matches(`${p.firstName} ${p.lastName}`, p.email)).map((p) => mk("player", p._id));
+  function selectablePlayerKeys(list) {
+    return list.filter((p) => hasContact(p, "player") && matches(`${p.firstName} ${p.lastName}`, p.email || "")).map((p) => mk("player", p._id));
   }
-  function visibleParentKeys(list) {
-    return list.filter((p) => matches(`${p.firstName} ${p.lastName}`, p.email)).map((p) => mk("parent", p._id));
+  function selectableParentKeys(list) {
+    return list.filter((p) => hasContact(p, "parent") && matches(`${p.firstName} ${p.lastName}`, p.email || "")).map((p) => mk("parent", p._id));
   }
   function teamAllKeys(tid) {
     const td = teamData[tid];
     if (!td) return [];
-    return [...visiblePlayerKeys(td.players), ...visibleParentKeys(td.parents)];
+    return [...selectablePlayerKeys(td.players), ...selectableParentKeys(td.parents)];
   }
 
   function handleConfirm() {
@@ -116,10 +136,24 @@ export default function RecipientPicker({ open, onClose, onConfirm, t }) {
       seen.add(id);
       if (type === "player") {
         const p = players.find((pl) => String(pl._id) === id);
-        if (p?.email) result.push({ type: "player", id: p._id, name: `${p.firstName} ${p.lastName}`, email: p.email });
+        if (!p) continue;
+        result.push({
+          type: "player", id: p._id,
+          name: `${p.firstName} ${p.lastName}`,
+          email: p.email || "",
+          phonePrefix: p.phonePrefix || "+1",
+          phone: p.phoneNumber || "",
+        });
       } else {
         const p = parents.find((pa) => String(pa._id) === id);
-        if (p?.email) result.push({ type: "parent", id: p._id, name: `${p.firstName} ${p.lastName}`, email: p.email });
+        if (!p) continue;
+        result.push({
+          type: "parent", id: p._id,
+          name: `${p.firstName} ${p.lastName}`,
+          email: p.email || "",
+          phonePrefix: p.phonePrefix || "+1",
+          phone: p.phone || "",
+        });
       }
     }
     onConfirm(result);
@@ -129,9 +163,9 @@ export default function RecipientPicker({ open, onClose, onConfirm, t }) {
   if (!open) return null;
 
   const visibleAllPlayers = allPlayers.filter((p) => matches(`${p.firstName} ${p.lastName}`, p.email || ""));
-  const visibleAllParents = filteredParents.filter((p) => matches(`${p.firstName} ${p.lastName}`, p.email));
-  const allPlayerKeys = visiblePlayerKeys(allPlayersWithEmail);
-  const allParentKeys = visibleParentKeys(filteredParents);
+  const visibleAllParents = filteredParents.filter((p) => matches(`${p.firstName} ${p.lastName}`, p.email || ""));
+  const allPlayerKeys = selectablePlayerKeys(allPlayers);
+  const allParentKeys = selectableParentKeys(filteredParents);
   const allPlayersChecked = allPlayerKeys.length > 0 && allPlayerKeys.every((k) => selected.has(k));
   const allParentsChecked = allParentKeys.length > 0 && allParentKeys.every((k) => selected.has(k));
 
@@ -139,14 +173,30 @@ export default function RecipientPicker({ open, onClose, onConfirm, t }) {
     const visible = list.filter((p) => matches(`${p.firstName} ${p.lastName}`, p.email || ""));
     return (
       <div className={`${indent} space-y-0.5`}>
-        {visible.map((p) =>
-          p.email ? (
-            <PersonRow key={p._id} name={`${p.firstName} ${p.lastName}`} email={p.email}
-              checked={selected.has(mk("player", p._id))} onCheck={() => toggle(mk("player", p._id))} />
-          ) : (
-            <AddEmailRow key={p._id} player={p} onSaved={updatePlayerEmail} t={t} />
-          )
-        )}
+        {visible.map((p) => (
+          <PersonRow key={p._id} person={p} personType="player"
+            checked={selected.has(mk("player", p._id))}
+            canCheck={hasContact(p, "player")}
+            onCheck={() => toggle(mk("player", p._id))}
+            onUpdate={(updates) => updatePlayerField(p._id, updates)}
+            isSms={isSms} t={t} />
+        ))}
+      </div>
+    );
+  }
+
+  function renderParentList(list, indent) {
+    const visible = list.filter((p) => matches(`${p.firstName} ${p.lastName}`, p.email || ""));
+    return (
+      <div className={`${indent} space-y-0.5`}>
+        {visible.map((p) => (
+          <PersonRow key={p._id} person={p} personType="parent"
+            checked={selected.has(mk("parent", p._id))}
+            canCheck={hasContact(p, "parent")}
+            onCheck={() => toggle(mk("parent", p._id))}
+            onUpdate={(updates) => updateParentField(p._id, updates)}
+            isSms={isSms} t={t} />
+        ))}
       </div>
     );
   }
@@ -154,7 +204,6 @@ export default function RecipientPicker({ open, onClose, onConfirm, t }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
-        {/* Header */}
         <div className="flex items-center justify-between px-6 pt-5 pb-2">
           <div>
             <h3 className="text-lg font-bold text-gray-900">{t("addRecipients")}</h3>
@@ -163,7 +212,6 @@ export default function RecipientPicker({ open, onClose, onConfirm, t }) {
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
         </div>
 
-        {/* Filters */}
         <div className="px-6 py-3">
           <div className="bg-gray-50 rounded-lg p-3 space-y-2">
             <p className="text-sm font-semibold text-gray-700">{t("filters")}</p>
@@ -185,7 +233,6 @@ export default function RecipientPicker({ open, onClose, onConfirm, t }) {
           </div>
         </div>
 
-        {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 pb-3 space-y-2">
           {loading ? (
             <div className="flex justify-center py-12">
@@ -193,36 +240,24 @@ export default function RecipientPicker({ open, onClose, onConfirm, t }) {
             </div>
           ) : (
             <>
-              {/* All Players */}
               <GroupRow label={t("players")} count={visibleAllPlayers.length}
                 checked={allPlayersChecked} onCheck={() => toggleAll(allPlayerKeys)}
                 isExpanded={expanded.has("allPlayers")} onExpand={() => toggleExp("allPlayers")} />
               {expanded.has("allPlayers") && renderPlayerList(allPlayers, "ml-4 mb-2")}
 
-              {/* All Parents */}
               <GroupRow label={t("parentGroup")} count={visibleAllParents.length}
                 checked={allParentsChecked} onCheck={() => toggleAll(allParentKeys)}
                 isExpanded={expanded.has("allParents")} onExpand={() => toggleExp("allParents")} />
-              {expanded.has("allParents") && (
-                <div className="ml-4 space-y-0.5 mb-2">
-                  {filteredParents.filter((p) => matches(`${p.firstName} ${p.lastName}`, p.email)).map((p) => (
-                    <PersonRow key={p._id} name={`${p.firstName} ${p.lastName}`} email={p.email}
-                      checked={selected.has(mk("parent", p._id))} onCheck={() => toggle(mk("parent", p._id))} />
-                  ))}
-                </div>
-              )}
+              {expanded.has("allParents") && renderParentList(filteredParents, "ml-4 mb-2")}
 
-              {/* Divider */}
               {filteredTeams.length > 0 && <div className="border-t my-3" />}
 
-              {/* Per-team rows */}
               {filteredTeams.map((team) => {
                 const td = teamData[String(team._id)];
                 if (!td || td.players.length === 0) return null;
-                const tPlayersAll = td.players.filter((p) => matches(`${p.firstName} ${p.lastName}`, p.email || ""));
-                const tPlayers = td.players.filter((p) => p.email && matches(`${p.firstName} ${p.lastName}`, p.email));
-                const tParents = td.parents.filter((p) => matches(`${p.firstName} ${p.lastName}`, p.email));
-                const totalCount = tPlayersAll.length + tParents.length;
+                const tPlayersVis = td.players.filter((p) => matches(`${p.firstName} ${p.lastName}`, p.email || ""));
+                const tParentsVis = td.parents.filter((p) => matches(`${p.firstName} ${p.lastName}`, p.email || ""));
+                const totalCount = tPlayersVis.length + tParentsVis.length;
                 if (totalCount === 0) return null;
 
                 const allKeys = teamAllKeys(String(team._id));
@@ -231,8 +266,8 @@ export default function RecipientPicker({ open, onClose, onConfirm, t }) {
                 const pGk = `${teamGk}:players`;
                 const parGk = `${teamGk}:parents`;
 
-                const teamPlayerKeys = visiblePlayerKeys(tPlayers);
-                const teamParentKeys = visibleParentKeys(tParents);
+                const teamPlayerKeys = selectablePlayerKeys(td.players);
+                const teamParentKeys = selectableParentKeys(td.parents);
                 const teamPlayersChecked = teamPlayerKeys.length > 0 && teamPlayerKeys.every((k) => selected.has(k));
                 const teamParentsChecked = teamParentKeys.length > 0 && teamParentKeys.every((k) => selected.has(k));
 
@@ -244,27 +279,25 @@ export default function RecipientPicker({ open, onClose, onConfirm, t }) {
 
                     {expanded.has(teamGk) && (
                       <div className="ml-4 space-y-1 mt-1 mb-2">
-                        {tPlayersAll.length > 0 && (
+                        {tPlayersVis.length > 0 && (
                           <>
-                            <SubGroupRow label={t("players")} count={tPlayersAll.length}
+                            <SubGroupRow label={t("players")} count={tPlayersVis.length}
                               checked={teamPlayersChecked} onCheck={() => toggleAll(teamPlayerKeys)}
                               isExpanded={expanded.has(pGk)} onExpand={() => toggleExp(pGk)} />
-                            {expanded.has(pGk) && renderPlayerList(td.players.filter((p) => matches(`${p.firstName} ${p.lastName}`, p.email || "")), "ml-6")}
+                            {expanded.has(pGk) && renderPlayerList(
+                              td.players.filter((p) => matches(`${p.firstName} ${p.lastName}`, p.email || "")),
+                              "ml-6"
+                            )}
                           </>
                         )}
-
-                        {tParents.length > 0 && (
+                        {tParentsVis.length > 0 && (
                           <>
-                            <SubGroupRow label={t("parentGroup")} count={tParents.length}
+                            <SubGroupRow label={t("parentGroup")} count={tParentsVis.length}
                               checked={teamParentsChecked} onCheck={() => toggleAll(teamParentKeys)}
                               isExpanded={expanded.has(parGk)} onExpand={() => toggleExp(parGk)} />
-                            {expanded.has(parGk) && (
-                              <div className="ml-6 space-y-0.5">
-                                {tParents.map((p) => (
-                                  <PersonRow key={p._id} name={`${p.firstName} ${p.lastName}`} email={p.email}
-                                    checked={selected.has(mk("parent", p._id))} onCheck={() => toggle(mk("parent", p._id))} />
-                                ))}
-                              </div>
+                            {expanded.has(parGk) && renderParentList(
+                              td.parents.filter((p) => matches(`${p.firstName} ${p.lastName}`, p.email || "")),
+                              "ml-6"
                             )}
                           </>
                         )}
@@ -274,11 +307,10 @@ export default function RecipientPicker({ open, onClose, onConfirm, t }) {
                 );
               })}
 
-              {/* No-team players */}
               {noTeamPlayers.length > 0 && (() => {
                 const vis = noTeamPlayers.filter((p) => matches(`${p.firstName} ${p.lastName}`, p.email || ""));
                 if (vis.length === 0) return null;
-                const ntKeys = visiblePlayerKeys(vis.filter((p) => p.email));
+                const ntKeys = selectablePlayerKeys(vis);
                 const ntChecked = ntKeys.length > 0 && ntKeys.every((k) => selected.has(k));
                 return (
                   <div>
@@ -293,7 +325,6 @@ export default function RecipientPicker({ open, onClose, onConfirm, t }) {
           )}
         </div>
 
-        {/* Footer */}
         <div className="px-6 py-4 border-t flex items-center justify-between">
           <span className="text-sm text-gray-500">{t("selectedCount", { count: selected.size })}</span>
           <div className="flex gap-2">
@@ -347,85 +378,189 @@ function SubGroupRow({ label, count, checked, onCheck, isExpanded, onExpand }) {
   );
 }
 
-function PersonRow({ name, email, checked, onCheck }) {
-  return (
-    <label className="flex items-center justify-between px-3 py-1.5 rounded hover:bg-gray-50 cursor-pointer">
-      <div className="flex-1 min-w-0">
-        <span className="text-sm text-gray-900">{name}</span>
-        <span className="text-xs text-gray-400 ml-2 truncate">{email}</span>
-      </div>
-      <input type="checkbox" checked={checked} onChange={onCheck}
-        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer flex-shrink-0" />
-    </label>
-  );
-}
+function PersonRow({ person, personType, checked, canCheck, onCheck, onUpdate, isSms, t }) {
+  const name = `${person.firstName} ${person.lastName}`;
+  const phoneField = personType === "player" ? "phoneNumber" : "phone";
+  const phone = person[phoneField] || "";
+  const prefix = person.phonePrefix || "+1";
+  const email = person.email || "";
+  const hasPhone = !!phone;
+  const hasEmail = !!email;
 
-function AddEmailRow({ player, onSaved, t }) {
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState("");
+  const [editingPhone, setEditingPhone] = useState(false);
+  const [editingEmail, setEditingEmail] = useState(false);
+  const [phoneVal, setPhoneVal] = useState(phone);
+  const [prefixVal, setPrefixVal] = useState(prefix);
+  const [emailVal, setEmailVal] = useState(email);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  async function save() {
-    const email = value.trim().toLowerCase();
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setError(t("invalidEmail"));
-      return;
-    }
+  const initials = (person.firstName?.[0] || "?").toUpperCase();
+
+  async function savePhone() {
+    if (!phoneVal.trim()) { setError(t("phoneRequired")); return; }
     setSaving(true);
     setError("");
     try {
-      const res = await fetch(`/api/players/${player._id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
+      const url = personType === "player" ? `/api/players/${person._id}` : `/api/parents/${person._id}`;
+      const body = personType === "player"
+        ? { phonePrefix: prefixVal, phoneNumber: phoneVal.trim() }
+        : { phonePrefix: prefixVal, phone: phoneVal.trim() };
+      const res = await fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (res.ok) {
-        onSaved(player._id, email);
-        setEditing(false);
+        onUpdate(body);
+        setEditingPhone(false);
       } else {
         const d = await res.json();
         setError(d.error || t("saveFailed"));
       }
-    } catch {
-      setError(t("saveFailed"));
-    }
+    } catch { setError(t("saveFailed")); }
     setSaving(false);
   }
 
-  const name = `${player.firstName} ${player.lastName}`;
+  async function saveEmail() {
+    const em = emailVal.trim().toLowerCase();
+    if (!em || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { setError(t("invalidEmail")); return; }
+    setSaving(true);
+    setError("");
+    try {
+      const url = personType === "player" ? `/api/players/${person._id}` : `/api/parents/${person._id}`;
+      const res = await fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: em }) });
+      if (res.ok) {
+        onUpdate({ email: em });
+        setEditingEmail(false);
+      } else {
+        const d = await res.json();
+        setError(d.error || t("saveFailed"));
+      }
+    } catch { setError(t("saveFailed")); }
+    setSaving(false);
+  }
 
-  if (!editing) {
+  if (editingPhone) {
     return (
-      <div className="flex items-center justify-between px-3 py-1.5 rounded hover:bg-gray-50">
-        <div className="flex-1 min-w-0">
-          <span className="text-sm text-gray-900">{name}</span>
-          <span className="text-xs text-gray-300 ml-2">{t("noEmail")}</span>
+      <div className="px-3 py-2 rounded bg-blue-50/50 space-y-1">
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm text-gray-900 font-medium flex-shrink-0">{name}</span>
         </div>
-        <button onClick={() => setEditing(true)}
-          className="text-xs text-blue-600 hover:text-blue-700 border border-dashed border-blue-300 rounded px-2 py-0.5 hover:bg-blue-50 transition flex-shrink-0">
-          + {t("addEmailBtn")}
-        </button>
+        <div className="flex items-center gap-1.5" dir="ltr">
+          <select value={prefixVal} onChange={(e) => setPrefixVal(e.target.value)}
+            className="w-[72px] shrink-0 border rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500">
+            {PHONE_PREFIXES.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <input type="tel" value={phoneVal} onChange={(e) => setPhoneVal(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); savePhone(); } if (e.key === "Escape") setEditingPhone(false); }}
+            placeholder="5551234567" autoFocus
+            className="flex-1 min-w-0 border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          <button onClick={savePhone} disabled={saving}
+            className="text-xs font-medium text-white bg-blue-600 rounded px-2 py-1 hover:bg-blue-700 disabled:opacity-50 flex-shrink-0">
+            {saving ? "..." : t("saveBtn")}
+          </button>
+          <button onClick={() => setEditingPhone(false)}
+            className="text-xs text-gray-400 hover:text-gray-600 flex-shrink-0">&times;</button>
+        </div>
+        {error && <p className="text-xs text-red-500">{error}</p>}
+      </div>
+    );
+  }
+
+  if (editingEmail) {
+    return (
+      <div className="px-3 py-2 rounded bg-blue-50/50 space-y-1">
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm text-gray-900 font-medium flex-shrink-0">{name}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <input type="email" value={emailVal} onChange={(e) => setEmailVal(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveEmail(); } if (e.key === "Escape") setEditingEmail(false); }}
+            placeholder="email@example.com" autoFocus
+            className="flex-1 min-w-0 border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          <button onClick={saveEmail} disabled={saving}
+            className="text-xs font-medium text-white bg-blue-600 rounded px-2 py-1 hover:bg-blue-700 disabled:opacity-50 flex-shrink-0">
+            {saving ? "..." : t("saveBtn")}
+          </button>
+          <button onClick={() => setEditingEmail(false)}
+            className="text-xs text-gray-400 hover:text-gray-600 flex-shrink-0">&times;</button>
+        </div>
+        {error && <p className="text-xs text-red-500">{error}</p>}
       </div>
     );
   }
 
   return (
-    <div className="px-3 py-1.5 rounded bg-blue-50/50">
-      <div className="flex items-center gap-1.5">
-        <span className="text-sm text-gray-900 flex-shrink-0">{name}</span>
-        <input type="email" value={value} onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); save(); } if (e.key === "Escape") setEditing(false); }}
-          placeholder="email@example.com" autoFocus
-          className="flex-1 min-w-0 border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
-        <button onClick={save} disabled={saving}
-          className="text-xs font-medium text-white bg-blue-600 rounded px-2 py-1 hover:bg-blue-700 disabled:opacity-50 flex-shrink-0">
-          {saving ? "..." : t("saveBtn")}
-        </button>
-        <button onClick={() => setEditing(false)}
-          className="text-xs text-gray-400 hover:text-gray-600 flex-shrink-0">&times;</button>
+    <div className="flex items-center px-3 py-2 rounded hover:bg-gray-50 gap-2">
+      <input type="checkbox" checked={checked} disabled={!canCheck}
+        onChange={onCheck}
+        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer flex-shrink-0 disabled:opacity-30" />
+
+      <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0 ${
+        personType === "parent" ? "bg-purple-500" : "bg-gray-800"
+      }`}>
+        {initials}
       </div>
-      {error && <p className="text-xs text-red-500 mt-0.5">{error}</p>}
+
+      <div className="flex-1 min-w-0">
+        <span className="text-sm font-medium text-gray-900">{name}</span>
+        <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+          {/* Phone info */}
+          {hasPhone ? (
+            <span className="inline-flex items-center gap-1 text-xs text-gray-500">
+              <PhoneIcon />
+              <span dir="ltr">{prefix} {phone}</span>
+              <button onClick={() => { setPhoneVal(phone); setPrefixVal(prefix); setEditingPhone(true); }}
+                className="text-gray-300 hover:text-blue-500 transition ml-0.5">
+                <PencilIcon />
+              </button>
+            </span>
+          ) : (
+            <button onClick={() => { setPhoneVal(""); setPrefixVal("+1"); setEditingPhone(true); }}
+              className="inline-flex items-center gap-1 text-xs text-blue-600 border border-dashed border-blue-300 rounded px-1.5 py-0.5 hover:bg-blue-50 transition">
+              <PhoneIcon /> + {t("addPhone")}
+            </button>
+          )}
+
+          {/* Email info */}
+          {hasEmail ? (
+            <span className="inline-flex items-center gap-1 text-xs text-gray-500 truncate">
+              <EmailIcon />
+              <span className="truncate">{email}</span>
+              <button onClick={() => { setEmailVal(email); setEditingEmail(true); }}
+                className="text-gray-300 hover:text-blue-500 transition ml-0.5 flex-shrink-0">
+                <PencilIcon />
+              </button>
+            </span>
+          ) : (
+            <button onClick={() => { setEmailVal(""); setEditingEmail(true); }}
+              className="inline-flex items-center gap-1 text-xs text-blue-600 border border-dashed border-blue-300 rounded px-1.5 py-0.5 hover:bg-blue-50 transition">
+              <EmailIcon /> + {t("addEmailBtn")}
+            </button>
+          )}
+        </div>
+      </div>
     </div>
+  );
+}
+
+function PhoneIcon() {
+  return (
+    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
+    </svg>
+  );
+}
+
+function EmailIcon() {
+  return (
+    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
+    </svg>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" />
+    </svg>
   );
 }

@@ -46,6 +46,8 @@ const ClubSchema = new mongoose.Schema({
     enum: ["en", "he"],
     default: "en",
   },
+  maxPaymentRequestInstallments: { type: Number, default: 10, min: 1, max: 10 },
+  supportEmail: { type: String, default: "" },
   smtpHost: { type: String, default: "" },
   smtpPort: { type: Number, default: 587 },
   smtpEmail: { type: String, default: "" },

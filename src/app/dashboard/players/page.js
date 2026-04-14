@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
+import SendMessageModal from "@/components/SendMessageModal";
+import PhonePrefixInput from "@/components/PhonePrefixInput";
 
 const US_STATES = [
   "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
@@ -16,7 +18,7 @@ const PREVIOUS_SEASON = "25/26";
 const EMPTY_PLAYER = {
   firstName: "", lastName: "", dateOfBirth: "", gender: "",
   primaryPosition: "", secondaryPosition: "", school: "",
-  joinDate: "", phoneNumber: "", address: "", city: "", state: "", zip: "", email: "",
+  joinDate: "", phonePrefix: "+1", phoneNumber: "", address: "", city: "", state: "", zip: "", email: "",
 };
 
 function age(dob) {
@@ -96,9 +98,15 @@ export default function PlayersPage() {
   const [createForm, setCreateForm] = useState({ ...EMPTY_PLAYER });
   const [editSeasonTab, setEditSeasonTab] = useState(CURRENT_SEASON);
 
+  const [stats, setStats] = useState(null);
+
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
+  const [sendMessageTarget, setSendMessageTarget] = useState(null);
+  const [toast, setToast] = useState(null);
   const fileInputRef = useRef(null);
+  const [showUploadMenu, setShowUploadMenu] = useState(false);
+  const [selectedUploadType, setSelectedUploadType] = useState("byga");
 
   const ALL_OPTIONAL_COLS = [
     { key: "position", label: t("position") },
@@ -124,17 +132,20 @@ export default function PlayersPage() {
 
   async function fetchAll() {
     try {
-      const [pRes, tRes, oRes] = await Promise.all([
+      const [pRes, tRes, oRes, sRes] = await Promise.all([
         fetch("/api/players"),
         fetch("/api/teams"),
         fetch("/api/players/options"),
+        fetch("/api/players/stats"),
       ]);
       const pData = await pRes.json();
       const tData = await tRes.json();
       const oData = await oRes.json();
+      const sData = await sRes.json();
       if (pRes.ok) setPlayers(pData.players);
       if (tRes.ok) setTeams(tData.teams);
       if (oRes.ok) setOptions(oData);
+      if (sRes.ok) setStats(sData);
     } catch (err) {
       console.error("Failed to fetch:", err);
     } finally {
@@ -179,6 +190,7 @@ export default function PlayersPage() {
       secondaryPosition: p.secondaryPosition || "",
       school: p.school || "",
       joinDate: p.joinDate ? p.joinDate.split("T")[0] : "",
+      phonePrefix: p.phonePrefix || "+1",
       phoneNumber: p.phoneNumber || "",
       address: p.address || "",
       city: p.city || "",
@@ -255,6 +267,12 @@ export default function PlayersPage() {
     }
   }
 
+  function triggerUpload(type) {
+    setSelectedUploadType(type);
+    setShowUploadMenu(false);
+    setTimeout(() => fileInputRef.current?.click(), 0);
+  }
+
   async function handleFileUpload(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -265,6 +283,7 @@ export default function PlayersPage() {
     try {
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("uploadType", selectedUploadType);
       const res = await fetch("/api/players/upload", { method: "POST", body: formData });
       const data = await res.json();
 
@@ -272,17 +291,31 @@ export default function PlayersPage() {
         setUploadResult({ success: false, message: data.error, errors: data.errors });
       } else {
         const s = data.stats;
-        setUploadResult({
-          success: true,
-          message: t("csvUploadSuccess", {
-            playersCreated: s.players.created,
-            parentsCreated: s.parents.created,
-            teamsCreated: s.teams.created,
-            playersUpdated: s.players.updated,
-            parentsUpdated: s.parents.updated,
-          }),
-          errors: data.errors,
-        });
+        if (selectedUploadType === "rangers") {
+          setUploadResult({
+            success: true,
+            message: t("rangersUploadSuccess", {
+              playersCreated: s.players.created,
+              parentsCreated: s.parents.created,
+              ordersCreated: s.orders?.created || 0,
+              playersUpdated: s.players.updated,
+              parentsUpdated: s.parents.updated,
+            }),
+            errors: data.errors,
+          });
+        } else {
+          setUploadResult({
+            success: true,
+            message: t("csvUploadSuccess", {
+              playersCreated: s.players.created,
+              parentsCreated: s.parents.created,
+              teamsCreated: s.teams?.created || 0,
+              playersUpdated: s.players.updated,
+              parentsUpdated: s.parents.updated,
+            }),
+            errors: data.errors,
+          });
+        }
         fetchAll();
       }
     } catch (err) {
@@ -337,13 +370,22 @@ export default function PlayersPage() {
             onChange={handleFileUpload}
             className="hidden"
           />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition disabled:opacity-50"
-          >
-            {uploading ? t("uploading") : t("uploadCSV")}
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => setShowUploadMenu((v) => !v)}
+              disabled={uploading}
+              className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {uploading ? t("uploading") : t("uploadCSV")}
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+            </button>
+            {showUploadMenu && (
+              <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 w-44">
+                <button onClick={() => triggerUpload("byga")} className="w-full text-start px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">{t("bygaExcel")}</button>
+                <button onClick={() => triggerUpload("rangers")} className="w-full text-start px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">{t("rangersExcel")}</button>
+              </div>
+            )}
+          </div>
           <button
             onClick={() => { setShowCreate(true); setFormError(""); }}
             className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition"
@@ -363,6 +405,27 @@ export default function PlayersPage() {
           className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-gray-900 text-sm"
         />
       </div>
+
+      {/* Financial Summary */}
+      {stats && stats.orderCount > 0 && (
+        <div className="grid grid-cols-3 gap-4 mb-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <p className="text-xs font-semibold text-gray-500 uppercase mb-1">{t("expected")}</p>
+            <p className="text-xl font-bold text-gray-900">${((stats.expectedCents || 0) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{t("invoicesCount", { count: stats.orderCount })}</p>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <p className="text-xs font-semibold text-gray-500 uppercase mb-1">{t("collected")}</p>
+            <p className="text-xl font-bold text-green-600">${((stats.collectedCents || 0) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{t("collectedDesc")}</p>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <p className="text-xs font-semibold text-gray-500 uppercase mb-1">{t("uncollected")}</p>
+            <p className="text-xl font-bold text-red-600">${((stats.uncollectedCents || 0) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{t("uncollectedDesc")}</p>
+          </div>
+        </div>
+      )}
 
       {/* Upload Result Banner */}
       {uploadResult && (
@@ -431,7 +494,7 @@ export default function PlayersPage() {
                       <div className="text-sm text-gray-500 mt-1 space-y-0.5">
                         {selectedPlayer.dateOfBirth && <p>{t("dob")}: {new Date(selectedPlayer.dateOfBirth).toLocaleDateString()} ({t("age")} {age(selectedPlayer.dateOfBirth)})</p>}
                         {selectedPlayer.email && <p>{tc("email")}: {selectedPlayer.email}</p>}
-                        {selectedPlayer.phoneNumber && <p>{tc("phone")}: {selectedPlayer.phoneNumber}</p>}
+                        {selectedPlayer.phoneNumber && <p dir="ltr">{tc("phone")}: {selectedPlayer.phonePrefix || "+1"} {selectedPlayer.phoneNumber}</p>}
                         {selectedPlayer.primaryPosition && <p>{t("position")}: {selectedPlayer.primaryPosition}{selectedPlayer.secondaryPosition ? ` / ${selectedPlayer.secondaryPosition}` : ""}</p>}
                         {selectedPlayer.school && <p>{t("school")}: {selectedPlayer.school}</p>}
                         {selectedPlayer.joinDate && <p>{t("joined")}: {new Date(selectedPlayer.joinDate).toLocaleDateString()}</p>}
@@ -441,6 +504,21 @@ export default function PlayersPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
+                      <button onClick={() => {
+                        const parent = selectedPlayer.parents?.[0];
+                        const parentId = typeof parent === "object" ? parent?._id : parent;
+                        const parentObj = typeof parent === "object" ? parent : null;
+                        const pfx = parentObj ? (parentObj.phonePrefix || "+1") : (selectedPlayer.phonePrefix || "+1");
+                        const ph = parentObj ? (parentObj.phone || "") : (selectedPlayer.phoneNumber || "");
+                        setSendMessageTarget({
+                          type: "parent",
+                          id: parentId || selectedPlayer._id,
+                          name: parentObj ? `${parentObj.firstName} ${parentObj.lastName}` : `${selectedPlayer.firstName} ${selectedPlayer.lastName}`,
+                          email: parentObj?.email || selectedPlayer.email || "",
+                          phone: ph ? `${pfx}${ph}` : "",
+                        });
+                      }}
+                        className="px-3 py-1.5 border border-blue-200 rounded-lg text-sm font-medium text-blue-600 hover:bg-blue-50 transition">{t("sendMessage") || "Send Message"}</button>
                       <button onClick={startEdit} className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-white transition">{tc("edit")}</button>
                       <button onClick={() => handleDelete(selectedPlayer._id)} className="px-3 py-1.5 border border-red-200 rounded-lg text-sm text-red-600 hover:bg-red-50 transition">{tc("delete")}</button>
                     </div>
@@ -637,7 +715,18 @@ export default function PlayersPage() {
           <h3 className="text-lg font-semibold text-gray-900 mb-2">{t("noPlayers")}</h3>
           <p className="text-gray-500 mb-4">{t("noPlayersDesc")}</p>
           <div className="flex items-center justify-center gap-3">
-            <button onClick={() => fileInputRef.current?.click()} className="px-6 py-2.5 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition">{t("uploadCSV")}</button>
+            <div className="relative">
+              <button onClick={() => setShowUploadMenu((v) => !v)} className="px-6 py-2.5 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition flex items-center gap-1.5">
+                {t("uploadCSV")}
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+              </button>
+              {showUploadMenu && (
+                <div className="absolute left-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 w-44">
+                  <button onClick={() => triggerUpload("byga")} className="w-full text-start px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">{t("bygaExcel")}</button>
+                  <button onClick={() => triggerUpload("rangers")} className="w-full text-start px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">{t("rangersExcel")}</button>
+                </div>
+              )}
+            </div>
             <button onClick={() => setShowCreate(true)} className="bg-blue-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-blue-700 transition">{t("addPlayer")}</button>
           </div>
         </div>
@@ -709,7 +798,7 @@ export default function PlayersPage() {
                           ) : "—"}
                         </td>
                       )}
-                      {visibleCols.has("phone") && <td className="px-4 py-3 text-gray-700 text-xs">{player.phoneNumber || "—"}</td>}
+                      {visibleCols.has("phone") && <td className="px-4 py-3 text-gray-700 text-xs" dir="ltr">{player.phoneNumber ? `${player.phonePrefix || "+1"} ${player.phoneNumber}` : "—"}</td>}
                       {visibleCols.has("email") && <td className="px-4 py-3 text-gray-700 text-xs">{player.email || "—"}</td>}
                       <td className="px-4 py-3">
                         {p1 ? (
@@ -766,6 +855,18 @@ export default function PlayersPage() {
           </div>
         </div>
       )}
+
+      {sendMessageTarget && (
+        <SendMessageModal
+          recipient={sendMessageTarget}
+          onClose={() => setSendMessageTarget(null)}
+          onDone={() => { setSendMessageTarget(null); setToast("Message sent"); setTimeout(() => setToast(null), 3000); }}
+          onError={(msg) => { setToast(msg || "Error"); setTimeout(() => setToast(null), 4000); }}
+        />
+      )}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-5 py-2.5 rounded-xl shadow-lg text-sm z-[9999] animate-fade-in">{toast}</div>
+      )}
     </div>
   );
 
@@ -803,7 +904,7 @@ export default function PlayersPage() {
               {opts.schools.map((s) => <option key={s} value={s} />)}
             </datalist>
           </div>
-          <input type="tel" value={form.phoneNumber} onChange={(e) => setForm({ ...form, phoneNumber: e.target.value })} className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 outline-none focus:ring-2 focus:ring-blue-500" placeholder={t("phoneNumber")} />
+          <PhonePrefixInput prefix={form.phonePrefix} phone={form.phoneNumber} onPrefixChange={(v) => setForm({ ...form, phonePrefix: v })} onPhoneChange={(v) => setForm({ ...form, phoneNumber: v })} placeholder={t("phoneNumber")} />
         </div>
         <div className="grid grid-cols-2 gap-2">
           <input type="date" value={form.joinDate} onChange={(e) => setForm({ ...form, joinDate: e.target.value })} className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 outline-none focus:ring-2 focus:ring-blue-500" />

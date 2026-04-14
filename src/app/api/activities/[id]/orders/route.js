@@ -104,14 +104,17 @@ export async function GET(request, { params }) {
             playerLastName: player.lastName,
             playerDob: player.dateOfBirth,
             playerGender: player.gender || "",
+            playerPhonePrefix: player.phonePrefix || "+1",
             playerPhone: player.phoneNumber || "",
             playerEmail: player.email || "",
             parent1FirstName: parent1?.firstName || "",
             parent1LastName: parent1?.lastName || "",
+            parent1PhonePrefix: parent1?.phonePrefix || "+1",
             parent1Phone: parent1?.phone || "",
             parent1Email: parent1?.email || "",
             parent2FirstName: parent2?.firstName || "",
             parent2LastName: parent2?.lastName || "",
+            parent2PhonePrefix: parent2?.phonePrefix || "+1",
             parent2Phone: parent2?.phone || "",
             parent2Email: parent2?.email || "",
             teamId: tid,
@@ -191,22 +194,118 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: "Player name is required" }, { status: 400 });
     }
 
+    let playerId = body.playerId || null;
+    const parentIds = [];
+
+    async function findOrCreateParent(firstName, lastName, email, phone, phonePrefix) {
+      if (!firstName || !lastName || !email) return null;
+      let parent = await Parent.findOne({
+        clubId: session.user.id,
+        email: email.trim().toLowerCase(),
+      });
+      if (parent) {
+        if (phone && !parent.phone) {
+          parent.phone = phone;
+          parent.phonePrefix = phonePrefix || "+1";
+          await parent.save();
+        }
+        return parent;
+      }
+      parent = await Parent.create({
+        clubId: session.user.id,
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        email: email.trim().toLowerCase(),
+        phonePrefix: phonePrefix || "+1",
+        phone: (phone || "").trim() || "0000000000",
+      });
+      return parent;
+    }
+
+    if (!playerId) {
+      const playerQuery = {
+        clubId: session.user.id,
+        firstName: body.playerFirstName.trim(),
+        lastName: body.playerLastName.trim(),
+      };
+      if (body.playerDob) playerQuery.dateOfBirth = new Date(body.playerDob);
+      else playerQuery.dateOfBirth = null;
+
+      let player = await Player.findOne(playerQuery).collation({ locale: "en", strength: 2 });
+
+      if (!player) {
+        const teamEntries = [];
+        if (body.teamId) {
+          const Team = (await import("@/models/Team")).default;
+          const teamDoc = await Team.findById(body.teamId).lean();
+          if (teamDoc) {
+            teamEntries.push({ teamId: body.teamId, season: teamDoc.season || "" });
+          }
+        }
+
+        player = await Player.create({
+          clubId: session.user.id,
+          firstName: body.playerFirstName.trim(),
+          lastName: body.playerLastName.trim(),
+          dateOfBirth: body.playerDob || null,
+          gender: body.playerGender || "",
+          phonePrefix: body.playerPhonePrefix || "+1",
+          phoneNumber: (body.playerPhone || "").trim(),
+          email: (body.playerEmail || "").trim().toLowerCase(),
+          teams: teamEntries,
+          registrationTeamId: body.teamId || null,
+          parents: [],
+        });
+      }
+      playerId = player._id;
+
+      const p1 = await findOrCreateParent(
+        body.parent1FirstName, body.parent1LastName,
+        body.parent1Email, body.parent1Phone, body.parent1PhonePrefix
+      );
+      if (p1) parentIds.push(p1._id);
+
+      const p2 = await findOrCreateParent(
+        body.parent2FirstName, body.parent2LastName,
+        body.parent2Email, body.parent2Phone, body.parent2PhonePrefix
+      );
+      if (p2) parentIds.push(p2._id);
+
+      if (parentIds.length > 0) {
+        const existingParentIds = player.parents.map((p) => String(p));
+        const newParentIds = parentIds.filter((pid) => !existingParentIds.includes(String(pid)));
+        if (newParentIds.length > 0) {
+          await Player.updateOne(
+            { _id: player._id },
+            { $addToSet: { parents: { $each: newParentIds } } }
+          );
+          await Parent.updateMany(
+            { _id: { $in: newParentIds } },
+            { $addToSet: { players: player._id } }
+          );
+        }
+      }
+    }
+
     const orderData = {
       activityId: id,
       clubId: session.user.id,
-      playerId: body.playerId || null,
+      playerId,
       playerFirstName: body.playerFirstName,
       playerLastName: body.playerLastName,
       playerDob: body.playerDob || null,
       playerGender: body.playerGender || "",
+      playerPhonePrefix: body.playerPhonePrefix || "+1",
       playerPhone: body.playerPhone || "",
       playerEmail: body.playerEmail || "",
       parent1FirstName: body.parent1FirstName || "",
       parent1LastName: body.parent1LastName || "",
+      parent1PhonePrefix: body.parent1PhonePrefix || "+1",
       parent1Phone: body.parent1Phone || "",
       parent1Email: body.parent1Email || "",
       parent2FirstName: body.parent2FirstName || "",
       parent2LastName: body.parent2LastName || "",
+      parent2PhonePrefix: body.parent2PhonePrefix || "+1",
       parent2Phone: body.parent2Phone || "",
       parent2Email: body.parent2Email || "",
       teamId: body.teamId || null,

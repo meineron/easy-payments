@@ -33,6 +33,8 @@ export default function LoginPage() {
 
     if (session?.user?.role === "admin") {
       router.push("/admin");
+    } else if (session?.user?.role === "staff") {
+      router.push(session.user.mustChangePassword ? "/set-password" : "/staff/dashboard");
     } else {
       router.push("/dashboard");
     }

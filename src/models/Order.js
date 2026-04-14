@@ -26,15 +26,18 @@ const OrderSchema = new mongoose.Schema({
   playerLastName: { type: String, required: true, trim: true },
   playerDob: { type: Date, default: null },
   playerGender: { type: String, default: "" },
+  playerPhonePrefix: { type: String, default: "+1" },
   playerPhone: { type: String, default: "" },
   playerEmail: { type: String, default: "" },
 
   parent1FirstName: { type: String, default: "", trim: true },
   parent1LastName: { type: String, default: "", trim: true },
+  parent1PhonePrefix: { type: String, default: "+1" },
   parent1Phone: { type: String, default: "" },
   parent1Email: { type: String, default: "" },
   parent2FirstName: { type: String, default: "", trim: true },
   parent2LastName: { type: String, default: "", trim: true },
+  parent2PhonePrefix: { type: String, default: "+1" },
   parent2Phone: { type: String, default: "" },
   parent2Email: { type: String, default: "" },
 

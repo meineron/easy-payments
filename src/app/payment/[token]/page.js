@@ -70,11 +70,23 @@ function PaymentErrorView({ error }) {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
       <div className="bg-white rounded-2xl shadow-lg p-8 max-w-md w-full text-center">
-        <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
-          <span className="text-red-600 text-xl">!</span>
-        </div>
-        <h2 className="text-lg font-semibold text-gray-900 mb-2">{isPaid ? t("alreadyPaid") : t("linkNotFound")}</h2>
-        <p className="text-sm text-gray-500">{isPaid ? t("alreadyPaidDesc") : t("linkInvalid")}</p>
+        {isPaid ? (
+          <>
+            <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
+              <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+            </div>
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">{t("alreadyPaid")}</h2>
+            <p className="text-sm text-gray-500">{t("alreadyPaidDesc")}</p>
+          </>
+        ) : (
+          <>
+            <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+              <span className="text-red-600 text-xl">!</span>
+            </div>
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">{t("linkNotFound")}</h2>
+            <p className="text-sm text-gray-500">{t("linkInvalid")}</p>
+          </>
+        )}
       </div>
     </div>
   );
@@ -89,11 +101,9 @@ function PaymentPageInner({ data, token }) {
   );
   const [paying, setPaying] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
-  const [waiverConsents, setWaiverConsents] = useState(() => {
-    const existing = {};
-    (data.existingConsents || []).forEach((id) => { existing[id] = true; });
-    return existing;
-  });
+  const [payerFirstName, setPayerFirstName] = useState("");
+  const [payerLastName, setPayerLastName] = useState("");
+  const [payerEmail, setPayerEmail] = useState("");
 
   const { schedule, feeCents } = useMemo(() => {
     if (!data) return { schedule: [], feeCents: 0 };
@@ -114,7 +124,12 @@ function PaymentPageInner({ data, token }) {
       const res = await fetch(`/api/payment/${token}/checkout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chosenInstallments, waiverConsents: Object.keys(waiverConsents).filter((k) => waiverConsents[k]) }),
+        body: JSON.stringify({
+          chosenInstallments,
+          payerFirstName: payerFirstName.trim(),
+          payerLastName: payerLastName.trim(),
+          payerEmail: payerEmail.trim(),
+        }),
       });
       const d = await res.json();
       if (d.url) {
@@ -224,6 +239,10 @@ function PaymentPageInner({ data, token }) {
                   <span>{t("amountDue")}</span>
                   <span>${centsToDisplay(amountDue)}</span>
                 </div>
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-2">
+                  <p className="text-sm text-amber-800 font-medium">{t("partialPaidNotice")}</p>
+                  <p className="text-xs text-amber-700 mt-1">{t("partialPaidContactOffice")}</p>
+                </div>
               </>
             )}
           </div>
@@ -303,32 +322,6 @@ function PaymentPageInner({ data, token }) {
             </div>
           )}
 
-          {/* Waivers (if not yet agreed) */}
-          {(data.waivers || []).length > 0 && (data.waivers || []).some((w) => !data.existingConsents?.includes(String(w._id))) && (
-            <div className="px-6 py-5 border-t border-gray-100">
-              <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">{t("agreements")}</h3>
-              <div className="space-y-3">
-                {(data.waivers || []).filter((w) => !data.existingConsents?.includes(String(w._id))).map((w) => (
-                  <div key={w._id} className="border rounded-lg overflow-hidden">
-                    <div className="px-3 py-2 bg-gray-50 flex items-center justify-between">
-                      <span className="text-sm font-medium text-gray-900">{w.title}</span>
-                      {w.isRequired && <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">{tc("required")}</span>}
-                    </div>
-                    <div className="px-3 py-2 max-h-48 overflow-y-auto border-b">
-                      <div className="prose prose-sm text-xs text-gray-700" dangerouslySetInnerHTML={{ __html: w.contentHtml }} />
-                    </div>
-                    <label className="flex items-start gap-2.5 px-3 py-2.5 cursor-pointer hover:bg-gray-50">
-                      <input type="checkbox" checked={!!waiverConsents[w._id]}
-                        onChange={(e) => setWaiverConsents((prev) => ({ ...prev, [w._id]: e.target.checked }))}
-                        className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                      <span className="text-xs text-gray-700">{t("agreeToWaiver", { title: w.title })}</span>
-                    </label>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Commitment Notice */}
           {chosenInstallments > 1 && (
             <div className="px-6 py-4 border-t border-gray-100">
@@ -342,8 +335,14 @@ function PaymentPageInner({ data, token }) {
                       amount: `$${centsToDisplay(schedule[0]?.amountCents || 0)}`,
                       count: chosenInstallments - 1,
                       installmentAmount: `$${centsToDisplay(schedule[1]?.amountCents || 0)}`,
-                      total: `$${centsToDisplay(amountDue)}`,
+                      total: `$${centsToDisplay(amountDue + feeCents)}`,
                     })}</p>
+                    {feeCents > 0 && (
+                      <p className="mt-1 font-medium">{t("recurringFeeNote", {
+                        percent: installmentOptions.installmentFeePercent,
+                        fee: `$${centsToDisplay(feeCents)}`,
+                      })}</p>
+                    )}
                     {installmentOptions.firstInstallmentDate && (
                       <p className="mt-1">{t("installmentsStart", { date: new Date(installmentOptions.firstInstallmentDate).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) })}</p>
                     )}
@@ -353,10 +352,51 @@ function PaymentPageInner({ data, token }) {
               <label className="flex items-start gap-2.5 mt-3 cursor-pointer">
                 <input type="checkbox" checked={agreedToTerms} onChange={(e) => setAgreedToTerms(e.target.checked)}
                   className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                <span className="text-sm text-gray-700">{t("agreeRecurring")}</span>
+                <span className="text-sm text-gray-700">
+                  {feeCents > 0
+                    ? t("agreeRecurringWithFee", { percent: installmentOptions.installmentFeePercent, fee: `$${centsToDisplay(feeCents)}` })
+                    : t("agreeRecurring")}
+                </span>
               </label>
             </div>
           )}
+
+          {/* Payer Details */}
+          <div className="px-6 py-5 border-t border-gray-100">
+            <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">{t("payerDetails")}</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">{tc("firstName")} *</label>
+                <input
+                  type="text"
+                  value={payerFirstName}
+                  onChange={(e) => setPayerFirstName(e.target.value)}
+                  placeholder={tc("firstName")}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">{tc("lastName")} *</label>
+                <input
+                  type="text"
+                  value={payerLastName}
+                  onChange={(e) => setPayerLastName(e.target.value)}
+                  placeholder={tc("lastName")}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+            </div>
+            <div className="mt-3">
+              <label className="block text-xs font-medium text-gray-500 mb-1">{tc("email")} *</label>
+              <input
+                type="email"
+                value={payerEmail}
+                onChange={(e) => setPayerEmail(e.target.value)}
+                placeholder={t("emailPlaceholder")}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+          </div>
 
           {/* Pay Button */}
           <div className="px-6 py-5 border-t border-gray-100">
@@ -366,7 +406,7 @@ function PaymentPageInner({ data, token }) {
             </div>
             <button
               onClick={handlePay}
-              disabled={paying || amountDue <= 0 || (chosenInstallments > 1 && !agreedToTerms) || (data.waivers || []).filter((w) => w.isRequired && !data.existingConsents?.includes(String(w._id))).some((w) => !waiverConsents[w._id])}
+              disabled={paying || amountDue <= 0 || (chosenInstallments > 1 && !agreedToTerms) || !payerFirstName.trim() || !payerLastName.trim() || !payerEmail.trim()}
               className="w-full py-3.5 rounded-xl font-semibold text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-base"
             >
               {paying ? t("redirecting") : t("payNow", { amount: `$${centsToDisplay(schedule[0]?.amountCents || amountDue)}` })}

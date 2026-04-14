@@ -86,6 +86,16 @@ function DashboardLayoutInner({ children }) {
               {t("players")}
             </Link>
             <Link
+              href="/dashboard/users"
+              className={`text-sm font-medium transition ${
+                pathname.startsWith("/dashboard/users")
+                  ? "text-blue-600"
+                  : "text-gray-500 hover:text-gray-900"
+              }`}
+            >
+              {t("users")}
+            </Link>
+            <Link
               href="/dashboard/messages"
               className={`text-sm font-medium transition ${
                 pathname.startsWith("/dashboard/messages")

@@ -5,6 +5,11 @@ export async function middleware(request) {
   const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
   const { pathname } = request.nextUrl;
 
+  // Staff must change password before accessing anything else
+  if (token?.role === "staff" && token.mustChangePassword && pathname !== "/set-password") {
+    return NextResponse.redirect(new URL("/set-password", request.url));
+  }
+
   // Protect admin routes
   if (pathname.startsWith("/admin")) {
     if (!token || token.role !== "admin") {
@@ -12,9 +17,23 @@ export async function middleware(request) {
     }
   }
 
-  // Protect dashboard routes
+  // Protect dashboard routes (club only)
   if (pathname.startsWith("/dashboard")) {
     if (!token || token.role !== "club") {
+      return NextResponse.redirect(new URL("/", request.url));
+    }
+  }
+
+  // Protect staff routes
+  if (pathname.startsWith("/staff")) {
+    if (!token || token.role !== "staff") {
+      return NextResponse.redirect(new URL("/", request.url));
+    }
+  }
+
+  // Protect set-password page (staff only)
+  if (pathname === "/set-password") {
+    if (!token || token.role !== "staff") {
       return NextResponse.redirect(new URL("/", request.url));
     }
   }
@@ -30,5 +49,5 @@ export async function middleware(request) {
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/dashboard/:path*", "/api/admin/:path*"],
+  matcher: ["/admin/:path*", "/dashboard/:path*", "/api/admin/:path*", "/staff/:path*", "/set-password"],
 };

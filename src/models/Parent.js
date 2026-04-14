@@ -16,6 +16,7 @@ const ParentSchema = new mongoose.Schema({
   },
   phonePrefix: { type: String, default: "+1", trim: true },
   phone: { type: String, required: true, trim: true },
+  alternatePhone: { type: String, default: "", trim: true },
   emailVerified: { type: Boolean, default: false },
   emailVerifiedAt: { type: Date, default: null },
   invitedAt: { type: Date, default: null },

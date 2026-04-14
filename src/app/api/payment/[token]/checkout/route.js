@@ -53,7 +53,7 @@ export async function POST(request, { params }) {
   try {
     const { token } = await params;
     const body = await request.json();
-    const { chosenInstallments, waiverConsents: consentIds } = body;
+    const { chosenInstallments, payerFirstName, payerLastName, payerEmail } = body;
 
     await dbConnect();
 
@@ -77,16 +77,6 @@ export async function POST(request, { params }) {
     const actSub = (activity?.subscriptions || []).find((s) => String(s._id) === order.subscriptionId);
     const maxInstallments = actSub?.maxInstallments || 1;
     const chosen = Math.min(Math.max(chosenInstallments || 1, 1), maxInstallments);
-
-    if (consentIds?.length > 0) {
-      const actWaivers = await Activity.findById(order.activityId, "waivers").lean();
-      const existingIds = (order.waiverConsents || []).map((c) => c.waiverId);
-      const newConsents = consentIds.filter((id) => !existingIds.includes(id)).map((id) => {
-        const w = (actWaivers?.waivers || []).find((ww) => String(ww._id) === id);
-        return { waiverId: id, title: w?.title || "", agreedAt: new Date(), agreedByName: `${order.parent1FirstName} ${order.parent1LastName}`.trim(), agreedByEmail: order.parent1Email };
-      });
-      order.waiverConsents = [...(order.waiverConsents || []), ...newConsents];
-    }
 
     order.chosenInstallments = chosen;
     const feeCents = computeInstallmentFee(order.totalCostCents, chosen, actSub);
@@ -161,12 +151,14 @@ export async function POST(request, { params }) {
         }
       }
 
+      const resolvedEmail = payerEmail?.trim() || order.parent1Email || undefined;
+
       const sessionConfig = {
         mode: "payment",
         line_items: lineItems,
         success_url: successUrl,
         cancel_url: cancelUrl,
-        customer_email: order.parent1Email || undefined,
+        customer_email: resolvedEmail,
         metadata,
         ...connectedArgs,
       };
@@ -184,13 +176,16 @@ export async function POST(request, { params }) {
     const recurringCount = chosen - 1;
     const firstInstDate = schedule.length > 1 ? new Date(schedule[1].date) : null;
 
-    const customerEmail = order.parent1Email || undefined;
+    const customerEmail = payerEmail?.trim() || order.parent1Email || undefined;
+    const customerName = (payerFirstName && payerLastName)
+      ? `${payerFirstName.trim()} ${payerLastName.trim()}`
+      : `${order.parent1FirstName || ""} ${order.parent1LastName || ""}`.trim() || undefined;
     let customer = null;
     if (customerEmail) {
       const existing = await stripeClient.customers.list({ email: customerEmail, limit: 1 });
-      customer = existing.data[0] || await stripeClient.customers.create({ email: customerEmail, name: `${order.parent1FirstName} ${order.parent1LastName}`.trim() || undefined, metadata });
+      customer = existing.data[0] || await stripeClient.customers.create({ email: customerEmail, name: customerName, metadata });
     } else {
-      customer = await stripeClient.customers.create({ metadata });
+      customer = await stripeClient.customers.create({ name: customerName, metadata });
     }
     order.stripeCustomerId = customer.id;
 

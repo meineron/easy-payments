@@ -22,7 +22,7 @@ export async function GET(request, { params }) {
     }
 
     const [activity, club] = await Promise.all([
-      Activity.findById(order.activityId, "title description subscriptions startDate hasPayment waivers passStripeFeeToCustomer").lean(),
+      Activity.findById(order.activityId, "title description subscriptions startDate hasPayment passStripeFeeToCustomer").lean(),
       Club.findById(order.clubId, "name logoUrl language").lean(),
     ]);
 
@@ -70,10 +70,6 @@ export async function GET(request, { params }) {
         installmentFeePercent: actSub?.installmentFeePercent || 0,
         installmentFeeMode: actSub?.installmentFeeMode || "split",
       },
-      waivers: (activity?.waivers || []).map((w) => ({
-        _id: w._id, title: w.title, contentHtml: w.contentHtml, isRequired: w.isRequired,
-      })),
-      existingConsents: (order.waiverConsents || []).map((c) => c.waiverId),
     });
   } catch (error) {
     console.error("Get payment details error:", error);

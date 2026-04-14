@@ -50,7 +50,7 @@ export async function PUT(request, { params }) {
     const fields = [
       "firstName", "lastName", "dateOfBirth", "gender",
       "primaryPosition", "secondaryPosition", "school",
-      "joinDate", "phoneNumber", "address", "city", "state", "zip", "email",
+      "joinDate", "phonePrefix", "phoneNumber", "address", "city", "state", "zip", "email",
     ];
 
     for (const field of fields) {

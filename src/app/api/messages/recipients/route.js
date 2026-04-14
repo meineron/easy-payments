@@ -17,12 +17,12 @@ export async function GET() {
     const clubId = session.user.id;
 
     const [players, parents, teams] = await Promise.all([
-      Player.find({ clubId }, "firstName lastName email teams parents")
+      Player.find({ clubId }, "firstName lastName email phonePrefix phoneNumber teams parents")
         .populate("teams.teamId", "name season")
-        .populate("parents", "firstName lastName email")
+        .populate("parents", "firstName lastName email phonePrefix phone")
         .sort("lastName firstName")
         .lean(),
-      Parent.find({ clubId }, "firstName lastName email")
+      Parent.find({ clubId }, "firstName lastName email phonePrefix phone")
         .sort("lastName firstName")
         .lean(),
       Team.find({ clubId }, "name season")

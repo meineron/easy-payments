@@ -2,6 +2,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import dbConnect from "@/lib/mongodb";
 import Club from "@/models/Club";
+import ClubUser from "@/models/ClubUser";
 
 export const authOptions = {
   providers: [
@@ -26,23 +27,47 @@ export const authOptions = {
           };
         }
 
-        // Check club credentials
         await dbConnect();
+
+        // Check club credentials
         const club = await Club.findOne({ username: username.toLowerCase() });
+        if (club) {
+          const isValid = await bcrypt.compare(password, club.password);
+          if (!isValid) return null;
+          return {
+            id: club._id.toString(),
+            name: club.name,
+            username: club.username,
+            role: "club",
+            stripeAccountId: club.stripeAccountId,
+            onboardingComplete: club.onboardingComplete,
+            hasDirectStripeAccess: club.hasDirectStripeAccess,
+          };
+        }
 
-        if (!club) return null;
+        // Check staff (ClubUser) credentials by email
+        const staffUser = await ClubUser.findOne({
+          email: username.toLowerCase(),
+          status: { $in: ["invited", "active"] },
+        });
+        if (!staffUser) return null;
 
-        const isValid = await bcrypt.compare(password, club.password);
-        if (!isValid) return null;
+        let passwordValid = false;
+        if (staffUser.password) {
+          passwordValid = await bcrypt.compare(password, staffUser.password);
+        }
+        if (!passwordValid && staffUser.temporaryPassword) {
+          passwordValid = await bcrypt.compare(password, staffUser.temporaryPassword);
+        }
+        if (!passwordValid) return null;
 
         return {
-          id: club._id.toString(),
-          name: club.name,
-          username: club.username,
-          role: "club",
-          stripeAccountId: club.stripeAccountId,
-          onboardingComplete: club.onboardingComplete,
-          hasDirectStripeAccess: club.hasDirectStripeAccess,
+          id: staffUser._id.toString(),
+          name: `${staffUser.firstName} ${staffUser.lastName}`,
+          role: "staff",
+          clubId: staffUser.clubId.toString(),
+          mustChangePassword: staffUser.mustChangePassword,
+          staffRole: staffUser.mainRole === "custom" ? staffUser.customRoleLabel : staffUser.mainRole,
         };
       },
     }),
@@ -58,6 +83,11 @@ export const authOptions = {
           token.onboardingComplete = user.onboardingComplete;
           token.hasDirectStripeAccess = user.hasDirectStripeAccess;
         }
+        if (user.role === "staff") {
+          token.clubId = user.clubId;
+          token.mustChangePassword = user.mustChangePassword;
+          token.staffRole = user.staffRole;
+        }
       }
 
       if (token.role === "club" && !token.onboardingComplete) {
@@ -70,6 +100,12 @@ export const authOptions = {
         }
       }
 
+      if (token.role === "staff" && token.mustChangePassword) {
+        await dbConnect();
+        const su = await ClubUser.findById(token.userId).select("mustChangePassword");
+        if (su) token.mustChangePassword = su.mustChangePassword;
+      }
+
       return token;
     },
     async session({ session, token }) {
@@ -80,6 +116,11 @@ export const authOptions = {
         session.user.stripeAccountId = token.stripeAccountId;
         session.user.onboardingComplete = token.onboardingComplete;
         session.user.hasDirectStripeAccess = token.hasDirectStripeAccess;
+      }
+      if (token.role === "staff") {
+        session.user.clubId = token.clubId;
+        session.user.mustChangePassword = token.mustChangePassword;
+        session.user.staffRole = token.staffRole;
       }
       return session;
     },

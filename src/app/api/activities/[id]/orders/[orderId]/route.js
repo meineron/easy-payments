@@ -8,6 +8,8 @@ import OrderLog from "@/models/OrderLog";
 import Club from "@/models/Club";
 import Transaction from "@/models/Transaction";
 import PaymentRequest from "@/models/PaymentRequest";
+import Player from "@/models/Player";
+import Parent from "@/models/Parent";
 
 function computeTotal(order) {
   let total = order.subscriptionPriceCents || 0;
@@ -127,9 +129,9 @@ const TRACKED_FIELDS = [
   "items", "discountType", "discountValue", "couponCode", "couponDiscountCents",
   "paidCents", "refundedCents", "status", "installmentSchedule",
   "playerFirstName", "playerLastName", "playerDob", "playerGender",
-  "playerPhone", "playerEmail",
-  "parent1FirstName", "parent1LastName", "parent1Phone", "parent1Email",
-  "parent2FirstName", "parent2LastName", "parent2Phone", "parent2Email",
+  "playerPhonePrefix", "playerPhone", "playerEmail",
+  "parent1FirstName", "parent1LastName", "parent1PhonePrefix", "parent1Phone", "parent1Email",
+  "parent2FirstName", "parent2LastName", "parent2PhonePrefix", "parent2Phone", "parent2Email",
 ];
 
 export async function PUT(request, { params }) {
@@ -190,9 +192,9 @@ export async function PUT(request, { params }) {
       "items", "discountType", "discountValue", "couponCode", "couponDiscountCents",
       "paidCents", "refundedCents", "status", "installmentSchedule",
       "playerFirstName", "playerLastName", "playerDob", "playerGender",
-      "playerPhone", "playerEmail",
-      "parent1FirstName", "parent1LastName", "parent1Phone", "parent1Email",
-      "parent2FirstName", "parent2LastName", "parent2Phone", "parent2Email",
+      "playerPhonePrefix", "playerPhone", "playerEmail",
+      "parent1FirstName", "parent1LastName", "parent1PhonePrefix", "parent1Phone", "parent1Email",
+      "parent2FirstName", "parent2LastName", "parent2PhonePrefix", "parent2Phone", "parent2Email",
       "formData",
     ];
 
@@ -204,6 +206,45 @@ export async function PUT(request, { params }) {
 
     order.totalCostCents = computeTotal(order);
     await order.save();
+
+    const parentFieldChanged = [
+      "parent1FirstName", "parent1LastName", "parent1PhonePrefix", "parent1Phone", "parent1Email",
+      "parent2FirstName", "parent2LastName", "parent2PhonePrefix", "parent2Phone", "parent2Email",
+    ].some((f) => body[f] !== undefined);
+
+    if (parentFieldChanged && order.playerId) {
+      try {
+        for (const slot of ["parent1", "parent2"]) {
+          const firstName = order[`${slot}FirstName`];
+          const lastName = order[`${slot}LastName`];
+          const email = order[`${slot}Email`];
+          const phone = order[`${slot}Phone`];
+          const phonePrefix = order[`${slot}PhonePrefix`] || "+1";
+          if (!firstName || !lastName || !email) continue;
+
+          let parent = await Parent.findOne({ clubId: session.user.id, email: email.trim().toLowerCase() });
+          if (parent) {
+            parent.firstName = firstName.trim();
+            parent.lastName = lastName.trim();
+            if (phone) { parent.phone = phone.trim(); parent.phonePrefix = phonePrefix; }
+            await parent.save();
+          } else {
+            parent = await Parent.create({
+              clubId: session.user.id,
+              firstName: firstName.trim(),
+              lastName: lastName.trim(),
+              email: email.trim().toLowerCase(),
+              phonePrefix,
+              phone: (phone || "").trim() || "0000000000",
+            });
+          }
+          await Player.updateOne({ _id: order.playerId }, { $addToSet: { parents: parent._id } });
+          await Parent.updateOne({ _id: parent._id }, { $addToSet: { players: order.playerId } });
+        }
+      } catch (e) {
+        console.error("Parent sync on order update:", e);
+      }
+    }
 
     if (logs.length > 0) {
       await OrderLog.insertMany(logs);

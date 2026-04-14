@@ -51,7 +51,7 @@ export async function POST(request) {
     const {
       firstName, lastName, dateOfBirth, gender,
       primaryPosition, secondaryPosition, school,
-      joinDate, phoneNumber, address, city, state, zip, email,
+      joinDate, phonePrefix, phoneNumber, address, city, state, zip, email,
       teams, parentIds, registrationTeamId,
     } = body;
 
@@ -71,6 +71,7 @@ export async function POST(request) {
       secondaryPosition: secondaryPosition ? secondaryPosition.trim() : "",
       school: school ? school.trim() : "",
       joinDate: joinDate || null,
+      phonePrefix: phonePrefix || "+1",
       phoneNumber: phoneNumber ? phoneNumber.trim() : "",
       address: address ? address.trim() : "",
       city: city ? city.trim() : "",

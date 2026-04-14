@@ -4,21 +4,40 @@ import { useState, useEffect, useMemo, use } from "react";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import IntlProvider from "@/components/IntlProvider";
+import PhonePrefixInput from "@/components/PhonePrefixInput";
 import { getMessages, getDirection } from "@/lib/i18n";
 
 function centsToDisplay(c) {
   return ((c || 0) / 100).toFixed(2);
 }
 
-function buildPreviewSchedule(totalCostCents, dueDateAmountCents, chosen, firstInstallmentDate, labels) {
-  if (chosen <= 1) {
-    return [{ number: 1, date: new Date(), amountCents: totalCostCents, label: labels.payInFull }];
-  }
-  const dueAmount = dueDateAmountCents || totalCostCents;
-  const remaining = Math.max(0, totalCostCents - dueAmount);
-  const numRemaining = Math.max(0, chosen - 1);
+function computeFee(totalCents, chosen, opts) {
+  const threshold = opts?.installmentFeeThreshold || 0;
+  const percent = opts?.installmentFeePercent || 0;
+  if (threshold <= 0 || percent <= 0 || chosen <= threshold) return 0;
+  return Math.round(totalCents * percent / 100);
+}
 
-  const schedule = [{ number: 1, date: new Date(), amountCents: dueAmount, label: labels.dueNow }];
+function buildPreviewSchedule(totalCostCents, dueDateAmountCents, chosen, firstInstallmentDate, labels, opts) {
+  const feeCents = computeFee(totalCostCents, chosen, opts);
+  const feeMode = opts?.installmentFeeMode || "split";
+
+  if (chosen <= 1) {
+    return { schedule: [{ number: 1, date: new Date(), amountCents: totalCostCents, label: labels.payInFull }], feeCents: 0 };
+  }
+
+  let dueNow = dueDateAmountCents || totalCostCents;
+  let remaining;
+  if (feeCents > 0 && feeMode === "due_date") {
+    dueNow = (dueDateAmountCents || totalCostCents) + feeCents;
+    remaining = Math.max(0, totalCostCents - (dueDateAmountCents || totalCostCents));
+  } else {
+    const effectiveTotal = totalCostCents + feeCents;
+    remaining = Math.max(0, effectiveTotal - dueNow);
+  }
+
+  const numRemaining = Math.max(0, chosen - 1);
+  const schedule = [{ number: 1, date: new Date(), amountCents: dueNow, label: labels.dueNow }];
   if (numRemaining > 0 && remaining > 0) {
     const perInstallment = Math.round(remaining / numRemaining);
     const now = new Date();
@@ -32,7 +51,7 @@ function buildPreviewSchedule(totalCostCents, dueDateAmountCents, chosen, firstI
       schedule.push({ number: i + 2, date: d, amountCents: amt });
     }
   }
-  return schedule;
+  return { schedule, feeCents };
 }
 
 function buildSteps(hasWaivers, t) {
@@ -115,35 +134,121 @@ function ErrorView({ message }) {
 }
 
 function initParent1(order) {
-  if (!order) return { firstName: "", lastName: "", phone: "", email: "" };
+  if (!order) return { firstName: "", lastName: "", phonePrefix: "+1", phone: "", email: "" };
   return {
     firstName: order.parent1FirstName || "",
     lastName: order.parent1LastName || "",
+    phonePrefix: order.parent1PhonePrefix || "+1",
     phone: order.parent1Phone || "",
     email: order.parent1Email || "",
   };
 }
 
 function initParent2(order) {
-  if (!order) return { firstName: "", lastName: "", phone: "", email: "" };
+  if (!order) return { firstName: "", lastName: "", phonePrefix: "+1", phone: "", email: "" };
   return {
     firstName: order.parent2FirstName || "",
     lastName: order.parent2LastName || "",
+    phonePrefix: order.parent2PhonePrefix || "+1",
     phone: order.parent2Phone || "",
     email: order.parent2Email || "",
   };
 }
 
 function initPlayer(order) {
-  if (!order) return { firstName: "", lastName: "", dob: "", gender: "", phone: "", email: "" };
+  if (!order) return { firstName: "", lastName: "", dob: "", gender: "", phonePrefix: "+1", phone: "", email: "" };
   return {
     firstName: order.playerFirstName || "",
     lastName: order.playerLastName || "",
     dob: order.playerDob ? new Date(order.playerDob).toISOString().slice(0, 10) : "",
     gender: order.playerGender || "",
+    phonePrefix: order.playerPhonePrefix || "+1",
     phone: order.playerPhone || "",
     email: order.playerEmail || "",
   };
+}
+
+function ContactForm({ activityId, activity, order, t, tc }) {
+  const [subject, setSubject] = useState("");
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  async function handleSubmit() {
+    if (!subject.trim() || !message.trim()) return;
+    setSending(true);
+    try {
+      await fetch("/api/registration-requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          activityId,
+          orderId: order._id,
+          clubId: activity.clubId,
+          playerName: `${order.playerFirstName || ""} ${order.playerLastName || ""}`.trim(),
+          parentName: `${order.parent1FirstName || ""} ${order.parent1LastName || ""}`.trim(),
+          parentEmail: order.parent1Email || "",
+          parentPhone: order.parent1Phone || "",
+          subject: subject.trim(),
+          message: message.trim(),
+        }),
+      });
+      setSent(true);
+    } catch {
+      alert(tc("somethingWentWrong"));
+    } finally {
+      setSending(false);
+    }
+  }
+
+  if (sent) {
+    return (
+      <div className="text-center py-8">
+        <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <svg className="w-7 h-7 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+        <h3 className="text-lg font-bold text-gray-900 mb-1">{t("requestSent")}</h3>
+        <p className="text-sm text-gray-500">{t("requestSentDesc")}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <h3 className="font-semibold text-gray-900">{t("sendRequest")}</h3>
+      <p className="text-sm text-gray-500">{t("sendRequestDesc")}</p>
+      <div>
+        <label className="block text-xs text-gray-500 mb-1 text-start">{t("requestSubject")} *</label>
+        <input
+          value={subject}
+          onChange={(e) => setSubject(e.target.value)}
+          placeholder={t("requestSubjectPlaceholder")}
+          className="w-full border rounded-lg px-3 py-2 text-sm"
+        />
+      </div>
+      <div>
+        <label className="block text-xs text-gray-500 mb-1 text-start">{t("requestMessage")} *</label>
+        <textarea
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          placeholder={t("requestMessagePlaceholder")}
+          rows={4}
+          className="w-full border rounded-lg px-3 py-2 text-sm"
+        />
+      </div>
+      <div className="flex justify-end">
+        <button
+          onClick={handleSubmit}
+          disabled={sending || !subject.trim() || !message.trim()}
+          className="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition"
+        >
+          {sending ? tc("saving") : t("submitRequest")}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function RegisterPageInner({ activityId, token, activity, order: initialOrder, mode }) {
@@ -151,15 +256,28 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
   const tc = useTranslations("common");
   const tp = useTranslations("payment");
 
-  const [verified, setVerified] = useState(() => mode === "public");
-  const [otpEmail, setOtpEmail] = useState(() => initialOrder?.parent1Email || "");
-  const [otpCode, setOtpCode] = useState("");
-  const [otpSent, setOtpSent] = useState(false);
-  const [otpLoading, setOtpLoading] = useState(false);
-  const [otpError, setOtpError] = useState("");
+  const orderPaid = initialOrder && (initialOrder.status === "paid" || initialOrder.status === "partial") && (initialOrder.paidCents || 0) > 0;
+  const orderPaidNoRegistration = orderPaid && !initialOrder.registrationCompletedAt;
+  const orderFullyRegisteredAndPaid = orderPaid && !!initialOrder.registrationCompletedAt;
 
-  const [step, setStep] = useState(1);
-  const [completedSteps, setCompletedSteps] = useState([]);
+  const autoResumeToInvoice = initialOrder && !orderPaid && initialOrder.status === "pending" &&
+    !!initialOrder.playerFirstName && !!initialOrder.parent1FirstName;
+
+  const [step, setStep] = useState(() => {
+    if (orderFullyRegisteredAndPaid) return 1;
+    if (autoResumeToInvoice) {
+      const hasWaivers = (activity?.waivers || []).length > 0;
+      return hasWaivers ? 4 : 3;
+    }
+    return 1;
+  });
+  const [completedSteps, setCompletedSteps] = useState(() => {
+    if (autoResumeToInvoice) {
+      const hasWaivers = (activity?.waivers || []).length > 0;
+      return hasWaivers ? [1, 2, 3] : [1, 2];
+    }
+    return [];
+  });
   const [paying, setPaying] = useState(false);
 
   const [parent1, setParent1] = useState(() => initParent1(initialOrder));
@@ -170,7 +288,23 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
   const [subscriptionTitle, setSubscriptionTitle] = useState(() => initialOrder?.subscriptionTitle || "");
   const [subscriptionPriceCents, setSubscriptionPriceCents] = useState(() => initialOrder?.subscriptionPriceCents || 0);
 
-  const [waiverConsents, setWaiverConsents] = useState({});
+  const [formData, setFormData] = useState(() => initialOrder?.formData || {});
+
+  const savedWaiverIds = useMemo(() => {
+    const ids = new Set();
+    (initialOrder?.waiverConsents || []).forEach((c) => {
+      if (c.agreedAt) ids.add(c.waiverId);
+    });
+    return ids;
+  }, [initialOrder]);
+
+  const [waiverConsents, setWaiverConsents] = useState(() => {
+    const init = {};
+    (initialOrder?.waiverConsents || []).forEach((c) => {
+      if (c.agreedAt) init[c.waiverId] = true;
+    });
+    return init;
+  });
 
   const [chosenInstallments, setChosenInstallments] = useState(1);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
@@ -179,56 +313,14 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
   const [couponResult, setCouponResult] = useState(null);
   const [couponLoading, setCouponLoading] = useState(false);
 
-  async function sendOtp() {
-    if (!otpEmail) {
-      setOtpError(t("enterEmail"));
-      return;
-    }
-    setOtpLoading(true);
-    setOtpError("");
-    try {
-      const res = await fetch(`/api/register/${activityId}/verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: otpEmail, token: token || undefined }),
-      });
-      const d = await res.json();
-      if (d.success) setOtpSent(true);
-      else setOtpError(d.error || t("failedToSendCode"));
-    } catch {
-      setOtpError(t("failedToSendCode"));
-    } finally {
-      setOtpLoading(false);
-    }
-  }
-
-  async function verifyOtp() {
-    if (!otpCode) {
-      setOtpError(t("enterCode"));
-      return;
-    }
-    setOtpLoading(true);
-    setOtpError("");
-    try {
-      const res = await fetch(`/api/register/${activityId}/verify-code`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: otpEmail, code: otpCode }),
-      });
-      const d = await res.json();
-      if (d.verified) {
-        setVerified(true);
-        setParent1((p) => ({ ...p, email: otpEmail }));
-      } else setOtpError(d.error || t("invalidCode"));
-    } catch {
-      setOtpError(t("failedToVerify"));
-    } finally {
-      setOtpLoading(false);
-    }
-  }
-
   const teams = activity?.teams || [];
   const subscriptions = activity?.subscriptions || [];
+
+  const playerCustomFields = useMemo(() => {
+    const section = (activity?.formSections || []).find((s) => s.key === "player_details");
+    if (!section) return [];
+    return (section.fields || []).filter((f) => !f.isDefault && !f.hidden).sort((a, b) => (a.order || 0) - (b.order || 0));
+  }, [activity]);
 
   function getSubsForTeam(tid) {
     return subscriptions.filter((s) => (s.includedTeamIds || []).some((id) => String(id) === String(tid)));
@@ -321,6 +413,8 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
 
   function completeStep2() {
     if (!player.firstName || !player.lastName || !player.gender || !player.dob) return;
+    const missingRequired = playerCustomFields.some((f) => f.required && !formData[f.key]);
+    if (missingRequired) return;
     setCompletedSteps((prev) => (prev.includes(2) ? prev : [...prev, 2]));
     goToStep(hasWaivers ? 3 : 3);
   }
@@ -331,6 +425,28 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
     if (!allAgreed) return;
     setCompletedSteps((prev) => (prev.includes(waiverStepNum) ? prev : [...prev, waiverStepNum]));
     goToStep(invoiceStepNum);
+
+    const newConsents = waivers
+      .filter((w) => waiverConsents[w._id] && !savedWaiverIds.has(String(w._id)))
+      .map((w) => ({
+        waiverId: String(w._id),
+        title: w.title,
+        agreedAt: new Date().toISOString(),
+        agreedByName: `${parent1.firstName} ${parent1.lastName}`.trim(),
+        agreedByEmail: parent1.email,
+      }));
+
+    if (newConsents.length > 0) {
+      fetch(`/api/register/${activityId}/waiver-confirmation`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: token || undefined,
+          orderId: initialOrder?._id || undefined,
+          waiverConsents: newConsents,
+        }),
+      }).catch(() => {});
+    }
   }
 
   async function saveAndPay() {
@@ -360,14 +476,17 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
         playerLastName: player.lastName,
         playerDob: player.dob || null,
         playerGender: player.gender,
+        playerPhonePrefix: player.phonePrefix || "+1",
         playerPhone: player.phone,
         playerEmail: player.email,
         parent1FirstName: parent1.firstName,
         parent1LastName: parent1.lastName,
+        parent1PhonePrefix: parent1.phonePrefix || "+1",
         parent1Phone: parent1.phone,
         parent1Email: parent1.email,
         parent2FirstName: parent2.firstName,
         parent2LastName: parent2.lastName,
+        parent2PhonePrefix: parent2.phonePrefix || "+1",
         parent2Phone: parent2.phone,
         parent2Email: parent2.email,
         teamId: teamId || null,
@@ -375,6 +494,7 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
         subscriptionTitle,
         subscriptionPriceCents,
         items: reqItems,
+        formData,
         waiverConsents: waiverConsentData,
         couponCode: couponResult?.couponCode || "",
         couponDiscountCents: couponResult?.discountCents || 0,
@@ -423,76 +543,45 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
   const availableSubs = teamId ? getSubsForTeam(teamId) : subscriptions;
   const waiverName = `${parent1.firstName} ${parent1.lastName}`.trim();
 
-  const schedule = useMemo(() => {
-    if (!currentSub || total <= 0) return [];
+  const { schedule, feeCents } = useMemo(() => {
+    if (!currentSub || total <= 0) return { schedule: [], feeCents: 0 };
     return buildPreviewSchedule(
       total,
       currentSub.dueDateAmountCents,
       chosenInstallments,
       currentSub.firstInstallmentDate,
       { payInFull: tp("payInFull"), dueNow: tp("dueNow") },
+      currentSub,
     );
   }, [total, currentSub, chosenInstallments, tp]);
 
-  if (!verified && mode === "token") {
+  if (orderFullyRegisteredAndPaid) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-lg max-w-md w-full p-8">
-          <h2 className="text-xl font-bold text-gray-900 mb-1">{activity?.title || t("registration")}</h2>
-          <p className="text-sm text-gray-500 mb-6">{activity?.clubName}</p>
-          <p className="text-sm text-gray-600 mb-4">{t("verifyEmail")}</p>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1 text-start">{t("emailLabel")}</label>
-              <input
-                type="email"
-                value={otpEmail}
-                onChange={(e) => setOtpEmail(e.target.value)}
-                disabled={otpSent}
-                className="w-full border rounded-lg px-3 py-2.5 text-sm"
-                placeholder={t("emailPlaceholder")}
-              />
-            </div>
-            {!otpSent ? (
-              <button
-                onClick={sendOtp}
-                disabled={otpLoading}
-                className="w-full bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-              >
-                {otpLoading ? t("sending") : t("sendCode")}
-              </button>
-            ) : (
-              <>
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1 text-start">{t("verificationCode")}</label>
-                  <input
-                    type="text"
-                    value={otpCode}
-                    onChange={(e) => setOtpCode(e.target.value)}
-                    maxLength={6}
-                    className="w-full border rounded-lg px-3 py-2.5 text-sm text-center tracking-widest text-lg"
-                    placeholder="000000"
-                  />
-                </div>
-                <button
-                  onClick={verifyOtp}
-                  disabled={otpLoading}
-                  className="w-full bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {otpLoading ? t("verifying") : t("verifyAndContinue")}
-                </button>
-                <button
-                  onClick={() => {
-                    setOtpSent(false);
-                    setOtpCode("");
-                  }}
-                  className="w-full text-sm text-gray-500 hover:text-gray-700"
-                >
-                  {t("resendCode")}
-                </button>
-              </>
+      <div className="min-h-screen bg-gray-50 py-8 px-4">
+        <div className="max-w-2xl mx-auto">
+          <div className="text-center mb-8">
+            {activity?.clubLogoUrl && (
+              <img src={activity.clubLogoUrl} alt={activity?.clubName || ""} className="h-14 w-auto mx-auto mb-3 object-contain" />
             )}
-            {otpError && <p className="text-sm text-red-600 text-center">{otpError}</p>}
+            <h1 className="text-2xl font-bold text-gray-900">{activity?.title || t("registration")}</h1>
+            <p className="text-sm text-gray-500 mt-1">{activity?.clubName}{activity?.season ? ` · ${activity.season}` : ""}</p>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border p-6">
+            <div className="text-center mb-6">
+              <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-7 h-7 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <h2 className="text-xl font-bold text-gray-900 mb-1">{t("alreadyRegistered")}</h2>
+              <p className="text-sm text-gray-500">{t("alreadyRegisteredDesc")}</p>
+              <div className="mt-3 inline-block bg-green-50 text-green-700 px-3 py-1.5 rounded-full text-sm font-medium">
+                {tp("alreadyPaid")} — ${centsToDisplay(initialOrder.paidCents)}
+              </div>
+            </div>
+            <hr className="my-6" />
+            <ContactForm activityId={activityId} activity={activity} order={initialOrder} t={t} tc={tc} />
           </div>
         </div>
       </div>
@@ -546,11 +635,7 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                 <div className="grid grid-cols-2 gap-4 mt-3">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1 text-start">{t("phoneRequired")}</label>
-                    <input
-                      value={parent1.phone}
-                      onChange={(e) => setParent1({ ...parent1, phone: e.target.value })}
-                      className="w-full border rounded-lg px-3 py-2 text-sm"
-                    />
+                    <PhonePrefixInput prefix={parent1.phonePrefix} phone={parent1.phone} onPrefixChange={(v) => setParent1({ ...parent1, phonePrefix: v })} onPhoneChange={(v) => setParent1({ ...parent1, phone: v })} />
                   </div>
                   <div>
                     <label className="block text-xs text-gray-500 mb-1 text-start">{t("emailRequired")}</label>
@@ -589,11 +674,7 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                 <div className="grid grid-cols-2 gap-4 mt-3">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1 text-start">{t("phone")}</label>
-                    <input
-                      value={parent2.phone}
-                      onChange={(e) => setParent2({ ...parent2, phone: e.target.value })}
-                      className="w-full border rounded-lg px-3 py-2 text-sm"
-                    />
+                    <PhonePrefixInput prefix={parent2.phonePrefix} phone={parent2.phone} onPrefixChange={(v) => setParent2({ ...parent2, phonePrefix: v })} onPhoneChange={(v) => setParent2({ ...parent2, phone: v })} />
                   </div>
                   <div>
                     <label className="block text-xs text-gray-500 mb-1 text-start">{t("email")}</label>
@@ -665,11 +746,7 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs text-gray-500 mb-1 text-start">{t("phone")}</label>
-                  <input
-                    value={player.phone}
-                    onChange={(e) => setPlayer({ ...player, phone: e.target.value })}
-                    className="w-full border rounded-lg px-3 py-2 text-sm"
-                  />
+                  <PhonePrefixInput prefix={player.phonePrefix} phone={player.phone} onPrefixChange={(v) => setPlayer({ ...player, phonePrefix: v })} onPhoneChange={(v) => setPlayer({ ...player, phone: v })} />
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 mb-1 text-start">{t("email")}</label>
@@ -681,6 +758,60 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                   />
                 </div>
               </div>
+
+              {playerCustomFields.map((field) => (
+                <div key={field.key}>
+                  <label className="block text-xs text-gray-500 mb-1 text-start">
+                    {field.label}{field.required ? " *" : ""}
+                  </label>
+                  {field.type === "textarea" ? (
+                    <textarea
+                      value={formData[field.key] || ""}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                      className="w-full border rounded-lg px-3 py-2 text-sm min-h-[80px]"
+                      placeholder={field.description || ""}
+                    />
+                  ) : field.type === "dropdown_single" ? (
+                    <select
+                      value={formData[field.key] || ""}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                      className="w-full border rounded-lg px-3 py-2 text-sm"
+                    >
+                      <option value="">{t("select")}</option>
+                      {(field.options || []).map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  ) : field.type === "multichoice_checkbox" ? (
+                    <div className="space-y-1.5">
+                      {(field.options || []).map((opt) => {
+                        const vals = formData[field.key] || [];
+                        const checked = Array.isArray(vals) ? vals.includes(opt) : false;
+                        return (
+                          <label key={opt} className="flex items-center gap-2 text-sm text-gray-700">
+                            <input type="checkbox" checked={checked} onChange={(e) => {
+                              setFormData((prev) => {
+                                const cur = Array.isArray(prev[field.key]) ? [...prev[field.key]] : [];
+                                if (e.target.checked) cur.push(opt); else { const idx = cur.indexOf(opt); if (idx !== -1) cur.splice(idx, 1); }
+                                return { ...prev, [field.key]: cur };
+                              });
+                            }} className="rounded border-gray-300" />
+                            {opt}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <input
+                      type={field.type === "email" ? "email" : field.type === "date" ? "date" : "text"}
+                      value={formData[field.key] || ""}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                      className="w-full border rounded-lg px-3 py-2 text-sm"
+                      placeholder={field.description || ""}
+                    />
+                  )}
+                </div>
+              ))}
 
               {teams.length > 0 && !initialOrder?.teamId && (
                 <div>
@@ -719,7 +850,7 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                 </button>
                 <button
                   onClick={completeStep2}
-                  disabled={!player.firstName || !player.lastName || !player.gender || !player.dob}
+                  disabled={!player.firstName || !player.lastName || !player.gender || !player.dob || playerCustomFields.some((f) => f.required && !formData[f.key])}
                   className="bg-blue-600 text-white px-8 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition"
                 >
                   {tc("continue")}
@@ -736,30 +867,43 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
               <div className="space-y-4">
                 {waivers.map((w) => {
                   const agreed = !!waiverConsents[w._id];
+                  const locked = savedWaiverIds.has(String(w._id));
+                  const savedConsent = locked ? (initialOrder?.waiverConsents || []).find((c) => c.waiverId === String(w._id)) : null;
                   return (
-                    <div key={w._id} className="border rounded-lg overflow-hidden">
+                    <div key={w._id} className={`border rounded-lg overflow-hidden ${locked ? "bg-gray-50" : ""}`}>
                       <div className="px-4 py-3 bg-gray-50 flex items-center justify-between">
                         <span className="text-sm font-semibold text-gray-900">{w.title}</span>
-                        {w.isRequired && (
-                          <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">{tc("required")}</span>
-                        )}
+                        <div className="flex items-center gap-2">
+                          {locked && (
+                            <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium">{t("waiverSigned")}</span>
+                          )}
+                          {w.isRequired && !locked && (
+                            <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">{tc("required")}</span>
+                          )}
+                        </div>
                       </div>
                       <div className="px-4 py-3 max-h-64 overflow-y-auto border-b">
                         <div className="prose prose-sm text-sm text-gray-700" dangerouslySetInnerHTML={{ __html: w.contentHtml }} />
                       </div>
-                      <label className="flex items-start gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 transition">
+                      <label className={`flex items-start gap-3 px-4 py-3 ${locked ? "cursor-default" : "cursor-pointer hover:bg-gray-50"} transition`}>
                         <input
                           type="checkbox"
                           checked={agreed}
-                          onChange={(e) => setWaiverConsents((prev) => ({ ...prev, [w._id]: e.target.checked }))}
-                          className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          disabled={locked}
+                          onChange={locked ? undefined : (e) => setWaiverConsents((prev) => ({ ...prev, [w._id]: e.target.checked }))}
+                          className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-60"
                         />
-                        <span className="text-sm text-gray-700 text-start">
+                        <span className={`text-sm text-start ${locked ? "text-gray-500" : "text-gray-700"}`}>
                           {t("waiverPrefix")}
                           <strong>{waiverName}</strong>
                           {t("waiverMiddle")}
                           <strong>{w.title}</strong>
                           {t("waiverSuffix")}
+                          {locked && savedConsent?.agreedAt && (
+                            <span className="block text-xs text-green-600 mt-1">
+                              {t("waiverSignedAt", { date: new Date(savedConsent.agreedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" }), name: savedConsent.agreedByName || "" })}
+                            </span>
+                          )}
                         </span>
                       </label>
                     </div>
@@ -782,7 +926,31 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
             </div>
           )}
 
-          {step === invoiceStepNum && (
+          {step === invoiceStepNum && orderPaidNoRegistration && (
+            <div className="space-y-0">
+              <div className="bg-green-50 -mx-6 -mt-6 px-6 py-4 mb-5 border-b border-green-100 rounded-t-xl text-center">
+                <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-2">
+                  <svg className="w-5 h-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <p className="text-sm font-semibold text-green-800">{t("paymentAlreadyMade")}</p>
+                <p className="text-xs text-green-600 mt-1">{tp("alreadyPaid")} — ${centsToDisplay(initialOrder.paidCents)}</p>
+              </div>
+
+              <p className="text-sm text-gray-500 mb-4">{t("paymentAlreadyMadeDesc")}</p>
+
+              <ContactForm activityId={activityId} activity={activity} order={initialOrder} t={t} tc={tc} />
+
+              <div className="flex justify-start pt-4">
+                <button onClick={() => goToStep(hasWaivers ? waiverStepNum : 2)} className="text-sm text-gray-500 hover:text-gray-700 font-medium">
+                  {tc("back")}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === invoiceStepNum && !orderPaidNoRegistration && (
             <div className="space-y-0">
               {/* Player & Parent Info Header */}
               <div className="bg-blue-50 -mx-6 -mt-6 px-6 py-4 mb-5 border-b border-blue-100 rounded-t-xl">
@@ -797,7 +965,7 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                 )}
                 <div className="mt-2 text-xs text-blue-600">
                   {parent1.firstName} {parent1.lastName}
-                  {parent1.phone ? ` · ${parent1.phone}` : ""}
+                  {parent1.phone ? ` · ${parent1.phonePrefix || "+1"} ${parent1.phone}` : ""}
                   {parent1.email ? ` · ${parent1.email}` : ""}
                 </div>
               </div>
@@ -876,14 +1044,27 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                     onChange={(e) => setChosenInstallments(Number(e.target.value))}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   >
-                    {Array.from({ length: maxInstallments }, (_, i) => i + 1).map((n) => (
-                      <option key={n} value={n}>
-                        {n === 1
-                          ? `${tp("payFullOption")} — $${centsToDisplay(total)}`
-                          : `${tp("paymentsOption", { count: n })} — $${centsToDisplay(currentSub?.dueDateAmountCents || total)} ${tp("nowPlus")} ${n - 1} ${tp("installments")}`}
-                      </option>
-                    ))}
+                    {Array.from({ length: maxInstallments }, (_, i) => i + 1).map((n) => {
+                      const optFee = computeFee(total, n, currentSub);
+                      const feeTag = optFee > 0 ? ` (+${currentSub.installmentFeePercent}% ${tp("fee")})` : "";
+                      return (
+                        <option key={n} value={n}>
+                          {n === 1
+                            ? `${tp("payFullOption")} — $${centsToDisplay(total)}`
+                            : `${tp("paymentsOption", { count: n })} — $${centsToDisplay(currentSub?.dueDateAmountCents || total)} ${tp("nowPlus")} ${n - 1} ${tp("installments")}${feeTag}`}
+                        </option>
+                      );
+                    })}
                   </select>
+
+                  {currentSub?.installmentFeeThreshold > 0 && currentSub?.installmentFeePercent > 0 && (
+                    <p className="text-xs text-amber-700 mt-2">
+                      {tp("installmentFeeHint", {
+                        threshold: currentSub.installmentFeeThreshold,
+                        percent: currentSub.installmentFeePercent,
+                      })}
+                    </p>
+                  )}
 
                   {chosenInstallments > 1 && currentSub?.firstInstallmentDate && (
                     <p className="text-xs text-gray-500 mt-2">
@@ -915,6 +1096,16 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                       </table>
                     </div>
                   )}
+
+                  {feeCents > 0 && (
+                    <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-xs text-amber-800">
+                      {tp("installmentFeeNotice", {
+                        percent: currentSub.installmentFeePercent,
+                        fee: `$${centsToDisplay(feeCents)}`,
+                        total: `$${centsToDisplay(total + feeCents)}`,
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -933,8 +1124,14 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                           amount: `$${centsToDisplay(schedule[0]?.amountCents || 0)}`,
                           count: chosenInstallments - 1,
                           installmentAmount: `$${centsToDisplay(schedule[1]?.amountCents || 0)}`,
-                          total: `$${centsToDisplay(total)}`,
+                          total: `$${centsToDisplay(total + feeCents)}`,
                         })}</p>
+                        {feeCents > 0 && (
+                          <p className="mt-1 font-medium">{tp("recurringFeeNote", {
+                            percent: currentSub.installmentFeePercent,
+                            fee: `$${centsToDisplay(feeCents)}`,
+                          })}</p>
+                        )}
                         {currentSub?.firstInstallmentDate && (
                           <p className="mt-1">{tp("installmentsStart", { date: new Date(currentSub.firstInstallmentDate).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) })}</p>
                         )}
@@ -944,7 +1141,11 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                   <label className="flex items-start gap-2.5 mt-3 cursor-pointer">
                     <input type="checkbox" checked={agreedToTerms} onChange={(e) => setAgreedToTerms(e.target.checked)}
                       className="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                    <span className="text-sm text-gray-700">{tp("agreeRecurring")}</span>
+                    <span className="text-sm text-gray-700">
+                      {feeCents > 0
+                        ? tp("agreeRecurringWithFee", { percent: currentSub.installmentFeePercent, fee: `$${centsToDisplay(feeCents)}` })
+                        : tp("agreeRecurring")}
+                    </span>
                   </label>
                 </div>
               )}

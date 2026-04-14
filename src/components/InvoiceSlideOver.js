@@ -243,7 +243,7 @@ function AmountInput({ cents, onCommit, className = "" }) {
   );
 }
 
-function CreatePaymentForm({ order, activityId, outstanding, onCreated, onCancel, t, tc }) {
+function CreatePaymentForm({ order, activityId, outstanding, maxInstallments, onCreated, onCancel, t, tc }) {
   const [items, setItems] = useState(() => {
     const list = [];
     if (order.subscriptionPriceCents > 0) {
@@ -260,12 +260,22 @@ function CreatePaymentForm({ order, activityId, outstanding, onCreated, onCancel
   const [customEmail, setCustomEmail] = useState("");
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [allowedInstallments, setAllowedInstallments] = useState(() =>
+    Array.from({ length: maxInstallments }, (_, i) => i + 1),
+  );
 
   function toggleItem(idx) {
     setItems((prev) => prev.map((item, i) => i === idx ? { ...item, checked: !item.checked } : item));
   }
   function updateAmount(idx, cents) {
     setItems((prev) => prev.map((item, i) => i === idx ? { ...item, amountCents: cents } : item));
+  }
+
+  function toggleInstallment(n) {
+    setAllowedInstallments((prev) => {
+      if (n === 1) return prev;
+      return prev.includes(n) ? prev.filter((v) => v !== n) : [...prev, n].sort((a, b) => a - b);
+    });
   }
 
   const selectedItems = items.filter((i) => i.checked);
@@ -280,6 +290,7 @@ function CreatePaymentForm({ order, activityId, outstanding, onCreated, onCancel
         items: selectedItems.map((i) => ({ name: i.name, amountCents: i.amountCents })),
         sendMethod,
         note,
+        allowedInstallments,
       };
       if (sendMethod === "custom") {
         body.recipientEmail = customEmail;
@@ -328,6 +339,35 @@ function CreatePaymentForm({ order, activityId, outstanding, onCreated, onCancel
       </div>
       {exceedsBalance && <p className="text-xs text-red-600">{t("exceedsBalance")}</p>}
 
+      {maxInstallments > 1 && (
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-2">{t("allowedInstallments")}</label>
+          <div className="flex flex-wrap gap-2">
+            {Array.from({ length: maxInstallments }, (_, i) => i + 1).map((n) => {
+              const checked = allowedInstallments.includes(n);
+              const isOne = n === 1;
+              return (
+                <label key={n}
+                  className={`flex items-center gap-1.5 border rounded-lg px-3 py-1.5 text-sm cursor-pointer transition-colors ${
+                    checked ? "bg-blue-50 border-blue-300 text-blue-700" : "bg-white border-gray-200 text-gray-400"
+                  } ${isOne ? "opacity-80 cursor-default" : "hover:border-blue-300"}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleInstallment(n)}
+                    disabled={isOne}
+                    className="rounded text-blue-600 disabled:opacity-50"
+                  />
+                  <span>{n === 1 ? t("fullPayment") : t("xPayments", { count: n })}</span>
+                </label>
+              );
+            })}
+          </div>
+          <p className="text-xs text-gray-400 mt-1">{t("installmentsHint")}</p>
+        </div>
+      )}
+
       <div>
         <label className="block text-xs font-medium text-gray-500 mb-1">{t("note")}</label>
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("notePlaceholder")}
@@ -347,6 +387,18 @@ function CreatePaymentForm({ order, activityId, outstanding, onCreated, onCancel
             <label className="flex items-center gap-2 text-sm cursor-pointer">
               <input type="radio" name="sendTo" checked={sendMethod === "parent2"} onChange={() => setSendMethod("parent2")} />
               <span>{t("parent2")} — {order.parent2FirstName} {order.parent2LastName} ({order.parent2Email})</span>
+            </label>
+          )}
+          {order.parent1Phone && (
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="radio" name="sendTo" checked={sendMethod === "sms_parent1"} onChange={() => setSendMethod("sms_parent1")} />
+              <span dir="ltr">{t("smsParent1")} — {order.parent1FirstName} {order.parent1LastName} ({order.parent1PhonePrefix || "+1"} {order.parent1Phone})</span>
+            </label>
+          )}
+          {order.parent2Phone && (
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="radio" name="sendTo" checked={sendMethod === "sms_parent2"} onChange={() => setSendMethod("sms_parent2")} />
+              <span dir="ltr">{t("smsParent2")} — {order.parent2FirstName} {order.parent2LastName} ({order.parent2PhonePrefix || "+1"} {order.parent2Phone})</span>
             </label>
           )}
           <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -848,6 +900,10 @@ export default function InvoiceSlideOver({
                   order={order}
                   activityId={activityId}
                   outstanding={outstanding}
+                  maxInstallments={(() => {
+                    const sub = (activitySubs || []).find((s) => String(s.id) === String(order.subscriptionId));
+                    return sub?.maxInstallments || 1;
+                  })()}
                   onCreated={handleCreated}
                   onCancel={() => setShowCreateForm(false)}
                   t={t} tc={tc}
