@@ -166,7 +166,7 @@ function TabDetails({ activity, onSave, saving, t, tc, td }) {
           dangerouslySetInnerHTML={{ __html: form.description }} onBlur={(e) => setForm((p) => ({ ...p, description: e.target.innerHTML }))} />
         <p className="text-xs text-gray-400 mt-1">{td("descriptionHint")}</p>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">{td("type")}</label>
           <select value={form.type} onChange={(e) => setForm((p) => ({ ...p, type: e.target.value }))} className="w-full border rounded-lg px-3 py-2 text-sm">
@@ -191,7 +191,7 @@ function TabDetails({ activity, onSave, saving, t, tc, td }) {
       </div>
       <div className="bg-gray-50 rounded-lg p-4 space-y-4">
         <h4 className="font-semibold text-gray-900 text-sm">{td("publishingSettings")}</h4>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">{tc("status")}</label>
             <select value={form.status} onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))} className="w-full border rounded-lg px-3 py-2 text-sm">
@@ -210,7 +210,7 @@ function TabDetails({ activity, onSave, saving, t, tc, td }) {
           {td("hiddenLink")}
         </label>
       </div>
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
         <DateDropdown label={t("startDate")} parts={startParts} setParts={setStartParts} />
         <DateDropdown label={td("endDate")} parts={endParts} setParts={setEndParts} />
         <DateDropdown label={td("lastDateToRegister")} parts={lastRegParts} setParts={setLastRegParts} />
@@ -322,7 +322,7 @@ function TabTeams({ activity, onSave, saving, tc, td }) {
         {!settings.onlyAssignedPlayers && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">{td("playerAssignment")}</label>
-            <div className="flex gap-4">
+            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
               {[{ v: "auto", l: td("assignAutomatically") }, { v: "after_paid", l: td("afterFullyPaid") }, { v: "manual", l: td("dontAssignAutomatically") }].map(({ v, l }) => (
                 <label key={v} className="flex items-center gap-2 text-sm">
                   <input type="radio" name="playerAssignment" value={v} checked={settings.playerAssignment === v}
@@ -347,7 +347,7 @@ function TabTeams({ activity, onSave, saving, tc, td }) {
                   <div><span className="font-medium text-gray-900">{teamRow.teamName}</span><span className="text-xs text-gray-500 ms-2">{teamRow.teamSeason} · {teamRow.teamGender}</span></div>
                   <button onClick={() => removeTeam(idx)} className="text-red-500 text-xs hover:text-red-700">{tc("remove")}</button>
                 </div>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div><label className="block text-xs text-gray-500 mb-1">{td("playerLimit")}</label>
                     <input type="number" value={teamRow.playerLimit} onChange={(e) => updateTeam(idx, "playerLimit", e.target.value)} placeholder={td("noLimit")} className="w-full border rounded px-2 py-1 text-sm" /></div>
                   <div><label className="block text-xs text-gray-500 mb-1">{td("ageLimit")}</label>
@@ -356,11 +356,11 @@ function TabTeams({ activity, onSave, saving, tc, td }) {
                   <div><label className="block text-xs text-gray-500 mb-1">{td("serialNumber")}</label>
                     <input value={teamRow.serialNumber} onChange={(e) => updateTeam(idx, "serialNumber", e.target.value)} className="w-full border rounded px-2 py-1 text-sm" /></div>
                 </div>
-                {teamRow.ageLimitType === "yob" && (<div className="grid grid-cols-2 gap-3 mt-3">
+                {teamRow.ageLimitType === "yob" && (<div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                   <div><label className="block text-xs text-gray-500 mb-1">{td("minYOB")}</label><input type="number" value={teamRow.ageLimitYobMin} onChange={(e) => updateTeam(idx, "ageLimitYobMin", e.target.value)} placeholder="e.g. 2010" className="w-full border rounded px-2 py-1 text-sm" /></div>
                   <div><label className="block text-xs text-gray-500 mb-1">{td("maxYOB")}</label><input type="number" value={teamRow.ageLimitYobMax} onChange={(e) => updateTeam(idx, "ageLimitYobMax", e.target.value)} placeholder="e.g. 2012" className="w-full border rounded px-2 py-1 text-sm" /></div>
                 </div>)}
-                {teamRow.ageLimitType === "range" && (<div className="grid grid-cols-2 gap-3 mt-3">
+                {teamRow.ageLimitType === "range" && (<div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                   <div><label className="block text-xs text-gray-500 mb-1">{td("minDate")}</label><input type="date" value={teamRow.ageLimitDateMin ? teamRow.ageLimitDateMin.slice(0, 10) : ""} onChange={(e) => updateTeam(idx, "ageLimitDateMin", e.target.value)} className="w-full border rounded px-2 py-1 text-sm" /></div>
                   <div><label className="block text-xs text-gray-500 mb-1">{td("maxDate")}</label><input type="date" value={teamRow.ageLimitDateMax ? teamRow.ageLimitDateMax.slice(0, 10) : ""} onChange={(e) => updateTeam(idx, "ageLimitDateMax", e.target.value)} className="w-full border rounded px-2 py-1 text-sm" /></div>
                 </div>)}
@@ -710,7 +710,7 @@ function TabPayment({ activity, onSave, saving, t, tc, td }) {
                   {expandedSub === sIdx && (
                     <div className="p-4 space-y-5">
                       {/* Title & Description */}
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div><label className="block text-sm font-medium text-gray-700 mb-1">{td("title")}</label>
                           <input value={sub.title} onChange={(e) => updateSub(sIdx, "title", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
                         <div><label className="block text-sm font-medium text-gray-700 mb-1">{td("description")}</label>
@@ -718,7 +718,7 @@ function TabPayment({ activity, onSave, saving, t, tc, td }) {
                       </div>
 
                       {/* Price, Due Date Amount, Months */}
-                      <div className="grid grid-cols-3 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">{td("totalPrice")}</label>
                           <div className="flex items-center gap-1"><span className="text-sm text-gray-500">$</span>
@@ -737,7 +737,7 @@ function TabPayment({ activity, onSave, saving, t, tc, td }) {
                       </div>
 
                       {/* Max Installments & First Installment Date */}
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">{td("maxInstallmentsLabel")}</label>
                           <input type="number" value={sub.maxInstallments} onChange={(e) => updateSub(sIdx, "maxInstallments", Number(e.target.value))} className="w-full border rounded-lg px-3 py-2 text-sm" min="1" />
@@ -756,7 +756,7 @@ function TabPayment({ activity, onSave, saving, t, tc, td }) {
                       {sub.maxInstallments > 1 && (
                         <div className="border rounded-lg p-4 bg-amber-50/50">
                           <h4 className="text-sm font-semibold text-gray-700 mb-3">{td("installmentFeeTitle")}</h4>
-                          <div className="grid grid-cols-3 gap-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                             <div>
                               <label className="block text-xs font-medium text-gray-600 mb-1">{td("feeThreshold")}</label>
                               <input type="number" value={sub.installmentFeeThreshold || ""} placeholder="0"
@@ -1020,12 +1020,12 @@ function TabPayment({ activity, onSave, saving, t, tc, td }) {
             {coupons.map((c, cIdx) => (
               <div key={cIdx} className="border rounded-lg p-4">
                 <div className="flex items-start justify-between mb-3"><span className="font-medium text-gray-900">{c.name || "(Untitled)"}</span><button onClick={() => removeCoupon(cIdx)} className="text-xs text-red-500 hover:text-red-700">{tc("remove")}</button></div>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                   <div><label className="block text-xs text-gray-500 mb-1">{tc("name")}</label><input value={c.name} onChange={(e) => updateCoupon(cIdx, "name", e.target.value)} className="w-full border rounded px-2 py-1 text-sm" /></div>
                   <div><label className="block text-xs text-gray-500 mb-1">{td("code")}</label><input value={c.code} onChange={(e) => updateCoupon(cIdx, "code", e.target.value)} className="w-full border rounded px-2 py-1 text-sm" /></div>
                   <div><label className="block text-xs text-gray-500 mb-1">{td("type")}</label><select value={c.type} onChange={(e) => updateCoupon(cIdx, "type", e.target.value)} className="w-full border rounded px-2 py-1 text-sm"><option value="fixed">{td("fixedAmount")}</option><option value="percentage">{td("percentage")}</option><option value="greater_than">{td("greaterThanPrice")}</option></select></div>
                 </div>
-                <div className="grid grid-cols-3 gap-3 mt-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mt-3">
                   <div><label className="block text-xs text-gray-500 mb-1">{c.type === "percentage" ? td("percentage") + " (%)" : tc("amount") + " ($)"}</label>
                     {c.type === "percentage" ? (
                       <input type="text" inputMode="numeric" value={c.amount} onChange={(e) => { const v = e.target.value; if (v === "" || /^\d*$/.test(v)) updateCoupon(cIdx, "amount", Number(v || 0)); }} className="w-full border rounded px-2 py-1 text-sm" />
@@ -1121,12 +1121,12 @@ function TabWaivers({ activity, onSave, saving, tc, td }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h3 className="font-semibold text-gray-900">{`${td("waivers")} (${waivers.length})`}</h3>
           <p className="text-xs text-gray-400 mt-0.5">{td("waiversHint")}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 shrink-0">
           <label className={`cursor-pointer bg-gray-100 text-gray-700 px-3 py-1.5 rounded text-sm font-medium hover:bg-gray-200 transition inline-flex items-center gap-1.5 ${uploading ? "opacity-50 pointer-events-none" : ""}`}>
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
             {uploading ? td("converting") : td("uploadDocx")}
@@ -1271,19 +1271,19 @@ export default function ActivityEditPage({ params }) {
   return (
     <div>
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-6">
         <button onClick={() => router.push(`/dashboard/activities/${activityId}`)} className="text-gray-400 hover:text-gray-600 text-sm">{td("backToActivity")}</button>
         <h2 className="text-xl font-bold text-gray-900">{td("edit")}: {activity?.title || t("activity")}</h2>
       </div>
       <div className="border-b mb-6">
-        <div className="flex gap-0">
+        <div className="flex gap-0 overflow-x-auto">
           {visibleTabs.map((tabItem) => (
             <button key={tabItem.key} onClick={() => switchTab(tabItem.key)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition ${currentTab === tabItem.key ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>{tabItem.label}</button>
+              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition whitespace-nowrap shrink-0 ${currentTab === tabItem.key ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>{tabItem.label}</button>
           ))}
         </div>
       </div>
-      <div className="bg-white rounded-lg border p-6">
+      <div className="bg-white rounded-lg border p-3 sm:p-6">
         {currentTab === "details" && <TabDetails activity={activity} onSave={saveTab} saving={saving} t={t} tc={tc} td={td} />}
         {currentTab === "teams" && <TabTeams activity={activity} onSave={saveTab} saving={saving} tc={tc} td={td} />}
         {currentTab === "form" && <TabForm activity={activity} onSave={saveTab} saving={saving} tc={tc} td={td} />}

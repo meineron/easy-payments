@@ -111,12 +111,12 @@ export default function ActivitiesPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
         <h2 className="text-xl font-bold text-gray-900">{t("title")}</h2>
         <button
           onClick={openCreateModal}
           disabled={creating}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 w-full sm:w-auto"
         >
           {creating ? tc("creating") : t("createActivity")}
         </button>
@@ -131,12 +131,12 @@ export default function ActivitiesPage() {
         <div className="space-y-3">
           {activities.map((a) => (
             <div key={a._id} className="bg-white rounded-lg border p-4 hover:border-blue-300 transition">
-              <div className="flex items-start justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                 <div
-                  className="flex-1 cursor-pointer"
+                  className="flex-1 cursor-pointer min-w-0"
                   onClick={() => router.push(`/dashboard/activities/${a._id}`)}
                 >
-                  <div className="flex items-center gap-3 mb-1">
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
                     <h3 className="font-semibold text-gray-900">{a.title}</h3>
                     <span
                       className={`text-xs px-2 py-0.5 rounded-full font-medium ${
@@ -151,7 +151,7 @@ export default function ActivitiesPage() {
                       {a.type}
                     </span>
                   </div>
-                  <div className="flex items-center gap-4 text-xs text-gray-500">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
                     {a.season && <span>{t("season")}: {a.season}</span>}
                     <span>{a.teams?.length || 0} {t("teams")}</span>
                     <span>{fmtDate(a.startDate)} — {fmtDate(a.endDate)}</span>
@@ -160,7 +160,7 @@ export default function ActivitiesPage() {
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 ms-4">
+                <div className="flex items-center gap-2 shrink-0">
                   <button
                     onClick={() => toggleStatus(a._id, a.status)}
                     className={`text-xs px-3 py-1 rounded font-medium ${
@@ -201,7 +201,7 @@ export default function ActivitiesPage() {
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-gray-900"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">{t("seasonLabel")}</label>
                   <select

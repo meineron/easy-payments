@@ -213,8 +213,8 @@ function CompletePaymentContent() {
 
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
           {/* Registration Info Banner */}
-          <div className="bg-gray-50 px-6 py-3 border-b border-gray-100">
-            <div className="flex items-center justify-between text-sm">
+          <div className="bg-gray-50 px-4 sm:px-6 py-3 border-b border-gray-100">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between text-sm">
               <div>
                 <span className="text-gray-500">Player: </span>
                 <span className="font-medium text-gray-900">{reg.playerFirstName} {reg.playerLastName}</span>
@@ -324,7 +324,7 @@ function CompletePaymentContent() {
 
               <div className="p-6 border-b border-gray-100">
                 <label className="block text-sm font-medium text-gray-700 mb-3">Number of Payments</label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {[1, 2, 3, 4, 5, 6].map((n) => (
                     <button
                       key={n}

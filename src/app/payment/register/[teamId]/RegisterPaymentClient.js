@@ -202,7 +202,7 @@ export default function RegisterPaymentClient({ team, clubName, hasDiscount }) {
             <div className="p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Parent Information</h2>
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
                     <input
@@ -340,7 +340,7 @@ export default function RegisterPaymentClient({ team, clubName, hasDiscount }) {
             <div className="p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Player Details</h2>
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
                     <input
@@ -409,7 +409,7 @@ export default function RegisterPaymentClient({ team, clubName, hasDiscount }) {
                     placeholder="Street address"
                   />
                 </div>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
                     <input
@@ -493,7 +493,7 @@ export default function RegisterPaymentClient({ team, clubName, hasDiscount }) {
 
               <div className="p-6 border-b border-gray-100">
                 <label className="block text-sm font-medium text-gray-700 mb-3">Number of Payments</label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {[1, 2, 3, 4, 5, 6].map((n) => (
                     <button
                       key={n}

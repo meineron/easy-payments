@@ -1045,7 +1045,19 @@
     "payAmount": "שלם {amount}",
     "failedToLoad": "טעינת בקשת התשלום נכשלה",
     "alreadyPaid": "שולם",
-    "alreadyPaidDesc": "בקשת תשלום זו כבר שולמה. תודה!"
+    "alreadyPaidDesc": "בקשת תשלום זו כבר שולמה. תודה!",
+
+    "reviewSubscriptionItems": "סקירת פריטי מנוי",
+    "newSubscriptionItems": "פריטי מנוי חדשים",
+    "previousSubscriptionItems": "פריטי מנוי קודמים",
+    "manualItemsKept": "פריטים אחרים בחשבונית יישארו כפי שהם.",
+    "required": "חובה",
+    "discount": "הנחה",
+    "confirmChanges": "אשר שינויים",
+    "subscriptionChangedTo": "מנוי → {title}",
+    "noItemsInSubscription": "למנוי זה אין פריטים.",
+    "selectSubscriptionForTeam": "בחר מנוי לקבוצה החדשה",
+    "teamChangeSubscription": "הקבוצה החדשה שייכת למנוי אחר. סקור את השינויים למטה."
   },
   "email": {
     "verifySubject": "{code} הוא קוד האימות שלך",
@@ -1275,7 +1287,7 @@
     "ruleLowercase": "מכיל אות קטנה",
     "ruleNumber": "מכיל מספר",
     "ruleSpecial": "מכיל תו מיוחד",
-    "success": "הסיסמה הוגדרה בהצלחה! מפנה...",
+    "success": "הסיסמה הוגדרה בהצלחה! מפנה להתחברות...",
     "failed": "הגדרת הסיסמה נכשלה",
     "incorrectCurrent": "הסיסמה הנוכחית שגויה"
   },

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useTranslations } from "next-intl";
 
 const PREDEFINED_ROLES = [
@@ -67,11 +67,25 @@ export default function UsersPage() {
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [formLoading, setFormLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState(null);
+  const [openActionMenu, setOpenActionMenu] = useState(null);
+  const actionMenuRef = useRef(null);
 
   useEffect(() => {
     fetchUsers();
     fetchTeams();
   }, []);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (actionMenuRef.current && !actionMenuRef.current.contains(e.target)) {
+        setOpenActionMenu(null);
+      }
+    }
+    if (openActionMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [openActionMenu]);
 
   useEffect(() => {
     if (toast) {
@@ -345,33 +359,47 @@ export default function UsersPage() {
                     </span>
                   </td>
                   <td className="py-3 px-4">
-                    <div className="flex items-center gap-2">
+                    <div className="relative" ref={openActionMenu === u._id ? actionMenuRef : undefined}>
                       <button
-                        onClick={() => openEditModal(u)}
-                        className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                        onClick={() => setOpenActionMenu(openActionMenu === u._id ? null : u._id)}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition"
                       >
-                        {tc("edit")}
+                        {tc("actions")}
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                        </svg>
                       </button>
-                      <button
-                        onClick={() => setConfirmAction({ type: "invite", userId: u._id, name: `${u.firstName} ${u.lastName}` })}
-                        className="text-xs text-green-600 hover:text-green-800 font-medium"
-                      >
-                        {u.status === "invited" || u.status === "active" ? t("resendInvite") : t("invite")}
-                      </button>
-                      {(u.status === "invited" || u.status === "active") && (
-                        <button
-                          onClick={() => setConfirmAction({ type: "reset", userId: u._id, name: `${u.firstName} ${u.lastName}` })}
-                          className="text-xs text-orange-600 hover:text-orange-800 font-medium"
-                        >
-                          {t("resetPassword")}
-                        </button>
+                      {openActionMenu === u._id && (
+                        <div className="absolute right-0 z-20 mt-1 w-44 bg-white rounded-lg border border-gray-200 shadow-lg py-1">
+                          <button
+                            onClick={() => { openEditModal(u); setOpenActionMenu(null); }}
+                            className="w-full text-start px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition"
+                          >
+                            {tc("edit")}
+                          </button>
+                          <button
+                            onClick={() => { setConfirmAction({ type: "invite", userId: u._id, name: `${u.firstName} ${u.lastName}` }); setOpenActionMenu(null); }}
+                            className="w-full text-start px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition"
+                          >
+                            {u.status === "invited" || u.status === "active" ? t("resendInvite") : t("invite")}
+                          </button>
+                          {(u.status === "invited" || u.status === "active") && (
+                            <button
+                              onClick={() => { setConfirmAction({ type: "reset", userId: u._id, name: `${u.firstName} ${u.lastName}` }); setOpenActionMenu(null); }}
+                              className="w-full text-start px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition"
+                            >
+                              {t("resetPassword")}
+                            </button>
+                          )}
+                          <div className="border-t border-gray-100 my-1" />
+                          <button
+                            onClick={() => { handleDelete(u._id); setOpenActionMenu(null); }}
+                            className="w-full text-start px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition"
+                          >
+                            {tc("delete")}
+                          </button>
+                        </div>
                       )}
-                      <button
-                        onClick={() => handleDelete(u._id)}
-                        className="text-xs text-red-500 hover:text-red-700 font-medium"
-                      >
-                        {tc("delete")}
-                      </button>
                     </div>
                   </td>
                 </tr>

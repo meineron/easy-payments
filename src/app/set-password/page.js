@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useSession } from "next-auth/react";
+import { useSession, signOut } from "next-auth/react";
 import { SessionProvider } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { IntlProvider, useTranslations } from "next-intl";
@@ -84,7 +84,7 @@ function SetPasswordForm() {
         return;
       }
       setSuccess(true);
-      setTimeout(() => router.push("/staff/dashboard"), 1500);
+      setTimeout(() => signOut({ callbackUrl: "/" }), 1500);
     } catch {
       setError(t("failed"));
       setLoading(false);

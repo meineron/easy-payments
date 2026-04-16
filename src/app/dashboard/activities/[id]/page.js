@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import InvoiceSlideOver from "@/components/InvoiceSlideOver";
+import SubscriptionItemReviewModal from "@/components/SubscriptionItemReviewModal";
 import SendBulkLinksModal from "@/components/SendBulkLinksModal";
 import SendMessageModal from "@/components/SendMessageModal";
 import PhonePrefixInput from "@/components/PhonePrefixInput";
@@ -111,6 +112,7 @@ function TabParticipants({ activityId, activity, tc, td }) {
   const [editLogs, setEditLogs] = useState([]);
   const [editTab, setEditTab] = useState("invoice");
   const [playerCardData, setPlayerCardData] = useState(null);
+  const [inlineReviewModal, setInlineReviewModal] = useState(null);
 
   const teamFilterRef = useRef(null);
 
@@ -176,16 +178,33 @@ function TabParticipants({ activityId, activity, tc, td }) {
     return Math.max(0, total);
   }
 
-  async function handleInlineTeamChange(orderId, newTeamId) {
-    const body = { teamId: newTeamId || null };
-    if (newTeamId) {
-      const sub = activitySubs.find((s) => (s.includedTeamIds || []).map(String).includes(String(newTeamId)));
-      if (sub) {
-        body.subscriptionId = sub.id;
-        body.subscriptionTitle = sub.title;
-        body.subscriptionPriceCents = sub.priceCents;
-      }
+  function handleInlineTeamChange(orderId, newTeamId) {
+    const order = orders.find((o) => o._id === orderId);
+    const currentSubId = order?.subscriptionId || "";
+    const matchingSubs = newTeamId
+      ? activitySubs.filter((s) => (s.includedTeamIds || []).map(String).includes(String(newTeamId)))
+      : [];
+    const currentSubStillValid = matchingSubs.some((s) => s.id === currentSubId);
+
+    if (currentSubStillValid) {
+      applyInlineTeamChange(orderId, newTeamId, null, null);
+    } else if (matchingSubs.length >= 1) {
+      const newSub = matchingSubs[0];
+      const oldSub = activitySubs.find((s) => s.id === currentSubId) || null;
+      setInlineReviewModal({ orderId, teamId: newTeamId, newSub, oldSub, currentItems: order?.items || [], availableSubs: matchingSubs });
     } else {
+      applyInlineTeamChange(orderId, newTeamId, null, null);
+    }
+  }
+
+  async function applyInlineTeamChange(orderId, teamId, subData, items) {
+    const body = { teamId: teamId || null };
+    if (subData) {
+      body.subscriptionId = subData.subscriptionId;
+      body.subscriptionTitle = subData.subscriptionTitle;
+      body.subscriptionPriceCents = subData.subscriptionPriceCents;
+      if (items) body.items = items;
+    } else if (!teamId) {
       body.subscriptionId = "";
       body.subscriptionTitle = "";
       body.subscriptionPriceCents = 0;
@@ -201,6 +220,17 @@ function TabParticipants({ activityId, activity, tc, td }) {
         setToast({ message: td("invoiceSaved"), type: "success" });
       }
     } catch { /* ignore */ }
+  }
+
+  function handleInlineReviewConfirm({ items, subscriptionId, subscriptionTitle, subscriptionPriceCents }) {
+    if (!inlineReviewModal) return;
+    applyInlineTeamChange(
+      inlineReviewModal.orderId,
+      inlineReviewModal.teamId,
+      { subscriptionId, subscriptionTitle, subscriptionPriceCents },
+      items,
+    );
+    setInlineReviewModal(null);
   }
 
   const effectiveFilterTeams = (() => {
@@ -650,12 +680,12 @@ function TabParticipants({ activityId, activity, tc, td }) {
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
 
       {/* HEADER */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
         <h3 className="font-semibold text-gray-900">
           {td("participantCount", { count: filteredRows.length })}
           {expectedPlayers.length > 0 && <span className="text-sm font-normal text-gray-500 ms-2">({td("registeredCount", { count: orders.length })} · {td("expectedCount", { count: expectedPlayers.length })})</span>}
         </h3>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="relative" ref={headerActionsRef}>
             <button onClick={() => setHeaderActionsOpen((v) => !v)}
               className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded text-sm font-medium hover:bg-gray-200 flex items-center gap-1">
@@ -747,7 +777,7 @@ function TabParticipants({ activityId, activity, tc, td }) {
       </div>
 
       {/* STATS */}
-      <div className="grid grid-cols-5 gap-3 mb-5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-5">
         <div className="bg-gray-50 rounded-lg p-3 text-center">
           <p className="text-xs text-gray-500">{td("totalExpected")}</p>
           <p className="text-lg font-bold text-gray-900">${centsToDisplay(statExpected)}</p>
@@ -772,9 +802,9 @@ function TabParticipants({ activityId, activity, tc, td }) {
 
       {/* BULK ACTIONS BAR */}
       {selected.size > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mb-4 flex items-center justify-between">
+        <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <span className="text-sm font-medium text-blue-800">{td("selected", { count: selected.size })}</span>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button onClick={() => setBulkModal("add_item")}
               className="bg-white border border-blue-300 text-blue-700 px-3 py-1.5 rounded text-sm font-medium hover:bg-blue-100">
               {td("addItem")}
@@ -815,16 +845,16 @@ function TabParticipants({ activityId, activity, tc, td }) {
               <tr className="border-b text-start text-gray-500 text-xs uppercase tracking-wider">
                 <th className="pb-2 px-2 w-8"><input type="checkbox" checked={filteredRows.length > 0 && selected.size === filteredRows.length} onChange={toggleSelectAll} className="rounded" /></th>
                 <th className="pb-2 px-2 font-medium">{td("player")}</th>
-                <th className="pb-2 px-2 font-medium">{td("team")}</th>
-                <th className="pb-2 px-2 font-medium">{td("regDate")}</th>
-                {detailed && <th className="pb-2 px-2 font-medium">{td("parent1")}</th>}
-                {detailed && <th className="pb-2 px-2 font-medium">{td("parent2")}</th>}
-                <th className="pb-2 px-2 font-medium text-right">{td("subCost")}</th>
-                <th className="pb-2 px-2 font-medium text-right">{td("items")}</th>
-                <th className="pb-2 px-2 font-medium text-right">{td("discounts")}</th>
+                <th className="pb-2 px-2 font-medium hidden sm:table-cell">{td("team")}</th>
+                <th className="pb-2 px-2 font-medium hidden md:table-cell">{td("regDate")}</th>
+                {detailed && <th className="pb-2 px-2 font-medium hidden lg:table-cell">{td("parent1")}</th>}
+                {detailed && <th className="pb-2 px-2 font-medium hidden lg:table-cell">{td("parent2")}</th>}
+                <th className="pb-2 px-2 font-medium text-right hidden md:table-cell">{td("subCost")}</th>
+                <th className="pb-2 px-2 font-medium text-right hidden md:table-cell">{td("items")}</th>
+                <th className="pb-2 px-2 font-medium text-right hidden md:table-cell">{td("discounts")}</th>
                 <th className="pb-2 px-2 font-medium text-right">{tc("total")}</th>
-                <th className="pb-2 px-2 font-medium text-right">{td("paid")}</th>
-                <th className="pb-2 px-2 font-medium text-right">{td("refund")}</th>
+                <th className="pb-2 px-2 font-medium text-right hidden sm:table-cell">{td("paid")}</th>
+                <th className="pb-2 px-2 font-medium text-right hidden lg:table-cell">{td("refund")}</th>
                 <th className="pb-2 px-2 font-medium text-right">{td("due")}</th>
                 <th className="pb-2 px-2 font-medium text-right">{tc("actions")}</th>
               </tr>
@@ -853,7 +883,7 @@ function TabParticipants({ activityId, activity, tc, td }) {
                       <div className={`font-medium ${isExpected ? "text-gray-700" : "text-gray-900"}`}>{r.playerFirstName} {r.playerLastName}</div>
                       <div className="text-xs text-gray-400 truncate">{r.subscriptionTitle || ""}</div>
                     </td>
-                    <td className="py-2.5 px-2">
+                    <td className="py-2.5 px-2 hidden sm:table-cell">
                       {isExpected ? (
                         <span className="text-xs text-gray-400">{r.teamId?.name || "—"}</span>
                       ) : (
@@ -869,9 +899,9 @@ function TabParticipants({ activityId, activity, tc, td }) {
                         </select>
                       )}
                     </td>
-                    <td className="py-2.5 px-2 text-gray-500 text-xs">{regDate ? fmtDate(regDate) : "—"}</td>
+                    <td className="py-2.5 px-2 text-gray-500 text-xs hidden md:table-cell">{regDate ? fmtDate(regDate) : "—"}</td>
                     {detailed && (
-                      <td className="py-2.5 px-2">
+                      <td className="py-2.5 px-2 hidden lg:table-cell">
                         {r.parent1FirstName ? (
                           <div>
                             <div className="text-xs font-medium text-gray-900">{r.parent1FirstName} {r.parent1LastName}</div>
@@ -882,7 +912,7 @@ function TabParticipants({ activityId, activity, tc, td }) {
                       </td>
                     )}
                     {detailed && (
-                      <td className="py-2.5 px-2">
+                      <td className="py-2.5 px-2 hidden lg:table-cell">
                         {r.parent2FirstName ? (
                           <div>
                             <div className="text-xs font-medium text-gray-900">{r.parent2FirstName} {r.parent2LastName}</div>
@@ -892,17 +922,17 @@ function TabParticipants({ activityId, activity, tc, td }) {
                         ) : <span className="text-gray-400 text-xs">—</span>}
                       </td>
                     )}
-                    <td className="py-2.5 px-2 text-right text-xs">{subCost > 0 ? `$${centsToDisplay(subCost)}` : <span className="text-gray-400">—</span>}</td>
-                    <td className="py-2.5 px-2 text-right text-xs">{itemsCost > 0 ? `$${centsToDisplay(itemsCost)}` : <span className="text-gray-400">—</span>}</td>
-                    <td className="py-2.5 px-2 text-right text-xs">{totalDiscounts > 0 ? <span className="text-red-500">-${centsToDisplay(totalDiscounts)}</span> : <span className="text-gray-400">—</span>}</td>
+                    <td className="py-2.5 px-2 text-right text-xs hidden md:table-cell">{subCost > 0 ? `$${centsToDisplay(subCost)}` : <span className="text-gray-400">—</span>}</td>
+                    <td className="py-2.5 px-2 text-right text-xs hidden md:table-cell">{itemsCost > 0 ? `$${centsToDisplay(itemsCost)}` : <span className="text-gray-400">—</span>}</td>
+                    <td className="py-2.5 px-2 text-right text-xs hidden md:table-cell">{totalDiscounts > 0 ? <span className="text-red-500">-${centsToDisplay(totalDiscounts)}</span> : <span className="text-gray-400">—</span>}</td>
                     <td className="py-2.5 px-2 text-right font-medium">{total > 0 ? `$${centsToDisplay(total)}` : <span className="text-gray-400">—</span>}</td>
-                    <td className="py-2.5 px-2 text-right">
+                    <td className="py-2.5 px-2 text-right hidden sm:table-cell">
                       <span className="text-green-700">{paid > 0 ? `$${centsToDisplay(paid)}` : <span className="text-gray-400">$0.00</span>}</span>
                       {(r.chosenInstallments || 0) > 1 && (
                         <div className="text-[10px] text-gray-400">{(r.installmentSchedule || []).filter((i) => i.status === "paid").length}/{r.chosenInstallments} {td("installments")}</div>
                       )}
                     </td>
-                    <td className="py-2.5 px-2 text-right text-xs">{refunded > 0 ? <span className="text-purple-600">$${centsToDisplay(refunded)}</span> : <span className="text-gray-400">—</span>}</td>
+                    <td className="py-2.5 px-2 text-right text-xs hidden lg:table-cell">{refunded > 0 ? <span className="text-purple-600">$${centsToDisplay(refunded)}</span> : <span className="text-gray-400">—</span>}</td>
                     <td className="py-2.5 px-2 text-right font-medium">{due > 0 ? <span className="text-red-600">${centsToDisplay(due)}</span> : <span className="text-green-600">$0.00</span>}</td>
                     <td className="py-2.5 px-2 text-right">
                       <div className="relative inline-block">
@@ -1060,6 +1090,18 @@ function TabParticipants({ activityId, activity, tc, td }) {
           onClose={() => { setEditOrder(null); setEditForm(null); }}
           saving={saving}
           onRefresh={refreshInvoiceData}
+        />
+      )}
+
+      {/* INLINE TEAM CHANGE — SUBSCRIPTION ITEM REVIEW */}
+      {inlineReviewModal && (
+        <SubscriptionItemReviewModal
+          newSub={inlineReviewModal.newSub}
+          oldSub={inlineReviewModal.oldSub}
+          availableSubs={inlineReviewModal.availableSubs}
+          currentItems={inlineReviewModal.currentItems}
+          onConfirm={handleInlineReviewConfirm}
+          onCancel={() => setInlineReviewModal(null)}
         />
       )}
 
@@ -1497,7 +1539,7 @@ function PlayerCardModal({ player, activityId, onClose, onUpdated, tc, td }) {
             </div>
             {editingPlayer && playerForm ? (
               <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">{tc("firstName")}</label>
                     <input value={playerForm.firstName} onChange={(e) => setPlayerForm((p) => ({ ...p, firstName: e.target.value }))}
@@ -1509,7 +1551,7 @@ function PlayerCardModal({ player, activityId, onClose, onUpdated, tc, td }) {
                       className="w-full border rounded-lg px-3 py-2 text-sm" />
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">{td("dateOfBirth")}</label>
                     <input type="date" value={playerForm.dateOfBirth} onChange={(e) => setPlayerForm((p) => ({ ...p, dateOfBirth: e.target.value }))}
@@ -1523,7 +1565,7 @@ function PlayerCardModal({ player, activityId, onClose, onUpdated, tc, td }) {
                     </select>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">{tc("phone")}</label>
                     <PhonePrefixInput prefix={playerForm.phonePrefix} phone={playerForm.phoneNumber}
@@ -1583,7 +1625,7 @@ function PlayerCardModal({ player, activityId, onClose, onUpdated, tc, td }) {
                     </div>
                     {editingParentIdx === idx && parentForm ? (
                       <div className="space-y-3 mt-2">
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div>
                             <label className="block text-xs text-gray-500 mb-1">{tc("firstName")}</label>
                             <input value={parentForm.firstName} onChange={(e) => setParentForm((p) => ({ ...p, firstName: e.target.value }))}
@@ -1595,7 +1637,7 @@ function PlayerCardModal({ player, activityId, onClose, onUpdated, tc, td }) {
                               className="w-full border rounded-lg px-3 py-2 text-sm" />
                           </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div>
                             <label className="block text-xs text-gray-500 mb-1">{tc("phone")}</label>
                             <PhonePrefixInput prefix={parentForm.phonePrefix} phone={parentForm.phone}
@@ -1699,7 +1741,7 @@ function PlayerCardModal({ player, activityId, onClose, onUpdated, tc, td }) {
                 ) : (
                   <div className="space-y-3">
                     <p className="text-xs font-semibold text-gray-600 uppercase">{td("createNewParent")}</p>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">{tc("firstName")} *</label>
                         <input value={newParentForm.firstName} onChange={(e) => setNewParentForm((p) => ({ ...p, firstName: e.target.value }))}
@@ -1711,7 +1753,7 @@ function PlayerCardModal({ player, activityId, onClose, onUpdated, tc, td }) {
                           className="w-full border rounded-lg px-3 py-2 text-sm" />
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">{tc("phone")} *</label>
                         <PhonePrefixInput prefix={newParentForm.phonePrefix} phone={newParentForm.phone}
@@ -1796,13 +1838,13 @@ function CreateOrderModal({ activityTeams, activitySubs, saving, onCreate, onClo
         <div className="p-6">
           {tab === "registration" && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("firstName")} *</label>
                   <input value={form.playerFirstName} onChange={(e) => update("playerFirstName", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
                 <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("lastName")} *</label>
                   <input value={form.playerLastName} onChange={(e) => update("playerLastName", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div><label className="block text-xs font-medium text-gray-500 mb-1">{td("dateOfBirth")}</label>
                   <input type="date" value={form.playerDob} onChange={(e) => update("playerDob", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
                 <div><label className="block text-xs font-medium text-gray-500 mb-1">{td("gender")}</label>
@@ -1810,7 +1852,7 @@ function CreateOrderModal({ activityTeams, activitySubs, saving, onCreate, onClo
                     <option value="">—</option><option value="Male">{td("male")}</option><option value="Female">{td("female")}</option>
                   </select></div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("phone")}</label>
                   <PhonePrefixInput prefix={form.playerPhonePrefix} phone={form.playerPhone} onPrefixChange={(v) => update("playerPhonePrefix", v)} onPhoneChange={(v) => update("playerPhone", v)} /></div>
                 <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("email")}</label>
@@ -1826,11 +1868,11 @@ function CreateOrderModal({ activityTeams, activitySubs, saving, onCreate, onClo
           {tab === "parents" && (
             <div className="space-y-5">
               <div><h4 className="text-sm font-semibold text-gray-700 mb-3">{td("parent1Title")}</h4>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("firstName")}</label><input value={form.parent1FirstName} onChange={(e) => update("parent1FirstName", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
                   <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("lastName")}</label><input value={form.parent1LastName} onChange={(e) => update("parent1LastName", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
                 </div>
-                <div className="grid grid-cols-2 gap-4 mt-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
                   <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("phone")}</label>
                     <PhonePrefixInput prefix={form.parent1PhonePrefix} phone={form.parent1Phone} onPrefixChange={(v) => update("parent1PhonePrefix", v)} onPhoneChange={(v) => update("parent1Phone", v)} /></div>
                   <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("email")}</label><input value={form.parent1Email} onChange={(e) => update("parent1Email", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
@@ -1838,11 +1880,11 @@ function CreateOrderModal({ activityTeams, activitySubs, saving, onCreate, onClo
               </div>
               <hr />
               <div><h4 className="text-sm font-semibold text-gray-700 mb-3">{td("parent2Title")} <span className="font-normal text-gray-400">{td("parent2Optional")}</span></h4>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("firstName")}</label><input value={form.parent2FirstName} onChange={(e) => update("parent2FirstName", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
                   <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("lastName")}</label><input value={form.parent2LastName} onChange={(e) => update("parent2LastName", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
                 </div>
-                <div className="grid grid-cols-2 gap-4 mt-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
                   <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("phone")}</label>
                     <PhonePrefixInput prefix={form.parent2PhonePrefix} phone={form.parent2Phone} onPrefixChange={(v) => update("parent2PhonePrefix", v)} onPhoneChange={(v) => update("parent2Phone", v)} /></div>
                   <div><label className="block text-xs font-medium text-gray-500 mb-1">{tc("email")}</label><input value={form.parent2Email} onChange={(e) => update("parent2Email", e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" /></div>
@@ -1852,7 +1894,7 @@ function CreateOrderModal({ activityTeams, activitySubs, saving, onCreate, onClo
           )}
           {tab === "invoice" && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div><label className="block text-xs font-medium text-gray-500 mb-1">{td("subscription")}</label>
                   <select value={form.subscriptionId} onChange={(e) => onSubChange(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm">
                     <option value="">{td("noSubscription")}</option>
@@ -1920,7 +1962,7 @@ function BulkActionModal({ type, busy, selectedCount, orderCount, allOrders, onE
                 <label className="block text-xs font-medium text-gray-500 mb-1">{td("itemName")}</label>
                 <input value={itemName} onChange={(e) => setItemName(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="e.g. Jersey Fee, Late Fee..." />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">{td("priceDollar")}</label>
                   <PriceInput value={itemPrice} onChange={setItemPrice} className="w-full border rounded-lg px-3 py-2 text-sm" />
@@ -2215,8 +2257,8 @@ function TabActivityTeams({ activityId, activity, tc, td }) {
             const s = teamStats(team.teamId);
             return (
               <div key={team.teamId} className="border rounded-lg p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-3">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="font-semibold text-gray-900">{team.name}</span>
                     {team.gender && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{team.gender}</span>}
                     <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{team.season}</span>
@@ -2226,7 +2268,7 @@ function TabActivityTeams({ activityId, activity, tc, td }) {
                     {s.expectedCount > 0 && <span className="text-xs text-orange-600">({s.registered} {td("registered")} · {s.expectedCount} {td("expected")})</span>}
                   </div>
                 </div>
-                <div className="grid grid-cols-5 gap-4 text-center">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 text-center">
                   <div className="bg-gray-50 rounded-lg p-3">
                     <p className="text-xs text-gray-500">{td("expectedRevenue")}</p>
                     <p className="text-lg font-bold text-gray-900">${centsToDisplay(s.expectedRevenue)}</p>
@@ -2688,8 +2730,8 @@ export default function ActivityPage({ params }) {
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <button onClick={() => router.push("/dashboard/activities")} className="text-gray-400 hover:text-gray-600 text-sm">← {t("title")}</button>
           <h2 className="text-xl font-bold text-gray-900">{activity?.title || "Activity"}</h2>
           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${activity?.status === "published" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}>
@@ -2698,17 +2740,17 @@ export default function ActivityPage({ params }) {
           {activity?.season && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600" title={t("season")}>{activity.season}</span>}
         </div>
         <Link href={`/dashboard/activities/${activityId}/edit`}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 text-center w-full sm:w-auto">
           {td("editActivity")}
         </Link>
       </div>
 
       {/* Tabs */}
       <div className="border-b mb-6">
-        <div className="flex gap-0">
+        <div className="flex gap-0 overflow-x-auto">
           {OVERVIEW_TABS.map((tab) => (
             <button key={tab.key} onClick={() => switchTab(tab.key)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition ${currentTab === tab.key ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
+              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition whitespace-nowrap shrink-0 ${currentTab === tab.key ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
               {tab.label}
             </button>
           ))}
@@ -2716,7 +2758,7 @@ export default function ActivityPage({ params }) {
       </div>
 
       {/* Content */}
-      <div className="bg-white rounded-lg border p-6">
+      <div className="bg-white rounded-lg border p-3 sm:p-6">
         {currentTab === "participants" && <TabParticipants activityId={activityId} activity={activity} tc={tc} td={td} />}
         {currentTab === "teams" && <TabActivityTeams activityId={activityId} activity={activity} tc={tc} td={td} />}
         {currentTab === "requests" && <TabRequests activityId={activityId} tc={tc} td={td} />}

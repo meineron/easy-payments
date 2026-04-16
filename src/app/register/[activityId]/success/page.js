@@ -33,7 +33,7 @@ export default function RegistrationSuccessPage({ params }) {
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-lg max-w-lg w-full p-8 text-center">
+      <div className="bg-white rounded-2xl shadow-lg max-w-lg w-full p-4 sm:p-8 text-center">
         {activity?.clubLogoUrl && (
           <img src={activity.clubLogoUrl} alt={activity?.clubName || ""} className="h-16 w-auto mx-auto mb-4 object-contain" />
         )}

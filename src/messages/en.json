@@ -1045,7 +1045,19 @@
     "payAmount": "Pay {amount}",
     "failedToLoad": "Failed to load payment request",
     "alreadyPaid": "Already Paid",
-    "alreadyPaidDesc": "This payment request has already been paid. Thank you!"
+    "alreadyPaidDesc": "This payment request has already been paid. Thank you!",
+
+    "reviewSubscriptionItems": "Review Subscription Items",
+    "newSubscriptionItems": "New Subscription Items",
+    "previousSubscriptionItems": "Previous Subscription Items",
+    "manualItemsKept": "Other items on the invoice will be kept as-is.",
+    "required": "Required",
+    "discount": "Discount",
+    "confirmChanges": "Confirm Changes",
+    "subscriptionChangedTo": "Subscription → {title}",
+    "noItemsInSubscription": "This subscription has no items.",
+    "selectSubscriptionForTeam": "Select subscription for new team",
+    "teamChangeSubscription": "The new team belongs to a different subscription. Review the changes below."
   },
   "email": {
     "verifySubject": "{code} is your verification code",
@@ -1275,7 +1287,7 @@
     "ruleLowercase": "Contains lowercase letter",
     "ruleNumber": "Contains a number",
     "ruleSpecial": "Contains a special character",
-    "success": "Password set successfully! Redirecting...",
+    "success": "Password set successfully! Redirecting to login...",
     "failed": "Failed to set password",
     "incorrectCurrent": "Current password is incorrect"
   },

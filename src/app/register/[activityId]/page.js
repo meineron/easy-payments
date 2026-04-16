@@ -66,7 +66,7 @@ function buildSteps(hasWaivers, t) {
 
 function StepIndicator({ current, completed, steps }) {
   return (
-    <div className="flex items-center justify-center gap-0 mb-8">
+    <div className="flex items-center justify-center gap-0 mb-8 overflow-x-auto px-2">
       {steps.map((s, idx) => {
         const isDone = completed.includes(s.num);
         const isActive = s.num === current;
@@ -260,20 +260,21 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
   const orderPaidNoRegistration = orderPaid && !initialOrder.registrationCompletedAt;
   const orderFullyRegisteredAndPaid = orderPaid && !!initialOrder.registrationCompletedAt;
 
+  const hasWaivers = (activity?.waivers || []).length > 0;
+  const waiversComplete = hasWaivers ? (initialOrder?.waiverConsents || []).length > 0 : true;
+
   const autoResumeToInvoice = initialOrder && !orderPaid && initialOrder.status === "pending" &&
-    !!initialOrder.playerFirstName && !!initialOrder.parent1FirstName;
+    !!initialOrder.playerFirstName && !!initialOrder.parent1FirstName && waiversComplete;
 
   const [step, setStep] = useState(() => {
     if (orderFullyRegisteredAndPaid) return 1;
     if (autoResumeToInvoice) {
-      const hasWaivers = (activity?.waivers || []).length > 0;
       return hasWaivers ? 4 : 3;
     }
     return 1;
   });
   const [completedSteps, setCompletedSteps] = useState(() => {
     if (autoResumeToInvoice) {
-      const hasWaivers = (activity?.waivers || []).length > 0;
       return hasWaivers ? [1, 2, 3] : [1, 2];
     }
     return [];
@@ -406,7 +407,6 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
   }
 
   const waivers = activity?.waivers || [];
-  const hasWaivers = waivers.length > 0;
   const STEPS = buildSteps(hasWaivers, t);
   const waiverStepNum = hasWaivers ? 3 : null;
   const invoiceStepNum = hasWaivers ? 4 : 3;
@@ -567,7 +567,7 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
             <p className="text-sm text-gray-500 mt-1">{activity?.clubName}{activity?.season ? ` · ${activity.season}` : ""}</p>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm border p-6">
+          <div className="bg-white rounded-xl shadow-sm border p-4 sm:p-6">
             <div className="text-center mb-6">
               <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg className="w-7 h-7 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -608,13 +608,13 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
 
         <StepIndicator current={step} completed={completedSteps} steps={STEPS} />
 
-        <div className="bg-white rounded-xl shadow-sm border p-6">
+        <div className="bg-white rounded-xl shadow-sm border p-4 sm:p-6">
           {step === 1 && (
             <div className="space-y-5">
               <h3 className="font-semibold text-gray-900">{t("parentGuardian")}</h3>
               <div>
                 <h4 className="text-sm font-medium text-gray-700 mb-3">{t("parent1Required")}</h4>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1 text-start">{t("firstNameRequired")}</label>
                     <input
@@ -632,7 +632,7 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                     />
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4 mt-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1 text-start">{t("phoneRequired")}</label>
                     <PhonePrefixInput prefix={parent1.phonePrefix} phone={parent1.phone} onPrefixChange={(v) => setParent1({ ...parent1, phonePrefix: v })} onPhoneChange={(v) => setParent1({ ...parent1, phone: v })} />
@@ -653,7 +653,7 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                 <h4 className="text-sm font-medium text-gray-700 mb-3">
                   {t("parent2Optional")} <span className="text-gray-400">({tc("optional")})</span>
                 </h4>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1 text-start">{t("firstName")}</label>
                     <input
@@ -671,7 +671,7 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                     />
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4 mt-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1 text-start">{t("phone")}</label>
                     <PhonePrefixInput prefix={parent2.phonePrefix} phone={parent2.phone} onPrefixChange={(v) => setParent2({ ...parent2, phonePrefix: v })} onPhoneChange={(v) => setParent2({ ...parent2, phone: v })} />
@@ -702,7 +702,7 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
           {step === 2 && (
             <div className="space-y-5">
               <h3 className="font-semibold text-gray-900">{t("playerDetails")}</h3>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs text-gray-500 mb-1 text-start">{t("firstNameRequired")}</label>
                   <input
@@ -720,7 +720,7 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs text-gray-500 mb-1 text-start">{t("dobRequired")}</label>
                   <input
@@ -743,7 +743,7 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                   </select>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs text-gray-500 mb-1 text-start">{t("phone")}</label>
                   <PhonePrefixInput prefix={player.phonePrefix} phone={player.phone} onPrefixChange={(v) => setPlayer({ ...player, phonePrefix: v })} onPhoneChange={(v) => setPlayer({ ...player, phone: v })} />
@@ -1017,7 +1017,7 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
               {activity?.hasPayment && total > 0 && (
                 <div className="mb-5">
                   <label className="block text-xs text-gray-500 mb-1 text-start">{t("couponCode")}</label>
-                  <div className="flex gap-2">
+                  <div className="flex flex-col sm:flex-row gap-2">
                     <input
                       value={couponCode}
                       onChange={(e) => setCouponCode(e.target.value)}
@@ -1073,7 +1073,7 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                   )}
 
                   {schedule.length > 0 && (
-                    <div className="mt-4 border rounded-lg overflow-hidden">
+                    <div className="mt-4 border rounded-lg overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="bg-gray-50 text-start">

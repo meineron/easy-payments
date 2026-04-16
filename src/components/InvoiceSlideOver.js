@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslations } from "next-intl";
+import SubscriptionItemReviewModal from "@/components/SubscriptionItemReviewModal";
 
 function centsToDisplay(c) { return ((c || 0) / 100).toFixed(2); }
 
@@ -447,6 +448,7 @@ export default function InvoiceSlideOver({
   const [toast, setToast] = useState(null);
   const [editInstallments, setEditInstallments] = useState(null);
   const [savingInstallments, setSavingInstallments] = useState(false);
+  const [itemReviewModal, setItemReviewModal] = useState(null);
 
   if (!order || !editForm) return null;
 
@@ -466,26 +468,9 @@ export default function InvoiceSlideOver({
   const outstanding = Math.max(0, totalCents - paidCents);
   const paidPercent = totalCents > 0 ? Math.min(100, Math.round((paidCents / totalCents) * 100)) : 0;
 
-  const NEEDS_REASON = ["subscriptionPriceCents", "subscriptionId", "subscriptionTitle", "teamId"];
-  const ITEM_PRICE_CHANGE = true;
-
-  function startFieldEdit(field, value, needsReason = false) {
-    if (needsReason) {
-      setPendingChange({ field, value });
-      setReasonModal({ field });
-    } else {
-      onUpdateForm(field, value);
-    }
-  }
-
-  function onReasonConfirm(reason) {
-    if (pendingChange) {
-      onUpdateForm(pendingChange.field, pendingChange.value);
-      onUpdateForm("_reason", reason);
-    }
-    setReasonModal(null);
-    setPendingChange(null);
-  }
+  const filteredSubs = editForm.teamId
+    ? activitySubs.filter((s) => (s.includedTeamIds || []).map(String).includes(String(editForm.teamId)))
+    : activitySubs;
 
   function addItem() {
     onUpdateForm("items", [...(editForm.items || []), { name: "", priceCents: 0, quantity: 1, isDiscount: false }]);
@@ -502,21 +487,40 @@ export default function InvoiceSlideOver({
   }
 
   function handleSubChange(subId) {
+    if (!subId) {
+      setPendingChange({ field: "clearSubscription" });
+      setReasonModal({ field: "clearSubscription" });
+      return;
+    }
     const sub = activitySubs.find((s) => s.id === subId);
-    setPendingChange({
-      field: "subscription",
-      updates: {
-        subscriptionId: subId,
-        subscriptionTitle: sub?.title || "",
-        subscriptionPriceCents: sub?.priceCents || 0,
-      },
-    });
+    if (!sub) return;
+    const oldSub = activitySubs.find((s) => s.id === editForm.subscriptionId) || null;
+    setPendingChange({ field: "subscription", newSub: sub, oldSub, teamId: editForm.teamId });
     setReasonModal({ field: "subscription" });
   }
 
   function handleTeamChange(teamId) {
-    setPendingChange({ field: "teamId", value: teamId });
-    setReasonModal({ field: "teamId" });
+    const matchingSubs = teamId
+      ? activitySubs.filter((s) => (s.includedTeamIds || []).map(String).includes(String(teamId)))
+      : [];
+    const currentSub = activitySubs.find((s) => s.id === editForm.subscriptionId);
+    const currentSubMatchesNewTeam = currentSub && matchingSubs.some((s) => s.id === currentSub.id);
+
+    if (currentSubMatchesNewTeam) {
+      setPendingChange({ field: "teamId", value: teamId });
+      setReasonModal({ field: "teamId" });
+    } else if (matchingSubs.length === 1) {
+      const newSub = matchingSubs[0];
+      const oldSub = currentSub || null;
+      setPendingChange({ field: "teamAndSubscription", teamId, newSub, oldSub });
+      setReasonModal({ field: "teamAndSubscription" });
+    } else if (matchingSubs.length === 0) {
+      setPendingChange({ field: "teamClearSub", value: teamId });
+      setReasonModal({ field: "teamClearSub" });
+    } else {
+      setPendingChange({ field: "teamPickSub", teamId, matchingSubs });
+      setReasonModal({ field: "teamPickSub" });
+    }
   }
 
   function handleSubPriceChange(cents) {
@@ -529,22 +533,82 @@ export default function InvoiceSlideOver({
     setReasonModal({ field: "itemPrice" });
   }
 
+  function openItemReview(newSub, oldSub, extraUpdates, reason) {
+    const teamId = extraUpdates.teamId || editForm.teamId;
+    const teamSubs = teamId
+      ? activitySubs.filter((s) => (s.includedTeamIds || []).map(String).includes(String(teamId)))
+      : [];
+    setItemReviewModal({ newSub, oldSub, extraUpdates, reason, availableSubs: teamSubs });
+  }
+
+  function onItemReviewConfirm({ items, subscriptionId, subscriptionTitle, subscriptionPriceCents }) {
+    const extra = itemReviewModal?.extraUpdates || {};
+    if (extra.teamId !== undefined) onUpdateForm("teamId", extra.teamId);
+    onUpdateForm("subscriptionId", subscriptionId);
+    onUpdateForm("subscriptionTitle", subscriptionTitle);
+    onUpdateForm("subscriptionPriceCents", subscriptionPriceCents);
+    onUpdateForm("items", items);
+    if (itemReviewModal?.reason) onUpdateForm("_reason", itemReviewModal.reason);
+    setItemReviewModal(null);
+  }
+
   function onReasonConfirmFull(reason) {
     if (!pendingChange) { setReasonModal(null); return; }
-    if (pendingChange.field === "subscription") {
-      const { subscriptionId, subscriptionTitle, subscriptionPriceCents } = pendingChange.updates;
-      onUpdateForm("subscriptionId", subscriptionId);
-      onUpdateForm("subscriptionTitle", subscriptionTitle);
-      onUpdateForm("subscriptionPriceCents", subscriptionPriceCents);
-    } else if (pendingChange.field === "itemPrice") {
+    const { field } = pendingChange;
+
+    if (field === "subscription") {
+      setReasonModal(null);
+      openItemReview(pendingChange.newSub, pendingChange.oldSub, {}, reason);
+      setPendingChange(null);
+      return;
+    }
+    if (field === "teamAndSubscription") {
+      setReasonModal(null);
+      openItemReview(pendingChange.newSub, pendingChange.oldSub, { teamId: pendingChange.teamId }, reason);
+      setPendingChange(null);
+      return;
+    }
+    if (field === "teamPickSub") {
+      setReasonModal(null);
+      setPendingChange((prev) => ({ ...prev, reason }));
+      setEditingField("pickSubForTeam");
+      return;
+    }
+    if (field === "teamClearSub") {
+      onUpdateForm("teamId", pendingChange.value);
+      onUpdateForm("subscriptionId", "");
+      onUpdateForm("subscriptionTitle", "");
+      onUpdateForm("subscriptionPriceCents", 0);
+      onUpdateForm("_reason", reason);
+    } else if (field === "clearSubscription") {
+      onUpdateForm("subscriptionId", "");
+      onUpdateForm("subscriptionTitle", "");
+      onUpdateForm("subscriptionPriceCents", 0);
+      onUpdateForm("_reason", reason);
+    } else if (field === "teamId") {
+      onUpdateForm("teamId", pendingChange.value);
+      onUpdateForm("_reason", reason);
+    } else if (field === "itemPrice") {
       const items = [...(editForm.items || [])];
       items[pendingChange.idx] = { ...items[pendingChange.idx], priceCents: pendingChange.value };
       onUpdateForm("items", items);
+      onUpdateForm("_reason", reason);
     } else {
       onUpdateForm(pendingChange.field, pendingChange.value);
+      onUpdateForm("_reason", reason);
     }
-    onUpdateForm("_reason", reason);
     setReasonModal(null);
+    setPendingChange(null);
+  }
+
+  function handlePickSubForTeam(subId) {
+    setEditingField(null);
+    if (!subId || !pendingChange) { setPendingChange(null); return; }
+    const newSub = activitySubs.find((s) => s.id === subId);
+    if (!newSub) { setPendingChange(null); return; }
+    const oldSub = activitySubs.find((s) => s.id === editForm.subscriptionId) || null;
+    const reason = pendingChange.reason || "";
+    openItemReview(newSub, oldSub, { teamId: pendingChange.teamId }, reason);
     setPendingChange(null);
   }
 
@@ -613,7 +677,7 @@ export default function InvoiceSlideOver({
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
 
           {/* ===== INVOICE TAB ===== */}
           {activeTab === "invoice" && (
@@ -621,7 +685,7 @@ export default function InvoiceSlideOver({
               {/* Team & Subscription */}
               <div>
                 <h4 className="text-sm font-semibold text-gray-700 mb-3">{td("teamAndSubscription")}</h4>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">{t("team")}</label>
                     <div className="flex items-center">
@@ -648,8 +712,19 @@ export default function InvoiceSlideOver({
                         onBlur={() => setEditingField(null)} autoFocus
                         className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
                         <option value="">{td("noSubscription")}</option>
-                        {activitySubs.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
+                        {filteredSubs.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
                       </select>
+                    )}
+                    {editingField === "pickSubForTeam" && (
+                      <div className="mt-1">
+                        <p className="text-xs text-amber-600 mb-1">{t("selectSubscriptionForTeam")}</p>
+                        <select value="" onChange={(e) => handlePickSubForTeam(e.target.value)}
+                          onBlur={() => { setEditingField(null); setPendingChange(null); }} autoFocus
+                          className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm bg-amber-50">
+                          <option value="">{td("noSubscription")}</option>
+                          {(pendingChange?.matchingSubs || []).map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
+                        </select>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -954,6 +1029,18 @@ export default function InvoiceSlideOver({
           t={t}
           onConfirm={onReasonConfirmFull}
           onCancel={() => { setReasonModal(null); setPendingChange(null); }}
+        />
+      )}
+
+      {/* Subscription Item Review Modal */}
+      {itemReviewModal && (
+        <SubscriptionItemReviewModal
+          newSub={itemReviewModal.newSub}
+          oldSub={itemReviewModal.oldSub}
+          availableSubs={itemReviewModal.availableSubs}
+          currentItems={editForm.items || []}
+          onConfirm={onItemReviewConfirm}
+          onCancel={() => setItemReviewModal(null)}
         />
       )}
 
