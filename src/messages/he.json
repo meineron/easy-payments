@@ -1057,7 +1057,13 @@
     "subscriptionChangedTo": "מנוי → {title}",
     "noItemsInSubscription": "למנוי זה אין פריטים.",
     "selectSubscriptionForTeam": "בחר מנוי לקבוצה החדשה",
-    "teamChangeSubscription": "הקבוצה החדשה שייכת למנוי אחר. סקור את השינויים למטה."
+    "teamChangeSubscription": "הקבוצה החדשה שייכת למנוי אחר. סקור את השינויים למטה.",
+    "orderLevelDiscount": "הנחת הזמנה",
+    "orderLevelDiscountPercent": "הנחת הזמנה ({value}%)",
+    "coupon": "קופון \"{code}\"",
+    "removeDiscount": "הסר הנחה",
+    "removeCoupon": "הסר קופון",
+    "discountWillBeCleared": "הנחת הזמנה קיימת של {amount} תוסר."
   },
   "email": {
     "verifySubject": "{code} הוא קוד האימות שלך",

@@ -538,7 +538,11 @@ export default function InvoiceSlideOver({
     const teamSubs = teamId
       ? activitySubs.filter((s) => (s.includedTeamIds || []).map(String).includes(String(teamId)))
       : [];
-    setItemReviewModal({ newSub, oldSub, extraUpdates, reason, availableSubs: teamSubs });
+    const hasOrderDiscount = editForm.discountType && editForm.discountType !== "none" && editForm.discountValue > 0;
+    const orderDiscountCents = hasOrderDiscount
+      ? (editForm.discountType === "amount" ? editForm.discountValue : 0)
+      : 0;
+    setItemReviewModal({ newSub, oldSub, extraUpdates, reason, availableSubs: teamSubs, orderDiscountCents });
   }
 
   function onItemReviewConfirm({ items, subscriptionId, subscriptionTitle, subscriptionPriceCents }) {
@@ -548,8 +552,20 @@ export default function InvoiceSlideOver({
     onUpdateForm("subscriptionTitle", subscriptionTitle);
     onUpdateForm("subscriptionPriceCents", subscriptionPriceCents);
     onUpdateForm("items", items);
+    onUpdateForm("discountType", "none");
+    onUpdateForm("discountValue", 0);
     if (itemReviewModal?.reason) onUpdateForm("_reason", itemReviewModal.reason);
     setItemReviewModal(null);
+  }
+
+  function removeOrderDiscount() {
+    onUpdateForm("discountType", "none");
+    onUpdateForm("discountValue", 0);
+  }
+
+  function removeCoupon() {
+    onUpdateForm("couponCode", "");
+    onUpdateForm("couponDiscountCents", 0);
   }
 
   function onReasonConfirmFull(reason) {
@@ -786,14 +802,73 @@ export default function InvoiceSlideOver({
 
               <hr />
 
-              {/* Summary */}
+              {/* Summary — full breakdown */}
               <div className="bg-gray-50 rounded-lg p-4 space-y-1.5">
+                {/* Subscription base */}
+                {editForm.subscriptionPriceCents > 0 && (
+                  <div className="flex justify-between text-sm text-gray-600">
+                    <span>{editForm.subscriptionTitle || t("subscription")}</span>
+                    <span>${centsToDisplay(editForm.subscriptionPriceCents)}</span>
+                  </div>
+                )}
+                {/* Each line item */}
+                {(editForm.items || []).map((item, idx) => {
+                  const amt = (item.priceCents || 0) * (item.quantity || 1);
+                  return (
+                    <div key={idx} className={`flex justify-between text-sm ${item.isDiscount ? "text-red-600" : "text-gray-600"}`}>
+                      <span>{item.name || t("itemName")}{item.isDiscount ? ` (${t("discount").toLowerCase()})` : ""}</span>
+                      <span>{item.isDiscount ? "-" : ""}${centsToDisplay(amt)}</span>
+                    </div>
+                  );
+                })}
+                {/* Order-level discount */}
+                {editForm.discountType === "amount" && editForm.discountValue > 0 && (
+                  <div className="flex justify-between text-sm text-red-600 items-center">
+                    <span>{t("orderLevelDiscount")}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span>-${centsToDisplay(editForm.discountValue)}</span>
+                      <button onClick={removeOrderDiscount} title={t("removeDiscount")}
+                        className="text-red-400 hover:text-red-600 text-base leading-none">×</button>
+                    </div>
+                  </div>
+                )}
+                {editForm.discountType === "percentage" && editForm.discountValue > 0 && (
+                  <div className="flex justify-between text-sm text-red-600 items-center">
+                    <span>{t("orderLevelDiscountPercent", { value: editForm.discountValue })}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span>-${centsToDisplay((() => {
+                        let base = editForm.subscriptionPriceCents || 0;
+                        (editForm.items || []).forEach((i) => {
+                          const a = (i.priceCents || 0) * (i.quantity || 1);
+                          if (i.isDiscount) base -= a; else base += a;
+                        });
+                        return Math.round(base * (editForm.discountValue || 0) / 100);
+                      })())}</span>
+                      <button onClick={removeOrderDiscount} title={t("removeDiscount")}
+                        className="text-red-400 hover:text-red-600 text-base leading-none">×</button>
+                    </div>
+                  </div>
+                )}
+                {/* Coupon */}
+                {editForm.couponDiscountCents > 0 && (
+                  <div className="flex justify-between text-sm text-red-600 items-center">
+                    <span>{editForm.couponCode ? t("coupon", { code: editForm.couponCode }) : t("coupon", { code: "—" })}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span>-${centsToDisplay(editForm.couponDiscountCents)}</span>
+                      <button onClick={removeCoupon} title={t("removeCoupon")}
+                        className="text-red-400 hover:text-red-600 text-base leading-none">×</button>
+                    </div>
+                  </div>
+                )}
+                {/* Processing fee */}
                 {order.processingFeeCents > 0 && (
                   <div className="flex justify-between text-sm text-gray-500 italic">
                     <span>{t("processingFee")}</span>
                     <span>${centsToDisplay(order.processingFeeCents)}</span>
                   </div>
                 )}
+                {/* Divider before totals */}
+                <div className="border-t my-1.5" />
                 <div className="flex justify-between text-sm font-bold">
                   <span>{t("totalInvoice")}</span>
                   <span>${centsToDisplay(totalCents)}</span>
@@ -1039,6 +1114,7 @@ export default function InvoiceSlideOver({
           oldSub={itemReviewModal.oldSub}
           availableSubs={itemReviewModal.availableSubs}
           currentItems={editForm.items || []}
+          orderDiscountCents={itemReviewModal.orderDiscountCents}
           onConfirm={onItemReviewConfirm}
           onCancel={() => setItemReviewModal(null)}
         />

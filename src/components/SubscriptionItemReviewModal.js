@@ -16,7 +16,7 @@ function centsToDisplay(c) { return ((c || 0) / 100).toFixed(2); }
  *  - onConfirm({ items, subscriptionId, subscriptionTitle, subscriptionPriceCents })
  *  - onCancel()
  */
-export default function SubscriptionItemReviewModal({ newSub: initialNewSub, oldSub, availableSubs, currentItems, onConfirm, onCancel }) {
+export default function SubscriptionItemReviewModal({ newSub: initialNewSub, oldSub, availableSubs, currentItems, orderDiscountCents, onConfirm, onCancel }) {
   const t = useTranslations("paymentRequest");
   const tc = useTranslations("common");
 
@@ -195,6 +195,13 @@ export default function SubscriptionItemReviewModal({ newSub: initialNewSub, old
           {/* Manual items info */}
           {hasManualItems && (
             <p className="text-xs text-gray-400 italic">{t("manualItemsKept")}</p>
+          )}
+
+          {/* Warning about order-level discount being cleared */}
+          {orderDiscountCents > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-sm text-amber-800">
+              {t("discountWillBeCleared", { amount: "$" + centsToDisplay(orderDiscountCents) })}
+            </div>
           )}
         </div>
 

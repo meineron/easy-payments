@@ -1057,7 +1057,13 @@
     "subscriptionChangedTo": "Subscription → {title}",
     "noItemsInSubscription": "This subscription has no items.",
     "selectSubscriptionForTeam": "Select subscription for new team",
-    "teamChangeSubscription": "The new team belongs to a different subscription. Review the changes below."
+    "teamChangeSubscription": "The new team belongs to a different subscription. Review the changes below.",
+    "orderLevelDiscount": "Order Discount",
+    "orderLevelDiscountPercent": "Order Discount ({value}%)",
+    "coupon": "Coupon \"{code}\"",
+    "removeDiscount": "Remove discount",
+    "removeCoupon": "Remove coupon",
+    "discountWillBeCleared": "An existing order-level discount of {amount} will be cleared."
   },
   "email": {
     "verifySubject": "{code} is your verification code",
