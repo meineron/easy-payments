@@ -178,6 +178,22 @@ function TabParticipants({ activityId, activity, tc, td }) {
     return Math.max(0, total);
   }
 
+  async function handleExpectedTeamChange(ep, newTeamId) {
+    setActionBusy(ep._id);
+    try {
+      const order = await ensureOrder(ep);
+      if (order) {
+        handleInlineTeamChange(order._id, newTeamId);
+      } else {
+        setToast({ message: tc("somethingWentWrong"), type: "error" });
+      }
+    } catch {
+      setToast({ message: tc("somethingWentWrong"), type: "error" });
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
   function handleInlineTeamChange(orderId, newTeamId) {
     const order = orders.find((o) => o._id === orderId);
     const currentSubId = order?.subscriptionId || "";
@@ -884,20 +900,16 @@ function TabParticipants({ activityId, activity, tc, td }) {
                       <div className="text-xs text-gray-400 truncate">{r.subscriptionTitle || ""}</div>
                     </td>
                     <td className="py-2.5 px-2 hidden sm:table-cell">
-                      {isExpected ? (
-                        <span className="text-xs text-gray-400">{r.teamId?.name || "—"}</span>
-                      ) : (
-                        <select
-                          value={r.teamId?._id || r.teamId || ""}
-                          onChange={(e) => handleInlineTeamChange(r._id, e.target.value)}
-                          className={`text-xs px-2 py-1 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500 ${!r.teamId ? "border-orange-300 bg-orange-50 text-orange-700" : "border-gray-200 text-gray-700"}`}
-                        >
-                          <option value="">{td("unassigned")}</option>
-                          {activityTeams.map((at) => (
-                            <option key={at.teamId} value={at.teamId}>{at.name}</option>
-                          ))}
-                        </select>
-                      )}
+                      <select
+                        value={r.teamId?._id || r.teamId || ""}
+                        onChange={(e) => isExpected ? handleExpectedTeamChange(r, e.target.value) : handleInlineTeamChange(r._id, e.target.value)}
+                        className={`text-xs px-2 py-1 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500 ${!r.teamId ? "border-orange-300 bg-orange-50 text-orange-700" : "border-gray-200 text-gray-700"}`}
+                      >
+                        <option value="">{td("unassigned")}</option>
+                        {activityTeams.map((at) => (
+                          <option key={at.teamId} value={at.teamId}>{at.name}</option>
+                        ))}
+                      </select>
                     </td>
                     <td className="py-2.5 px-2 text-gray-500 text-xs hidden md:table-cell">{regDate ? fmtDate(regDate) : "—"}</td>
                     {detailed && (
