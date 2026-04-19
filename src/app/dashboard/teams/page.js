@@ -1,10 +1,43 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 
 const EMPTY_TEAM = { name: "", season: "26/27", gender: "Male", teamType: "" };
+
+const LAST_TEAM_IMPORT_STORAGE_KEY = "teamsLastImportIds";
+const LAST_IMPORT_TTL_MS = 48 * 60 * 60 * 1000;
+
+function readLastImportIdsFromStorage() {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = sessionStorage.getItem(LAST_TEAM_IMPORT_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed.ids) || typeof parsed.savedAt !== "number") return [];
+    if (Date.now() - parsed.savedAt > LAST_IMPORT_TTL_MS) {
+      sessionStorage.removeItem(LAST_TEAM_IMPORT_STORAGE_KEY);
+      return [];
+    }
+    return parsed.ids.filter((id) => typeof id === "string" && id.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function writeLastImportIdsToStorage(ids) {
+  if (typeof window === "undefined" || !ids.length) return;
+  sessionStorage.setItem(
+    LAST_TEAM_IMPORT_STORAGE_KEY,
+    JSON.stringify({ ids, savedAt: Date.now() }),
+  );
+}
+
+function clearLastImportIdsFromStorage() {
+  if (typeof window === "undefined") return;
+  sessionStorage.removeItem(LAST_TEAM_IMPORT_STORAGE_KEY);
+}
 
 export default function TeamsPage() {
   const t = useTranslations("teams");
@@ -26,11 +59,42 @@ export default function TeamsPage() {
 
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
+  const [lastImportTeamIds, setLastImportTeamIds] = useState([]);
+  const [undoLoading, setUndoLoading] = useState(false);
+  const [selectedTeamIds, setSelectedTeamIds] = useState(() => new Set());
+  const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
   const fileInputRef = useRef(null);
+  const selectAllCheckboxRef = useRef(null);
 
   useEffect(() => {
     fetchAll();
   }, []);
+
+  useEffect(() => {
+    const ids = readLastImportIdsFromStorage();
+    if (ids.length) setLastImportTeamIds(ids);
+  }, []);
+
+  const filteredTeams = useMemo(() => {
+    return teams.filter((team) => {
+      if (filterType !== "all" && (team.teamType || "Other") !== filterType) return false;
+      if (filterGender !== "all" && team.gender !== filterGender) return false;
+      if (filterSeason !== "all" && team.season !== filterSeason) return false;
+      return true;
+    });
+  }, [teams, filterType, filterGender, filterSeason]);
+
+  const allFilteredSelected =
+    filteredTeams.length > 0 &&
+    filteredTeams.every((t) => selectedTeamIds.has(String(t._id)));
+  const someFilteredSelected =
+    filteredTeams.some((t) => selectedTeamIds.has(String(t._id))) && !allFilteredSelected;
+
+  useEffect(() => {
+    const el = selectAllCheckboxRef.current;
+    if (!el) return;
+    el.indeterminate = someFilteredSelected;
+  }, [someFilteredSelected]);
 
   async function fetchAll() {
     try {
@@ -145,6 +209,11 @@ export default function TeamsPage() {
       if (!res.ok) {
         setUploadResult({ success: false, message: data.error, errors: data.errors });
       } else {
+        const newIds = (data.teams || []).map((team) => String(team._id)).filter(Boolean);
+        if (newIds.length) {
+          writeLastImportIdsToStorage(newIds);
+          setLastImportTeamIds(newIds);
+        }
         setUploadResult({
           success: true,
           message: t("importSuccess", { count: data.created }),
@@ -165,9 +234,121 @@ export default function TeamsPage() {
 
     try {
       const res = await fetch(`/api/teams/${teamId}`, { method: "DELETE" });
-      if (res.ok) fetchAll();
+      if (res.ok) {
+        setSelectedTeamIds((prev) => {
+          const next = new Set(prev);
+          next.delete(String(teamId));
+          return next;
+        });
+        fetchAll();
+      }
     } catch (err) {
       console.error("Failed to delete team:", err);
+    }
+  }
+
+  async function postBulkDelete(teamIds) {
+    const res = await fetch("/api/teams/bulk-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teamIds }),
+    });
+    const data = await res.json();
+    return { ok: res.ok, data };
+  }
+
+  function bulkDeleteResultMessage(data) {
+    let message = t("lastImportUndoResult", { deleted: data.deleted ?? 0 });
+    if (data.skipped?.length) {
+      message = `${message} ${t("lastImportUndoSkipped", { count: data.skipped.length })}`;
+    }
+    return message;
+  }
+
+  function toggleSelectAllFiltered() {
+    const ids = filteredTeams.map((t) => String(t._id));
+    setSelectedTeamIds((prev) => {
+      const next = new Set(prev);
+      const allOn = ids.length > 0 && ids.every((id) => next.has(id));
+      if (allOn) {
+        ids.forEach((id) => next.delete(id));
+      } else {
+        ids.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  }
+
+  function toggleTeamSelected(teamId) {
+    const id = String(teamId);
+    setSelectedTeamIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function clearTeamSelection() {
+    setSelectedTeamIds(new Set());
+  }
+
+  async function handleBulkDeleteSelected() {
+    const ids = [...selectedTeamIds];
+    if (ids.length === 0) return;
+    if (!confirm(t("bulkDeleteSelectedConfirm", { count: ids.length }))) return;
+
+    setBulkDeleteLoading(true);
+    try {
+      const { ok, data } = await postBulkDelete(ids);
+      if (!ok) {
+        setUploadResult({ success: false, message: data.error || tc("somethingWentWrong") });
+        return;
+      }
+      setUploadResult({ success: true, message: bulkDeleteResultMessage(data) });
+      if (data.skipped?.length) {
+        const skippedSet = new Set(data.skipped.map((s) => String(s.teamId)));
+        setSelectedTeamIds((prev) => {
+          const next = new Set();
+          prev.forEach((id) => {
+            if (skippedSet.has(id)) next.add(id);
+          });
+          return next;
+        });
+      } else {
+        setSelectedTeamIds(new Set());
+      }
+      fetchAll();
+    } catch {
+      setUploadResult({ success: false, message: tc("somethingWentWrong") });
+    } finally {
+      setBulkDeleteLoading(false);
+    }
+  }
+
+  function dismissLastImportHint() {
+    clearLastImportIdsFromStorage();
+    setLastImportTeamIds([]);
+  }
+
+  async function handleUndoLastImport() {
+    if (!lastImportTeamIds.length) return;
+    if (!confirm(t("lastImportUndoConfirm", { count: lastImportTeamIds.length }))) return;
+
+    setUndoLoading(true);
+    try {
+      const { ok, data } = await postBulkDelete(lastImportTeamIds);
+      if (!ok) {
+        setUploadResult({ success: false, message: data.error || tc("somethingWentWrong") });
+        return;
+      }
+      setUploadResult({ success: true, message: bulkDeleteResultMessage(data) });
+      dismissLastImportHint();
+      fetchAll();
+    } catch {
+      setUploadResult({ success: false, message: tc("somethingWentWrong") });
+    } finally {
+      setUndoLoading(false);
     }
   }
 
@@ -217,7 +398,22 @@ export default function TeamsPage() {
 
       {/* Filters */}
       {teams.length > 0 && (
-        <div className="flex items-center gap-3 mb-4">
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <label
+            className={`flex items-center gap-2 text-sm shrink-0 ${
+              filteredTeams.length === 0 ? "opacity-50 pointer-events-none text-gray-400" : "text-gray-700 cursor-pointer"
+            }`}
+          >
+            <input
+              ref={selectAllCheckboxRef}
+              type="checkbox"
+              checked={allFilteredSelected}
+              disabled={filteredTeams.length === 0}
+              onChange={toggleSelectAllFiltered}
+              className="rounded border-gray-300"
+            />
+            <span className="whitespace-nowrap">{t("bulkSelectVisible")}</span>
+          </label>
           <select
             value={filterType}
             onChange={(e) => setFilterType(e.target.value)}
@@ -259,6 +455,58 @@ export default function TeamsPage() {
               {t("clearFilters")}
             </button>
           )}
+        </div>
+      )}
+
+      {selectedTeamIds.size > 0 && (
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between px-4 py-3 rounded-lg border border-blue-200 bg-blue-50 text-sm">
+          <span className="font-medium text-gray-900">
+            {t("bulkSelectedCount", { count: selectedTeamIds.size })}
+          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={clearTeamSelection}
+              disabled={bulkDeleteLoading}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium border border-blue-300 text-blue-900 hover:bg-white/80 transition disabled:opacity-50"
+            >
+              {t("bulkClearSelection")}
+            </button>
+            <button
+              type="button"
+              onClick={handleBulkDeleteSelected}
+              disabled={bulkDeleteLoading}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium bg-red-600 text-white hover:bg-red-700 transition disabled:opacity-50"
+            >
+              {bulkDeleteLoading ? t("bulkDeleting") : t("bulkDeleteSelected")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {lastImportTeamIds.length > 0 && (
+        <div className="mb-4 px-4 py-3 rounded-lg border border-amber-200 bg-amber-50 text-amber-950 text-sm flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="font-medium">
+            {t("lastImportUndoHint", { count: lastImportTeamIds.length })}
+          </p>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleUndoLastImport}
+              disabled={undoLoading}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium bg-amber-800 text-white hover:bg-amber-900 transition disabled:opacity-50"
+            >
+              {undoLoading ? tc("saving") : t("lastImportUndoButton")}
+            </button>
+            <button
+              type="button"
+              onClick={dismissLastImportHint}
+              disabled={undoLoading}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium border border-amber-300 text-amber-900 hover:bg-amber-100/80 transition disabled:opacity-50"
+            >
+              {t("lastImportUndoDismiss")}
+            </button>
+          </div>
         </div>
       )}
 
@@ -476,14 +724,8 @@ export default function TeamsPage() {
       ) : (
         <div className="space-y-6">
           {(() => {
-            const filtered = teams.filter((team) => {
-              if (filterType !== "all" && (team.teamType || "Other") !== filterType) return false;
-              if (filterGender !== "all" && team.gender !== filterGender) return false;
-              if (filterSeason !== "all" && team.season !== filterSeason) return false;
-              return true;
-            });
             const grouped = {};
-            filtered.forEach((team) => {
+            filteredTeams.forEach((team) => {
               const type = team.teamType || "Other";
               if (!grouped[type]) grouped[type] = [];
               grouped[type].push(team);
@@ -503,13 +745,22 @@ export default function TeamsPage() {
                 <div className="space-y-3">
                   {grouped[typeName].map((team) => {
                     const ts = stats.byTeam[team._id] || { teamMembers: 0, totalPlayers: 0 };
+                    const tid = String(team._id);
 
                     return (
                       <div key={team._id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                         <div className="p-5">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <div className="flex items-center gap-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <label className="flex items-start gap-3 min-w-0 cursor-pointer shrink-0">
+                              <input
+                                type="checkbox"
+                                checked={selectedTeamIds.has(tid)}
+                                onChange={() => toggleTeamSelected(tid)}
+                                className="mt-1 rounded border-gray-300"
+                              />
+                            </label>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
                                 <h3 className="font-semibold text-gray-900">{team.name}</h3>
                                 {team.gender && (
                                   <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${genderBadge(team.gender)}`}>
@@ -524,7 +775,7 @@ export default function TeamsPage() {
                                 </span>
                               </div>
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
                               <Link
                                 href={`/dashboard/teams/${team._id}`}
                                 className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition"

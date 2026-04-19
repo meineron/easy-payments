@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import SubscriptionItemReviewModal from "@/components/SubscriptionItemReviewModal";
+import { activityTeamSlotKey } from "@/lib/activity-team-keys";
 
 function centsToDisplay(c) { return ((c || 0) / 100).toFixed(2); }
 
@@ -705,7 +706,7 @@ export default function InvoiceSlideOver({
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">{t("team")}</label>
                     <div className="flex items-center">
-                      <span className="text-sm text-gray-900">{activityTeams.find((t) => t.teamId === (editForm.teamId || ""))?.name || td("noTeam")}</span>
+                      <span className="text-sm text-gray-900">{activityTeams.find((t) => String(t.teamId || "") === String(editForm.teamId || ""))?.name || td("noTeam")}</span>
                       <PenButton onClick={() => setEditingField("team")} />
                     </div>
                     {editingField === "team" && (
@@ -713,7 +714,9 @@ export default function InvoiceSlideOver({
                         onBlur={() => setEditingField(null)} autoFocus
                         className="w-full border rounded-lg px-3 py-2 text-sm mt-1">
                         <option value="">{td("noTeam")}</option>
-                        {activityTeams.map((team) => <option key={team.teamId} value={team.teamId}>{team.name}</option>)}
+                        {activityTeams.filter((t) => t.teamId).map((team, idx) => (
+                          <option key={activityTeamSlotKey(team, team.slotIndex ?? idx)} value={String(team.teamId)}>{team.name}</option>
+                        ))}
                       </select>
                     )}
                   </div>

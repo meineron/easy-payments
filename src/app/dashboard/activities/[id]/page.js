@@ -9,6 +9,7 @@ import SubscriptionItemReviewModal from "@/components/SubscriptionItemReviewModa
 import SendBulkLinksModal from "@/components/SendBulkLinksModal";
 import SendMessageModal from "@/components/SendMessageModal";
 import PhonePrefixInput from "@/components/PhonePrefixInput";
+import { activityTeamSlotKey } from "@/lib/activity-team-keys";
 
 function centsToDisplay(c) { return ((c || 0) / 100).toFixed(2); }
 function displayToCents(v) { return Math.round(parseFloat(v || 0) * 100); }
@@ -141,10 +142,14 @@ function TabParticipants({ activityId, activity, tc, td }) {
     return () => document.removeEventListener("mousedown", close);
   }, [teamFilterOpen]);
 
-  const activityTeams = (activity?.teams || []).map((row) => ({
-    teamId: row.teamId?._id || row.teamId, name: row.teamId?.name || "Unknown",
-    teamType: row.teamId?.teamType || "", gender: row.teamId?.gender || "",
+  const activityTeams = (activity?.teams || []).map((row, slotIndex) => ({
+    slotIndex,
+    teamId: row.teamId?._id || row.teamId || null,
+    name: row.teamId?.name || "Unknown",
+    teamType: row.teamId?.teamType || "",
+    gender: row.teamId?.gender || "",
   }));
+  const assignableActivityTeams = activityTeams.filter((t) => t.teamId);
   const teamTypes = [...new Set(activityTeams.map((team) => team.teamType).filter(Boolean))].sort();
   const genders = [...new Set(activityTeams.map((team) => team.gender).filter(Boolean))].sort();
   const activitySubs = (activity?.subscriptions || []).map((s, i) => ({
@@ -250,7 +255,7 @@ function TabParticipants({ activityId, activity, tc, td }) {
   }
 
   const effectiveFilterTeams = (() => {
-    let teams = activityTeams;
+    let teams = assignableActivityTeams;
     if (filterTeamType) teams = teams.filter((team) => team.teamType === filterTeamType);
     if (filterGender) teams = teams.filter((team) => team.gender === filterGender);
     const typeOrGenderActive = filterTeamType || filterGender;
@@ -767,10 +772,10 @@ function TabParticipants({ activityId, activity, tc, td }) {
                 <button onClick={() => setFilterTeams(new Set())} className="text-xs text-gray-500 hover:text-gray-800">{td("clear")}</button>
                 <button onClick={() => setTeamFilterOpen(false)} className="text-xs text-blue-600 font-medium">{td("done")}</button>
               </div>
-              {activityTeams.map((team) => {
+              {assignableActivityTeams.map((team) => {
                 const checked = filterTeams.has(String(team.teamId));
                 return (
-                  <label key={team.teamId} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm">
+                  <label key={activityTeamSlotKey(team, team.slotIndex)} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm">
                     <input type="checkbox" checked={checked} onChange={() => {
                       setFilterTeams((prev) => {
                         const next = new Set(prev);
@@ -906,8 +911,8 @@ function TabParticipants({ activityId, activity, tc, td }) {
                         className={`text-xs px-2 py-1 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500 ${!r.teamId ? "border-orange-300 bg-orange-50 text-orange-700" : "border-gray-200 text-gray-700"}`}
                       >
                         <option value="">{td("unassigned")}</option>
-                        {activityTeams.map((at) => (
-                          <option key={at.teamId} value={at.teamId}>{at.name}</option>
+                        {assignableActivityTeams.map((at) => (
+                          <option key={activityTeamSlotKey(at, at.slotIndex)} value={String(at.teamId)}>{at.name}</option>
                         ))}
                       </select>
                     </td>
@@ -1118,7 +1123,7 @@ function TabParticipants({ activityId, activity, tc, td }) {
       )}
 
       {/* CREATE ORDER MODAL */}
-      {showCreate && <CreateOrderModal activityTeams={activityTeams} activitySubs={activitySubs} saving={saving} onCreate={createOrder} onClose={() => setShowCreate(false)}
+      {showCreate && <CreateOrderModal activityTeams={assignableActivityTeams} activitySubs={activitySubs} saving={saving} onCreate={createOrder} onClose={() => setShowCreate(false)}
         prefill={typeof showCreate === "object" ? showCreate : null} tc={tc} td={td} />}
 
       {/* SEND LINK MODAL */}
@@ -1873,7 +1878,9 @@ function CreateOrderModal({ activityTeams, activitySubs, saving, onCreate, onClo
               <div><label className="block text-xs font-medium text-gray-500 mb-1">{td("team")}</label>
                 <select value={form.teamId} onChange={(e) => onTeamChange(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm">
                   <option value="">{td("noTeam")}</option>
-                  {activityTeams.map((team) => <option key={team.teamId} value={team.teamId}>{team.name}</option>)}
+                  {activityTeams.map((team) => (
+                    <option key={activityTeamSlotKey(team, team.slotIndex)} value={String(team.teamId)}>{team.name}</option>
+                  ))}
                 </select></div>
             </div>
           )}
@@ -2040,10 +2047,13 @@ function BulkActionModal({ type, busy, selectedCount, orderCount, allOrders, onE
 
 /* ============== SEND PAYMENT EMAILS MODAL ============== */
 function SendPaymentEmailsModal({ activityId, activity, orders, expectedPlayers, onClose, onDone, onError, tc, td }) {
-  const activityTeams = (activity?.teams || []).map((row) => ({
-    teamId: row.teamId?._id || row.teamId, name: row.teamId?.name || "Unknown",
+  const activityTeams = (activity?.teams || []).map((row, slotIndex) => ({
+    slotIndex,
+    teamId: row.teamId?._id || row.teamId || null,
+    name: row.teamId?.name || "Unknown",
   }));
-  const [selectedTeams, setSelectedTeams] = useState(() => new Set(activityTeams.map((row) => row.teamId)));
+  const linkTeams = activityTeams.filter((t) => t.teamId);
+  const [selectedTeams, setSelectedTeams] = useState(() => new Set(linkTeams.map((row) => String(row.teamId))));
   const [subject, setSubject] = useState(`Payment link for ${activity?.title || "Activity"}`);
   const [bodyHtml, setBodyHtml] = useState("<p>Dear parent,</p><p>Please complete your payment using the link below.</p>");
   const [sending, setSending] = useState(false);
@@ -2076,19 +2086,19 @@ function SendPaymentEmailsModal({ activityId, activity, orders, expectedPlayers,
   }
 
   function toggleTeam(tid) {
+    const id = String(tid);
     setSelectedTeams((prev) => {
       const next = new Set(prev);
-      if (next.has(tid)) next.delete(tid); else next.add(tid);
+      if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   }
 
   function toggleAll() {
-    if (selectedTeams.size === activityTeams.length) {
-      setSelectedTeams(new Set());
-    } else {
-      setSelectedTeams(new Set(activityTeams.map((row) => row.teamId)));
-    }
+    const ids = linkTeams.map((row) => String(row.teamId));
+    const allOn = ids.length > 0 && ids.every((id) => selectedTeams.has(id));
+    if (allOn) setSelectedTeams(new Set());
+    else setSelectedTeams(new Set(ids));
   }
 
   const eligibleCount = [...orders, ...expectedPlayers].filter((r) => {
@@ -2141,13 +2151,13 @@ function SendPaymentEmailsModal({ activityId, activity, orders, expectedPlayers,
             <div className="flex items-center justify-between mb-2">
               <label className="text-sm font-semibold text-gray-700">{td("teams")}</label>
               <button onClick={toggleAll} className="text-xs text-blue-600 hover:text-blue-800">
-                {selectedTeams.size === activityTeams.length ? td("deselectAll") : td("selectAll")}
+                {linkTeams.length > 0 && selectedTeams.size === linkTeams.length ? td("deselectAll") : td("selectAll")}
               </button>
             </div>
             <div className="border rounded-lg p-3 max-h-40 overflow-y-auto space-y-1.5">
-              {activityTeams.map((team) => (
-                <label key={team.teamId} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
-                  <input type="checkbox" checked={selectedTeams.has(team.teamId)} onChange={() => toggleTeam(team.teamId)} className="rounded" />
+              {linkTeams.map((team) => (
+                <label key={activityTeamSlotKey(team, team.slotIndex)} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
+                  <input type="checkbox" checked={selectedTeams.has(String(team.teamId))} onChange={() => toggleTeam(team.teamId)} className="rounded" />
                   {team.name}
                 </label>
               ))}
@@ -2231,9 +2241,12 @@ function TabActivityTeams({ activityId, activity, tc, td }) {
     }).catch(() => {}).finally(() => setLoading(false));
   }, [activityId]);
 
-  const activityTeams = (activity?.teams || []).map((row) => ({
-    teamId: row.teamId?._id || row.teamId, name: row.teamId?.name || "Unknown",
-    season: row.teamId?.season || "", gender: row.teamId?.gender || "",
+  const activityTeams = (activity?.teams || []).map((row, slotIndex) => ({
+    slotIndex,
+    teamId: row.teamId?._id || row.teamId || null,
+    name: row.teamId?.name || "Unknown",
+    season: row.teamId?.season || "",
+    gender: row.teamId?.gender || "",
   }));
 
   function teamStats(teamId) {
@@ -2268,7 +2281,7 @@ function TabActivityTeams({ activityId, activity, tc, td }) {
           {activityTeams.map((team) => {
             const s = teamStats(team.teamId);
             return (
-              <div key={team.teamId} className="border rounded-lg p-4">
+              <div key={activityTeamSlotKey(team, team.slotIndex)} className="border rounded-lg p-4">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-semibold text-gray-900">{team.name}</span>

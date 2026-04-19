@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, use } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { activityTeamSlotKey } from "@/lib/activity-team-keys";
 
 function Toast({ message, type = "success", onClose }) {
   useEffect(() => {
@@ -561,9 +562,13 @@ function TabPayment({ activity, onSave, saving, t, tc, td }) {
   const [expandedSub, setExpandedSub] = useState(null);
   const [teamSearch, setTeamSearch] = useState("");
 
-  const activityTeams = (activity?.teams || []).map((row) => ({
-    teamId: row.teamId?._id || row.teamId, name: row.teamId?.name || "Unknown", season: row.teamId?.season || "",
+  const activityTeams = (activity?.teams || []).map((row, slotIndex) => ({
+    slotIndex,
+    teamId: row.teamId?._id || row.teamId || null,
+    name: row.teamId?.name || "Unknown",
+    season: row.teamId?.season || "",
   }));
+  const assignableActivityTeams = activityTeams.filter((tm) => tm.teamId);
 
   const activityStartDate = activity?.startDate ? new Date(activity.startDate) : null;
 
@@ -576,7 +581,7 @@ function TabPayment({ activity, onSave, saving, t, tc, td }) {
   }, [activity]);
 
   function addSubscription() {
-    const allTeamIds = activityTeams.map((tm) => tm.teamId);
+    const allTeamIds = assignableActivityTeams.map((tm) => tm.teamId);
     setSubscriptions((prev) => [...prev, {
       title: "", description: "", priceCents: 0, dueDateAmountCents: 0,
       maxInstallments: 1, firstInstallmentDate: null, months: 10,
@@ -641,7 +646,8 @@ function TabPayment({ activity, onSave, saving, t, tc, td }) {
     setSubscriptions((prev) => {
       const ns = JSON.parse(JSON.stringify(prev));
       const ids = ns[subIdx].includedTeamIds || [];
-      const idx = ids.indexOf(teamId);
+      const t = String(teamId);
+      const idx = ids.findIndex((id) => String(id) === t);
       if (idx >= 0) ids.splice(idx, 1); else ids.push(teamId);
       ns[subIdx].includedTeamIds = ids;
       return ns;
@@ -651,9 +657,33 @@ function TabPayment({ activity, onSave, saving, t, tc, td }) {
   function toggleAllTeamsInSub(subIdx, check) {
     setSubscriptions((prev) => {
       const ns = JSON.parse(JSON.stringify(prev));
-      ns[subIdx].includedTeamIds = check ? activityTeams.map((tm) => tm.teamId) : [];
+      ns[subIdx].includedTeamIds = check ? assignableActivityTeams.map((tm) => tm.teamId) : [];
       return ns;
     });
+  }
+
+  function getTeamSubAssignmentLabel(tm, subIdx) {
+    if (!tm.teamId) return { text: "", className: "text-xs text-gray-300 ms-2" };
+    const tid = String(tm.teamId);
+    const inSubs = [];
+    subscriptions.forEach((s, j) => {
+      if ((s.includedTeamIds || []).some((id) => String(id) === tid)) {
+        inSubs.push({ j, title: (s.title || "").trim() || td("untitled") });
+      }
+    });
+    const inCurrent = inSubs.some((x) => x.j === subIdx);
+    const otherTitles = inSubs.filter((x) => x.j !== subIdx).map((x) => x.title);
+    const titlesStr = otherTitles.join(", ");
+    if (inCurrent && otherTitles.length > 0) {
+      return { text: td("teamSubDuplicate", { titles: titlesStr }), className: "text-xs text-amber-600 ms-2 font-medium" };
+    }
+    if (!inCurrent && otherTitles.length > 0) {
+      return { text: td("teamSubInOther", { titles: titlesStr }), className: "text-xs text-amber-600 ms-2" };
+    }
+    if (inCurrent) {
+      return { text: td("teamSubThis"), className: "text-xs text-gray-400 ms-2" };
+    }
+    return { text: td("teamSubUnassigned"), className: "text-xs text-gray-300 ms-2" };
   }
 
   function addItem(subIdx, isDiscount = false) { setSubscriptions((prev) => { const ns = JSON.parse(JSON.stringify(prev)); ns[subIdx].items.push({ name: "", priceCents: 0, quantity: 1, isRequired: false, isDiscount, expiresAt: null }); return ns; }); }
@@ -891,7 +921,7 @@ function TabPayment({ activity, onSave, saving, t, tc, td }) {
                       {/* Included Teams */}
                       <div>
                         <div className="flex items-center justify-between mb-2">
-                          <label className="text-sm font-medium text-gray-700">{td("includedTeams", { included: (sub.includedTeamIds || []).length, total: activityTeams.length })}</label>
+                          <label className="text-sm font-medium text-gray-700">{td("includedTeams", { included: (sub.includedTeamIds || []).length, total: assignableActivityTeams.length })}</label>
                           <div className="flex gap-2">
                             <button onClick={() => toggleAllTeamsInSub(sIdx, true)} className="text-xs text-blue-600 hover:text-blue-800">{td("checkAll")}</button>
                             <button onClick={() => toggleAllTeamsInSub(sIdx, false)} className="text-xs text-red-500 hover:text-red-700">{td("uncheckAll")}</button>
@@ -900,7 +930,7 @@ function TabPayment({ activity, onSave, saving, t, tc, td }) {
                         {(sub.includedTeamIds || []).length > 0 && (
                           <div className="flex flex-wrap gap-1.5 mb-2">
                             {(sub.includedTeamIds || []).map((tid) => {
-                              const team = activityTeams.find((tm) => tm.teamId === tid);
+                              const team = activityTeams.find((tm) => String(tm.teamId) === String(tid));
                               if (!team) return null;
                               return (
                                 <span key={tid} className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2.5 py-0.5 text-xs font-medium">
@@ -913,21 +943,26 @@ function TabPayment({ activity, onSave, saving, t, tc, td }) {
                             })}
                           </div>
                         )}
-                        {activityTeams.length === 0 ? <p className="text-xs text-gray-400">{td("addTeamsFirst")}</p> : (
+                        {assignableActivityTeams.length === 0 ? <p className="text-xs text-gray-400">{td("addTeamsFirst")}</p> : (
                           <>
                             <input type="text" value={teamSearch} onChange={(e) => setTeamSearch(e.target.value)}
                               placeholder={td("searchTeams")} className="w-full border rounded-lg px-3 py-1.5 text-sm mb-2" />
                             <div className="border rounded-lg divide-y max-h-48 overflow-y-auto">
-                              {activityTeams.filter((tm) => {
+                              {assignableActivityTeams.filter((tm) => {
                                 if (!teamSearch.trim()) return true;
                                 const q = teamSearch.toLowerCase();
                                 return (tm.name || "").toLowerCase().includes(q) || (tm.season || "").toLowerCase().includes(q);
                               }).map((tm) => {
-                                const included = (sub.includedTeamIds || []).includes(tm.teamId);
+                                const included = (sub.includedTeamIds || []).some((id) => String(id) === String(tm.teamId));
+                                const subHint = getTeamSubAssignmentLabel(tm, sIdx);
                                 return (
-                                  <div key={tm.teamId} className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50">
+                                  <div key={activityTeamSlotKey(tm, tm.slotIndex)} className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50">
                                     <input type="checkbox" checked={included} onChange={() => toggleTeamInSub(sIdx, tm.teamId)} className="rounded" />
-                                    <span className="flex-1 text-sm"><span className="font-medium">{tm.name}</span><span className="text-xs text-gray-400 ms-2">{tm.season}</span></span>
+                                    <span className="flex-1 text-sm flex flex-wrap items-baseline gap-x-1 gap-y-0.5">
+                                      <span className="font-medium">{tm.name}</span>
+                                      {tm.season ? <span className="text-xs text-gray-400">{tm.season}</span> : null}
+                                      <span className={subHint.className}>{subHint.text}</span>
+                                    </span>
                                   </div>
                                 );
                               })}

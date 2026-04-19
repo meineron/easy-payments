@@ -2,17 +2,21 @@
 
 import { useState, useRef } from "react";
 import { useTranslations } from "next-intl";
+import { activityTeamSlotKey } from "@/lib/activity-team-keys";
 
 export default function SendBulkLinksModal({ type, activityId, activity, orders, expectedPlayers, onClose, onDone, onError }) {
   const td = useTranslations("activityDetail");
   const tm = useTranslations("messages");
   const tc = useTranslations("common");
 
-  const activityTeams = (activity?.teams || []).map((row) => ({
-    teamId: row.teamId?._id || row.teamId, name: row.teamId?.name || "Unknown",
+  const activityTeams = (activity?.teams || []).map((row, slotIndex) => ({
+    slotIndex,
+    teamId: row.teamId?._id || row.teamId || null,
+    name: row.teamId?.name || "Unknown",
   }));
+  const linkTeams = activityTeams.filter((t) => t.teamId);
 
-  const [selectedTeams, setSelectedTeams] = useState(() => new Set(activityTeams.map((row) => row.teamId)));
+  const [selectedTeams, setSelectedTeams] = useState(() => new Set(linkTeams.map((row) => String(row.teamId))));
   const [channel, setChannel] = useState("email");
   const [subject, setSubject] = useState(
     type === "payment"
@@ -58,16 +62,19 @@ export default function SendBulkLinksModal({ type, activityId, activity, orders,
   }
 
   function toggleTeam(tid) {
+    const id = String(tid);
     setSelectedTeams((prev) => {
       const next = new Set(prev);
-      if (next.has(tid)) next.delete(tid); else next.add(tid);
+      if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   }
 
   function toggleAll() {
-    if (selectedTeams.size === activityTeams.length) setSelectedTeams(new Set());
-    else setSelectedTeams(new Set(activityTeams.map((row) => row.teamId)));
+    const ids = linkTeams.map((row) => String(row.teamId));
+    const allOn = ids.length > 0 && ids.every((id) => selectedTeams.has(id));
+    if (allOn) setSelectedTeams(new Set());
+    else setSelectedTeams(new Set(ids));
   }
 
   const eligibleCount = [...orders, ...expectedPlayers].filter((r) => {
@@ -181,13 +188,13 @@ export default function SendBulkLinksModal({ type, activityId, activity, orders,
             <div className="flex items-center justify-between mb-2">
               <label className="text-sm font-semibold text-gray-700">{td("teams")}</label>
               <button onClick={toggleAll} className="text-xs text-blue-600 hover:text-blue-800">
-                {selectedTeams.size === activityTeams.length ? td("deselectAll") : td("selectAll")}
+                {linkTeams.length > 0 && selectedTeams.size === linkTeams.length ? td("deselectAll") : td("selectAll")}
               </button>
             </div>
             <div className="border rounded-lg p-3 max-h-40 overflow-y-auto space-y-1.5">
-              {activityTeams.map((team) => (
-                <label key={team.teamId} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
-                  <input type="checkbox" checked={selectedTeams.has(team.teamId)} onChange={() => toggleTeam(team.teamId)} className="rounded" />
+              {linkTeams.map((team) => (
+                <label key={activityTeamSlotKey(team, team.slotIndex)} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
+                  <input type="checkbox" checked={selectedTeams.has(String(team.teamId))} onChange={() => toggleTeam(team.teamId)} className="rounded" />
                   {team.name}
                 </label>
               ))}

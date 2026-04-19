@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import IntlProvider from "@/components/IntlProvider";
 import PhonePrefixInput from "@/components/PhonePrefixInput";
 import { getMessages, getDirection } from "@/lib/i18n";
+import { activityTeamSlotKey } from "@/lib/activity-team-keys";
 
 function centsToDisplay(c) {
   return ((c || 0) / 100).toFixed(2);
@@ -818,11 +819,15 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                   <label className="block text-xs text-gray-500 mb-1 text-start">{t("teamRequired")}</label>
                   <select value={teamId} onChange={(e) => onTeamChange(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm">
                     <option value="">{t("selectTeam")}</option>
-                    {teams.map((tm) => (
-                      <option key={tm.teamId} value={tm.teamId}>
-                        {tm.name} ({tm.season})
-                      </option>
-                    ))}
+                    {teams.map((tm, idx) => {
+                      const id = tm.teamId?._id || tm.teamId;
+                      if (!id) return null;
+                      return (
+                        <option key={activityTeamSlotKey({ teamId: id }, idx)} value={String(id)}>
+                          {tm.name} ({tm.season})
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
               )}
