@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import dbConnect from "@/lib/mongodb";
 import Player from "@/models/Player";
+import { toDobString } from "@/lib/dob";
 
 export async function GET(request) {
   try {
@@ -65,7 +66,7 @@ export async function POST(request) {
       clubId: session.user.id,
       firstName: firstName.trim(),
       lastName: lastName.trim(),
-      dateOfBirth: dateOfBirth || null,
+      dateOfBirth: toDobString(dateOfBirth),
       gender: gender || "",
       primaryPosition: primaryPosition ? primaryPosition.trim() : "",
       secondaryPosition: secondaryPosition ? secondaryPosition.trim() : "",

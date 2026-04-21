@@ -8,6 +8,7 @@ import Activity from "@/models/Activity";
 import Player from "@/models/Player";
 import Parent from "@/models/Parent";
 import { syncOrderItemsWithSubscription, computeOrderTotalCents, isOrderSyncEligible } from "@/lib/order-sync";
+import { toDobString } from "@/lib/dob";
 
 export async function GET(request, { params }) {
   try {
@@ -259,8 +260,7 @@ export async function POST(request, { params }) {
         firstName: body.playerFirstName.trim(),
         lastName: body.playerLastName.trim(),
       };
-      if (body.playerDob) playerQuery.dateOfBirth = new Date(body.playerDob);
-      else playerQuery.dateOfBirth = null;
+      playerQuery.dateOfBirth = toDobString(body.playerDob);
 
       let player = await Player.findOne(playerQuery).collation({ locale: "en", strength: 2 });
 
@@ -278,7 +278,7 @@ export async function POST(request, { params }) {
           clubId: session.user.id,
           firstName: body.playerFirstName.trim(),
           lastName: body.playerLastName.trim(),
-          dateOfBirth: body.playerDob || null,
+          dateOfBirth: toDobString(body.playerDob),
           gender: body.playerGender || "",
           phonePrefix: body.playerPhonePrefix || "+1",
           phoneNumber: (body.playerPhone || "").trim(),
@@ -324,7 +324,7 @@ export async function POST(request, { params }) {
       playerId,
       playerFirstName: body.playerFirstName,
       playerLastName: body.playerLastName,
-      playerDob: body.playerDob || null,
+      playerDob: toDobString(body.playerDob),
       playerGender: body.playerGender || "",
       playerPhonePrefix: body.playerPhonePrefix || "+1",
       playerPhone: body.playerPhone || "",

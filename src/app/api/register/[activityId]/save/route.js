@@ -5,6 +5,7 @@ import Activity from "@/models/Activity";
 import Player from "@/models/Player";
 import Parent from "@/models/Parent";
 import { markPlayerRegisteredForTeam } from "@/lib/order-sync";
+import { toDobString } from "@/lib/dob";
 
 function computeTotal(order) {
   let total = order.subscriptionPriceCents || 0;
@@ -48,8 +49,7 @@ async function findOrCreatePlayer(clubId, body) {
     firstName: body.playerFirstName.trim(),
     lastName: body.playerLastName.trim(),
   };
-  if (body.playerDob) playerQuery.dateOfBirth = new Date(body.playerDob);
-  else playerQuery.dateOfBirth = null;
+  playerQuery.dateOfBirth = toDobString(body.playerDob);
 
   let player = await Player.findOne(playerQuery).collation({ locale: "en", strength: 2 });
 
@@ -64,7 +64,7 @@ async function findOrCreatePlayer(clubId, body) {
       clubId,
       firstName: body.playerFirstName.trim(),
       lastName: body.playerLastName.trim(),
-      dateOfBirth: body.playerDob || null,
+      dateOfBirth: toDobString(body.playerDob),
       gender: body.playerGender || "",
       phonePrefix: body.playerPhonePrefix || "+1",
       phoneNumber: (body.playerPhone || "").trim(),
@@ -137,7 +137,10 @@ export async function PUT(request, { params }) {
         "teamId",
         "formData",
       ];
-      fields.forEach((f) => { if (body[f] !== undefined) order[f] = body[f]; });
+      fields.forEach((f) => {
+        if (body[f] === undefined) return;
+        order[f] = f === "playerDob" ? toDobString(body[f]) : body[f];
+      });
 
       if (body.subscriptionId !== undefined && String(body.subscriptionId) !== String(order.subscriptionId || "")) {
         const sub = (activity.subscriptions || []).find((s) => String(s._id) === String(body.subscriptionId));
@@ -218,7 +221,10 @@ export async function PUT(request, { params }) {
         "teamId",
         "formData",
       ];
-      fields.forEach((f) => { if (body[f] !== undefined) existing[f] = body[f]; });
+      fields.forEach((f) => {
+        if (body[f] === undefined) return;
+        existing[f] = f === "playerDob" ? toDobString(body[f]) : body[f];
+      });
 
       if (body.subscriptionId !== undefined && String(body.subscriptionId) !== String(existing.subscriptionId || "")) {
         const sub = (activity.subscriptions || []).find((s) => String(s._id) === String(body.subscriptionId));
@@ -297,7 +303,7 @@ export async function PUT(request, { params }) {
       playerId,
       playerFirstName: body.playerFirstName,
       playerLastName: body.playerLastName,
-      playerDob: body.playerDob || null,
+      playerDob: toDobString(body.playerDob),
       playerGender: body.playerGender || "",
       playerPhonePrefix: body.playerPhonePrefix || "+1",
       playerPhone: body.playerPhone || "",

@@ -25,7 +25,8 @@ const PlayerSchema = new mongoose.Schema({
   },
   firstName: { type: String, required: true, trim: true },
   lastName: { type: String, required: true, trim: true },
-  dateOfBirth: { type: Date, default: null },
+  // Stored as a plain "YYYY-MM-DD" string. See `src/lib/dob.js`.
+  dateOfBirth: { type: String, default: null },
   gender: { type: String, enum: ["Male", "Female", ""], default: "" },
   primaryPosition: { type: String, trim: true, default: "" },
   secondaryPosition: { type: String, trim: true, default: "" },

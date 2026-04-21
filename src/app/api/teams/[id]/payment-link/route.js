@@ -5,6 +5,7 @@ import Team from "@/models/Team";
 import Club from "@/models/Club";
 import Registration from "@/models/Registration";
 import Parent from "@/models/Parent";
+import { toDobString } from "@/lib/dob";
 
 export async function POST(request, { params }) {
   try {
@@ -68,7 +69,7 @@ export async function POST(request, { params }) {
       playerCity: playerCity.trim(),
       playerState: playerState.trim(),
       playerZip: playerZip.trim(),
-      playerDob: playerDob ? new Date(playerDob) : null,
+      playerDob: toDobString(playerDob),
       subscriptionCostCents: totalCents,
       discountCents,
       finalCostCents: afterDiscountCents,
@@ -84,7 +85,7 @@ export async function POST(request, { params }) {
             players: {
               firstName: playerFirstName.trim(),
               lastName: playerLastName.trim(),
-              dateOfBirth: playerDob ? new Date(playerDob) : null,
+              dateOfBirth: toDobString(playerDob),
               address: playerAddress.trim(),
               city: playerCity.trim(),
               state: playerState.trim(),

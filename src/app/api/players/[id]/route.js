@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import dbConnect from "@/lib/mongodb";
 import Player from "@/models/Player";
 import Parent from "@/models/Parent";
+import { toDobString } from "@/lib/dob";
 
 export async function GET(request, { params }) {
   try {
@@ -55,7 +56,7 @@ export async function PUT(request, { params }) {
 
     for (const field of fields) {
       if (body[field] !== undefined) {
-        player[field] = body[field];
+        player[field] = field === "dateOfBirth" ? toDobString(body[field]) : body[field];
       }
     }
 

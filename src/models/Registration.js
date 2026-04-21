@@ -36,7 +36,8 @@ const RegistrationSchema = new mongoose.Schema({
   playerCity: { type: String, required: true, trim: true },
   playerState: { type: String, required: true, trim: true },
   playerZip: { type: String, required: true, trim: true },
-  playerDob: { type: Date, default: null },
+  // Stored as a plain "YYYY-MM-DD" string. See `src/lib/dob.js`.
+  playerDob: { type: String, default: null },
 
   subscriptionCostCents: { type: Number, required: true },
   discountCents: { type: Number, default: 0 },

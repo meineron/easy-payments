@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
 import SendMessageModal from "@/components/SendMessageModal";
 import PhonePrefixInput from "@/components/PhonePrefixInput";
+import { formatDob, dobAge, dobToInputValue } from "@/lib/dob";
 
 const US_STATES = [
   "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
@@ -21,12 +22,7 @@ const EMPTY_PLAYER = {
   joinDate: "", phonePrefix: "+1", phoneNumber: "", address: "", city: "", state: "", zip: "", email: "",
 };
 
-function age(dob) {
-  if (!dob) return "";
-  const d = new Date(dob);
-  const diff = Date.now() - d.getTime();
-  return Math.floor(diff / (365.25 * 24 * 60 * 60 * 1000));
-}
+const age = dobAge;
 
 function TeamsBySeason({ teams, regTeamId, genderBadge, t }) {
   const grouped = {};
@@ -184,7 +180,7 @@ export default function PlayersPage() {
     setEditForm({
       firstName: p.firstName,
       lastName: p.lastName,
-      dateOfBirth: p.dateOfBirth ? p.dateOfBirth.split("T")[0] : "",
+      dateOfBirth: dobToInputValue(p.dateOfBirth),
       gender: p.gender || "",
       primaryPosition: p.primaryPosition || "",
       secondaryPosition: p.secondaryPosition || "",
@@ -492,7 +488,7 @@ export default function PlayersPage() {
                         )}
                       </div>
                       <div className="text-sm text-gray-500 mt-1 space-y-0.5">
-                        {selectedPlayer.dateOfBirth && <p>{t("dob")}: {new Date(selectedPlayer.dateOfBirth).toLocaleDateString()} ({t("age")} {age(selectedPlayer.dateOfBirth)})</p>}
+                        {selectedPlayer.dateOfBirth && <p>{t("dob")}: {formatDob(selectedPlayer.dateOfBirth)} ({t("age")} {age(selectedPlayer.dateOfBirth)})</p>}
                         {selectedPlayer.email && <p>{tc("email")}: {selectedPlayer.email}</p>}
                         {selectedPlayer.phoneNumber && <p dir="ltr">{tc("phone")}: {selectedPlayer.phonePrefix || "+1"} {selectedPlayer.phoneNumber}</p>}
                         {selectedPlayer.primaryPosition && <p>{t("position")}: {selectedPlayer.primaryPosition}{selectedPlayer.secondaryPosition ? ` / ${selectedPlayer.secondaryPosition}` : ""}</p>}
@@ -785,7 +781,7 @@ export default function PlayersPage() {
                       </td>
                       <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
                         {player.dateOfBirth ? (
-                          <><span className="text-xs">{new Date(player.dateOfBirth).toLocaleDateString()}</span> <span className="text-gray-400">({age(player.dateOfBirth)})</span></>
+                          <><span className="text-xs">{formatDob(player.dateOfBirth)}</span> <span className="text-gray-400">({age(player.dateOfBirth)})</span></>
                         ) : "—"}
                       </td>
                       {visibleCols.has("position") && (

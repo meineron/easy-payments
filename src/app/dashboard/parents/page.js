@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
+import { formatDob } from "@/lib/dob";
 
 const PHONE_PREFIXES = ["+1", "+44", "+972", "+61", "+49", "+33", "+34", "+39", "+81", "+86"];
 
@@ -258,7 +259,7 @@ export default function ParentsPage() {
                         <p className="font-medium text-gray-900">{pl.firstName} {pl.lastName}</p>
                         <div className="text-xs text-gray-500 mt-0.5">
                           {pl.gender && <span className="me-3">{pl.gender}</span>}
-                          {pl.dateOfBirth && <span className="me-3">{t("dob")}: {new Date(pl.dateOfBirth).toLocaleDateString()}</span>}
+                          {pl.dateOfBirth && <span className="me-3">{t("dob")}: {formatDob(pl.dateOfBirth)}</span>}
                           {pl.primaryPosition && <span className="me-3">{pl.primaryPosition}</span>}
                           {pl.school && <span>{t("school")}: {pl.school}</span>}
                         </div>

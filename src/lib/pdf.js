@@ -28,6 +28,20 @@ function fmtDate(d) {
   return dt.toLocaleDateString("en-US", { year: "numeric", month: "2-digit", day: "2-digit" });
 }
 
+// DOBs are stored as "YYYY-MM-DD" strings and must render without any
+// timezone conversion (otherwise the day can drift in runtimes like Heroku
+// that run in UTC). See `src/lib/dob.js`.
+function fmtDob(s) {
+  if (!s) return "";
+  if (typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, m, d] = s.split("-").map(Number);
+    return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", {
+      year: "numeric", month: "2-digit", day: "2-digit", timeZone: "UTC",
+    });
+  }
+  return fmtDate(s);
+}
+
 function fmtDateTime(d) {
   if (!d) return "";
   const dt = new Date(d);
@@ -127,7 +141,7 @@ export async function generateRegistrationPDF({
     // ── Player Details ──
     sectionHeader("Player Details");
     row("Name", `${order.playerFirstName} ${order.playerLastName}`);
-    row("Date of Birth", fmtDate(order.playerDob));
+    row("Date of Birth", fmtDob(order.playerDob));
     row("Gender", order.playerGender);
     row("Phone", order.playerPhone ? `${order.playerPhonePrefix || ""} ${order.playerPhone}` : null);
     row("Email", order.playerEmail);

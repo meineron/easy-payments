@@ -27,7 +27,8 @@ const OrderSchema = new mongoose.Schema({
 
   playerFirstName: { type: String, required: true, trim: true },
   playerLastName: { type: String, required: true, trim: true },
-  playerDob: { type: Date, default: null },
+  // Stored as a plain "YYYY-MM-DD" string. See `src/lib/dob.js`.
+  playerDob: { type: String, default: null },
   playerGender: { type: String, default: "" },
   playerPhonePrefix: { type: String, default: "+1" },
   playerPhone: { type: String, default: "" },

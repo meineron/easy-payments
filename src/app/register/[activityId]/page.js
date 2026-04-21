@@ -7,6 +7,7 @@ import IntlProvider from "@/components/IntlProvider";
 import PhonePrefixInput from "@/components/PhonePrefixInput";
 import { getMessages, getDirection } from "@/lib/i18n";
 import { activityTeamSlotKey } from "@/lib/activity-team-keys";
+import { dobToInputValue } from "@/lib/dob";
 
 function centsToDisplay(c) {
   return ((c || 0) / 100).toFixed(2);
@@ -162,7 +163,7 @@ function initPlayer(order) {
   return {
     firstName: order.playerFirstName || "",
     lastName: order.playerLastName || "",
-    dob: order.playerDob ? new Date(order.playerDob).toISOString().slice(0, 10) : "",
+    dob: dobToInputValue(order.playerDob),
     gender: order.playerGender || "",
     phonePrefix: order.playerPhonePrefix || "+1",
     phone: order.playerPhone || "",

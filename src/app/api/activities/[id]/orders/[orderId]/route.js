@@ -12,6 +12,7 @@ import PaymentRequest from "@/models/PaymentRequest";
 import Player from "@/models/Player";
 import Parent from "@/models/Parent";
 import { computeDismissedSubItemNames } from "@/lib/order-sync";
+import { toDobString } from "@/lib/dob";
 
 function computeTotal(order) {
   let total = order.subscriptionPriceCents || 0;
@@ -255,7 +256,7 @@ export async function PUT(request, { params }) {
 
     for (const key of allowed) {
       if (body[key] !== undefined) {
-        order[key] = body[key];
+        order[key] = key === "playerDob" ? toDobString(body[key]) : body[key];
       }
     }
 

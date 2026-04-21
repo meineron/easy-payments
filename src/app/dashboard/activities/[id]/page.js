@@ -11,6 +11,7 @@ import SendMessageModal from "@/components/SendMessageModal";
 import PhonePrefixInput from "@/components/PhonePrefixInput";
 import { activityTeamSlotKey } from "@/lib/activity-team-keys";
 import { normalizeCopyUrl } from "@/lib/copy-url";
+import { formatDob, dobToInputValue } from "@/lib/dob";
 
 function centsToDisplay(c) { return ((c || 0) / 100).toFixed(2); }
 function displayToCents(v) { return Math.round(parseFloat(v || 0) * 100); }
@@ -1431,7 +1432,7 @@ function PlayerCardModal({ player, activityId, onClose, onUpdated, tc, td }) {
       setPlayerForm({
         firstName: player.playerFirstName || "",
         lastName: player.playerLastName || "",
-        dateOfBirth: player.playerDob ? new Date(player.playerDob).toISOString().split("T")[0] : "",
+        dateOfBirth: dobToInputValue(player.playerDob),
         gender: player.playerGender || "",
         phonePrefix: player.playerPhonePrefix || "+1",
         phoneNumber: player.playerPhone || "",
@@ -1441,7 +1442,7 @@ function PlayerCardModal({ player, activityId, onClose, onUpdated, tc, td }) {
       setPlayerForm({
         firstName: player.firstName || "",
         lastName: player.lastName || "",
-        dateOfBirth: player.dateOfBirth ? new Date(player.dateOfBirth).toISOString().split("T")[0] : "",
+        dateOfBirth: dobToInputValue(player.dateOfBirth),
         gender: player.gender || "",
         phonePrefix: player.phonePrefix || "+1",
         phoneNumber: player.phoneNumber || "",
@@ -1726,7 +1727,7 @@ function PlayerCardModal({ player, activityId, onClose, onUpdated, tc, td }) {
             ) : (
               <div className="space-y-1 text-sm">
                 <p className="font-semibold text-gray-900 text-base">{pName}</p>
-                {pDob && <p className="text-gray-500">{td("dateOfBirth")}: {fmtDate(pDob)}</p>}
+                {pDob && <p className="text-gray-500">{td("dateOfBirth")}: {formatDob(pDob)}</p>}
                 {pGender && <p className="text-gray-500">{td("gender")}: {pGender}</p>}
                 {pPhone && <p className="text-gray-500" dir="ltr">{tc("phone")}: {pPhonePrefix} {pPhone}</p>}
                 {pEmail && <p className="text-gray-500">{tc("email")}: {pEmail}</p>}

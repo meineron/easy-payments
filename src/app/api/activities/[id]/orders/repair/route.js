@@ -7,6 +7,7 @@ import Activity from "@/models/Activity";
 import Player from "@/models/Player";
 import Parent from "@/models/Parent";
 import { syncOrderItemsWithSubscription, computeOrderTotalCents, isOrderSyncEligible } from "@/lib/order-sync";
+import { toDobString } from "@/lib/dob";
 
 async function findOrCreateParent(clubId, firstName, lastName, email, phone, phonePrefix) {
   if (!firstName || !lastName || !email) return null;
@@ -78,8 +79,7 @@ export async function POST(request, { params }) {
             firstName: order.playerFirstName.trim(),
             lastName: order.playerLastName.trim(),
           };
-          if (order.playerDob) playerQuery.dateOfBirth = new Date(order.playerDob);
-          else playerQuery.dateOfBirth = null;
+          playerQuery.dateOfBirth = toDobString(order.playerDob);
 
           let player = await Player.findOne(playerQuery).collation({ locale: "en", strength: 2 });
 
@@ -94,7 +94,7 @@ export async function POST(request, { params }) {
               clubId: session.user.id,
               firstName: order.playerFirstName.trim(),
               lastName: order.playerLastName.trim(),
-              dateOfBirth: order.playerDob || null,
+              dateOfBirth: toDobString(order.playerDob),
               gender: order.playerGender || "",
               phonePrefix: order.playerPhonePrefix || "+1",
               phoneNumber: (order.playerPhone || "").trim(),

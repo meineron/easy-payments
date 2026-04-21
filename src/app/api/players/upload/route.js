@@ -8,6 +8,7 @@ import Team from "@/models/Team";
 import Activity from "@/models/Activity";
 import Order from "@/models/Order";
 import * as XLSX from "xlsx";
+import { toDobString } from "@/lib/dob";
 
 function normalizePhone(raw) {
   if (!raw) return "";
@@ -182,7 +183,7 @@ async function processRangersUpload(rows, headers, clubId) {
   const playerKey = (fn, ln, dob) => `${fn.toLowerCase().trim()}|${ln.toLowerCase().trim()}|${dob || ""}`;
   const playersByKey = {};
   for (const pl of existingPlayers) {
-    const dob = pl.dateOfBirth ? pl.dateOfBirth.toISOString().split("T")[0] : "";
+    const dob = toDobString(pl.dateOfBirth) || "";
     playersByKey[playerKey(pl.firstName, pl.lastName, dob)] = pl;
   }
 
@@ -267,7 +268,7 @@ async function processRangersUpload(rows, headers, clubId) {
     }
 
     try {
-      const dob = getCell(row, R.dob) || null;
+      const dob = toDobString(getCell(row, R.dob));
       const gender = csvGender(getCell(row, R.gender));
       const rawPhone = getCell(row, R.phone);
       const phoneNumber = normalizePhone(rawPhone);
@@ -328,7 +329,7 @@ async function processRangersUpload(rows, headers, clubId) {
           clubId,
           firstName,
           lastName,
-          dateOfBirth: dob ? new Date(dob) : null,
+          dateOfBirth: dob,
           gender,
           phonePrefix: "+1",
           phoneNumber,
@@ -381,7 +382,7 @@ async function processRangersUpload(rows, headers, clubId) {
           playerId: player._id,
           playerFirstName: firstName,
           playerLastName: lastName,
-          playerDob: dob ? new Date(dob) : null,
+          playerDob: dob,
           playerGender: gender,
           playerPhonePrefix: "+1",
           playerPhone: phoneNumber,
@@ -505,7 +506,7 @@ export async function POST(request) {
     const playerKey = (fn, ln, dob) => `${fn.toLowerCase().trim()}|${ln.toLowerCase().trim()}|${dob || ""}`;
     const playersByKey = {};
     for (const pl of existingPlayers) {
-      const dob = pl.dateOfBirth ? pl.dateOfBirth.toISOString().split("T")[0] : "";
+      const dob = toDobString(pl.dateOfBirth) || "";
       playersByKey[playerKey(pl.firstName, pl.lastName, dob)] = pl;
     }
 
@@ -526,7 +527,7 @@ export async function POST(request) {
       }
 
       try {
-        const dob = getCell(row, C.dob) || null;
+        const dob = toDobString(getCell(row, C.dob));
         const gender = csvGender(getCell(row, C.gender));
         const primaryPosition = getCell(row, C.primaryPosition);
         const secondaryPosition = getCell(row, C.secondaryPosition);
@@ -606,7 +607,7 @@ export async function POST(request) {
             clubId,
             firstName,
             lastName,
-            dateOfBirth: dob ? new Date(dob) : null,
+            dateOfBirth: dob,
             gender,
             primaryPosition,
             secondaryPosition,

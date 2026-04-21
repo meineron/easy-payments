@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import PhonePrefixInput from "@/components/PhonePrefixInput";
+import { formatDob, dobAge } from "@/lib/dob";
 
 const US_STATES = [
   "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
@@ -20,12 +21,7 @@ function fmt(cents) {
 const CURRENT_SEASON = "26/27";
 const PREVIOUS_SEASON = "25/26";
 
-function age(dob) {
-  if (!dob) return "";
-  const d = new Date(dob);
-  const diff = Date.now() - d.getTime();
-  return Math.floor(diff / (365.25 * 24 * 60 * 60 * 1000));
-}
+const age = dobAge;
 
 export default function TeamDetailPage() {
   const { id } = useParams();
@@ -159,7 +155,7 @@ export default function TeamDetailPage() {
       Object.assign(playerInfo, {
         name: `${p.firstName} ${p.lastName}`,
         gender: p.gender || "—",
-        dob: p.dateOfBirth ? new Date(p.dateOfBirth).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "—",
+        dob: p.dateOfBirth ? formatDob(p.dateOfBirth, "en-US") : "—",
         email: p.email || "—",
         phone: p.phoneNumber ? `${p.phonePrefix || "+1"} ${p.phoneNumber}` : "—",
         address: [p.address, p.city, p.state, p.zip].filter(Boolean).join(", ") || "—",
@@ -195,7 +191,7 @@ export default function TeamDetailPage() {
       Object.assign(playerInfo, {
         name: `${r.playerFirstName} ${r.playerLastName}`,
         gender: r.playerGender || "—",
-        dob: r.playerDob ? new Date(r.playerDob).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "—",
+        dob: r.playerDob ? formatDob(r.playerDob, "en-US") : "—",
         email: r.playerEmail || "—",
         phone: r.playerPhone || "—",
         address: [r.playerAddress, r.playerCity, r.playerState, r.playerZip].filter(Boolean).join(", ") || "—",
@@ -567,7 +563,7 @@ export default function TeamDetailPage() {
                     </td>
                     <td className="px-4 py-3 text-gray-700 whitespace-nowrap">
                       {row.dob ? (
-                        <><span className="text-xs">{new Date(row.dob).toLocaleDateString()}</span> <span className="text-gray-400">({age(row.dob)})</span></>
+                        <><span className="text-xs">{formatDob(row.dob)}</span> <span className="text-gray-400">({age(row.dob)})</span></>
                       ) : "—"}
                     </td>
                     {visibleCols.has("position") && (
@@ -814,7 +810,7 @@ export default function TeamDetailPage() {
                                   {alreadyInTeam && <span className="text-xs bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded font-medium">Already in team</span>}
                                 </div>
                                 <div className="text-xs text-gray-400">
-                                  {[p.dateOfBirth ? new Date(p.dateOfBirth).toLocaleDateString() : null, p.primaryPosition, p.school].filter(Boolean).join(" · ")}
+                                  {[p.dateOfBirth ? formatDob(p.dateOfBirth) : null, p.primaryPosition, p.school].filter(Boolean).join(" · ")}
                                 </div>
                               </div>
                             </label>
