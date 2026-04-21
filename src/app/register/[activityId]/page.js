@@ -266,10 +266,20 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
   const orderPaidNoRegistration = orderPaid && !liveOrder.registrationCompletedAt;
   const orderFullyRegisteredAndPaid = orderPaid && !!liveOrder.registrationCompletedAt;
 
+  // Only treat the draft as "in progress" if the parent actually finished the
+  // registration previously (registrationCompletedAt is set). Without that, the
+  // order may just be a shell created by the admin (name prefilled, no real
+  // registration done) and the parent should start from step 1, re-sign
+  // waivers, etc. — not be dropped straight onto the Invoice screen.
+  const hasCompletedRegistration = !!initialOrder?.registrationCompletedAt;
+
   const hasWaivers = (activity?.waivers || []).length > 0;
-  const waiversComplete = hasWaivers ? (initialOrder?.waiverConsents || []).length > 0 : true;
+  const waiversComplete = hasWaivers
+    ? hasCompletedRegistration && (initialOrder?.waiverConsents || []).length > 0
+    : true;
 
   const autoResumeToInvoice = initialOrder && !orderPaid && initialOrder.status === "pending" &&
+    hasCompletedRegistration &&
     !!initialOrder.playerFirstName && !!initialOrder.parent1FirstName && waiversComplete;
 
   const [step, setStep] = useState(() => {
@@ -308,16 +318,21 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
 
   const [formData, setFormData] = useState(() => initialOrder?.formData || {});
 
+  // When the parent hasn't completed registration yet, don't lock previously
+  // stored waiver consents — the parent should be able to re-check them as
+  // part of a fresh start from step 1.
   const savedWaiverIds = useMemo(() => {
     const ids = new Set();
+    if (!hasCompletedRegistration) return ids;
     (initialOrder?.waiverConsents || []).forEach((c) => {
       if (c.agreedAt) ids.add(c.waiverId);
     });
     return ids;
-  }, [initialOrder]);
+  }, [initialOrder, hasCompletedRegistration]);
 
   const [waiverConsents, setWaiverConsents] = useState(() => {
     const init = {};
+    if (!hasCompletedRegistration) return init;
     (initialOrder?.waiverConsents || []).forEach((c) => {
       if (c.agreedAt) init[c.waiverId] = true;
     });
