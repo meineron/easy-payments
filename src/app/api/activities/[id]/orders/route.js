@@ -7,6 +7,7 @@ import OrderLog from "@/models/OrderLog";
 import Activity from "@/models/Activity";
 import Player from "@/models/Player";
 import Parent from "@/models/Parent";
+import { syncOrderItemsWithSubscription, computeOrderTotalCents, isOrderSyncEligible } from "@/lib/order-sync";
 
 export async function GET(request, { params }) {
   try {
@@ -17,13 +18,43 @@ export async function GET(request, { params }) {
     const { id } = await params;
     await dbConnect();
 
-    const [orders, activity] = await Promise.all([
-      Order.find({ activityId: id, clubId: session.user.id })
-        .populate("teamId", "name season gender")
-        .sort({ createdAt: -1 })
-        .lean(),
-      Activity.findOne({ _id: id, clubId: session.user.id }).lean(),
-    ]);
+    const activity = await Activity.findOne({ _id: id, clubId: session.user.id }).lean();
+    if (!activity) {
+      return NextResponse.json({ error: "Activity not found" }, { status: 404 });
+    }
+
+    // Keep every unpaid order's invoice in sync with its subscription — the club never has
+    // to click "repair" to get discounts/items that were added to the subscription later.
+    const syncCandidates = await Order.find({
+      activityId: id,
+      clubId: session.user.id,
+      paidCents: { $lte: 0 },
+      status: { $nin: ["paid", "refunded"] },
+    });
+    const bulkOps = [];
+    for (const doc of syncCandidates) {
+      if (!isOrderSyncEligible(doc)) continue;
+      const sub = (activity.subscriptions || []).find((s) => String(s._id) === String(doc.subscriptionId));
+      if (!sub) continue;
+      const { changed, items } = syncOrderItemsWithSubscription(doc, sub);
+      if (!changed) continue;
+      const snapshot = { ...doc.toObject(), items };
+      const totalCostCents = computeOrderTotalCents(snapshot);
+      bulkOps.push({
+        updateOne: {
+          filter: { _id: doc._id },
+          update: { $set: { items, totalCostCents } },
+        },
+      });
+    }
+    if (bulkOps.length > 0) {
+      await Order.bulkWrite(bulkOps);
+    }
+
+    const orders = await Order.find({ activityId: id, clubId: session.user.id })
+      .populate("teamId", "name season gender")
+      .sort({ createdAt: -1 })
+      .lean();
 
     const teamIds = (activity?.teams || []).map((t) => t.teamId);
     let expectedPlayers = [];

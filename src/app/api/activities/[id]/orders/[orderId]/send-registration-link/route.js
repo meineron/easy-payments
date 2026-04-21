@@ -43,22 +43,26 @@ export async function POST(request, { params }) {
     const order = await Order.findOne({ _id: orderId, activityId: id, clubId: session.user.id });
     if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
 
-    let token = order.registrationToken;
-    if (!token || (order.registrationTokenExpiresAt && order.registrationTokenExpiresAt < new Date())) {
-      token = crypto.randomUUID();
-      order.registrationToken = token;
-      order.registrationTokenExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-    }
-    order.linkSentAt = new Date();
-    await order.save();
-
-    const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
-    const registrationUrl = `${baseUrl}/register/${id}?token=${token}`;
-
     let body = {};
     try { body = await request.json(); } catch { /* empty body ok */ }
 
     const recipients = body.recipients || [];
+    const { channel } = body;
+    const willSend = recipients.length > 0 || channel === "sms" || channel === "email";
+
+    let token = order.registrationToken;
+    let tokenChanged = false;
+    if (!token || (order.registrationTokenExpiresAt && order.registrationTokenExpiresAt < new Date())) {
+      token = crypto.randomUUID();
+      order.registrationToken = token;
+      order.registrationTokenExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      tokenChanged = true;
+    }
+    if (willSend) order.linkSentAt = new Date();
+    if (tokenChanged || willSend) await order.save();
+
+    const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
+    const registrationUrl = `${baseUrl}/register/${id}?token=${token}`;
 
     if (recipients.length > 0) {
       const [activity, club] = await Promise.all([
@@ -95,8 +99,6 @@ export async function POST(request, { params }) {
 
       return NextResponse.json({ success: true, registrationUrl, results });
     }
-
-    const { channel } = body;
 
     if (channel === "sms") {
       const phone = toE164(order.parent1PhonePrefix || "+1", order.parent1Phone);

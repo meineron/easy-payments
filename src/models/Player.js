@@ -10,6 +10,10 @@ const PlayerTeamSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  registrationDate: {
+    type: Date,
+    default: null,
+  },
 }, { _id: false });
 
 const PlayerSchema = new mongoose.Schema({

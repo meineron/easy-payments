@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const PHONE_PREFIXES = ["+1", "+44", "+972", "+61", "+49", "+33", "+34", "+39", "+81", "+86"];
 
@@ -17,6 +17,12 @@ export default function RegisterPaymentClient({ team, clubName, hasDiscount }) {
   const [error, setError] = useState("");
   const [step, setStep] = useState(1);
   const [paying, setPaying] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [step]);
 
   const [parent, setParent] = useState({
     firstName: "",

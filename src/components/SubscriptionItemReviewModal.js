@@ -61,18 +61,38 @@ export default function SubscriptionItemReviewModal({ newSub: initialNewSub, old
 
     newSubItems.forEach((item, idx) => {
       if (newChecked[idx]) {
-        items.push({ name: item.name, priceCents: item.priceCents, quantity: item.quantity || 1, isDiscount: item.isDiscount || false });
+        items.push({
+          name: item.name,
+          priceCents: item.priceCents,
+          quantity: item.quantity || 1,
+          isDiscount: item.isDiscount || false,
+          isManual: false,
+        });
       }
     });
 
+    // Kept-from-old items are no longer in the new subscription, so mark them manual
+    // — otherwise the next auto-sync cycle would remove them again.
     previousItems.forEach((item, idx) => {
       if (prevChecked[idx]) {
-        items.push({ name: item.name, priceCents: item.priceCents, quantity: item.quantity || 1, isDiscount: item.isDiscount || false });
+        items.push({
+          name: item.name,
+          priceCents: item.priceCents,
+          quantity: item.quantity || 1,
+          isDiscount: item.isDiscount || false,
+          isManual: true,
+        });
       }
     });
 
     manualItems.forEach((item) => {
-      items.push({ name: item.name, priceCents: item.priceCents, quantity: item.quantity || 1, isDiscount: item.isDiscount || false });
+      items.push({
+        name: item.name,
+        priceCents: item.priceCents,
+        quantity: item.quantity || 1,
+        isDiscount: item.isDiscount || false,
+        isManual: item.isManual !== false,
+      });
     });
 
     onConfirm({

@@ -4,6 +4,11 @@ import Activity from "@/models/Activity";
 import Order from "@/models/Order";
 import Club from "@/models/Club";
 
+// Admin invoice edits must be visible to the parent immediately, so this
+// route must never be served from the Next.js route-handler cache.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function GET(request, { params }) {
   try {
     const { activityId } = await params;
@@ -86,14 +91,20 @@ export async function GET(request, { params }) {
         return NextResponse.json({ error: "Registration link has expired" }, { status: 410 });
       }
 
-      return NextResponse.json({ activity: safeActivity, order, mode: "token" });
+      return NextResponse.json(
+        { activity: safeActivity, order, mode: "token" },
+        { headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" } },
+      );
     }
 
     if (activity.registrationType !== "public") {
       return NextResponse.json({ error: "This activity requires an invitation link" }, { status: 403 });
     }
 
-    return NextResponse.json({ activity: safeActivity, order: null, mode: "public" });
+    return NextResponse.json(
+      { activity: safeActivity, order: null, mode: "public" },
+      { headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" } },
+    );
   } catch (error) {
     console.error("Load registration error:", error);
     return NextResponse.json({ error: "Failed to load registration" }, { status: 500 });

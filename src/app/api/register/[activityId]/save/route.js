@@ -4,6 +4,7 @@ import Order from "@/models/Order";
 import Activity from "@/models/Activity";
 import Player from "@/models/Player";
 import Parent from "@/models/Parent";
+import { markPlayerRegisteredForTeam } from "@/lib/order-sync";
 
 function computeTotal(order) {
   let total = order.subscriptionPriceCents || 0;
@@ -123,15 +124,36 @@ export async function PUT(request, { params }) {
         return NextResponse.json({ error: "Invalid registration link" }, { status: 404 });
       }
 
+      // Contact / waivers / form fields are safe to overwrite from the client.
+      // Pricing fields (`subscriptionPriceCents`, `subscriptionTitle`) are NOT —
+      // the admin may have overridden them in the dashboard, and a stale client
+      // would blow that override away. We re-derive them server-side below
+      // whenever the subscription selection actually changes.
       const fields = [
         "playerFirstName", "playerLastName", "playerDob", "playerGender",
         "playerPhonePrefix", "playerPhone", "playerEmail",
         "parent1FirstName", "parent1LastName", "parent1PhonePrefix", "parent1Phone", "parent1Email",
         "parent2FirstName", "parent2LastName", "parent2PhonePrefix", "parent2Phone", "parent2Email",
-        "teamId", "subscriptionId", "subscriptionTitle", "subscriptionPriceCents",
+        "teamId",
         "formData",
       ];
       fields.forEach((f) => { if (body[f] !== undefined) order[f] = body[f]; });
+
+      if (body.subscriptionId !== undefined && String(body.subscriptionId) !== String(order.subscriptionId || "")) {
+        const sub = (activity.subscriptions || []).find((s) => String(s._id) === String(body.subscriptionId));
+        order.subscriptionId = body.subscriptionId;
+        // The parent picked a different subscription → "dismissed" names were
+        // scoped to the old template and no longer apply.
+        order.dismissedSubItemNames = [];
+        if (sub) {
+          order.subscriptionTitle = sub.title || "";
+          order.subscriptionPriceCents = sub.priceCents || 0;
+        } else {
+          order.subscriptionTitle = "";
+          order.subscriptionPriceCents = 0;
+        }
+      }
+
       if (body.waiverConsents) order.waiverConsents = body.waiverConsents;
       order.totalCostCents = computeTotal(order);
 
@@ -149,10 +171,17 @@ export async function PUT(request, { params }) {
         } catch (e) { console.error("Parent sync in token save:", e); }
       }
 
-      if (!activity.hasPayment || order.totalCostCents === 0) {
+      // Only auto-complete the order when the activity genuinely has no payment.
+      // Previously a 0 total (e.g. discounts cancelling out the sub price during
+      // mid-edit) also flipped status → "paid", which left orders stuck as
+      // "paid with paidCents=0" and rejected every future checkout attempt.
+      if (!activity.hasPayment) {
         order.registrationCompletedAt = order.registrationCompletedAt || new Date();
         order.status = "paid";
         await order.save();
+        try {
+          await markPlayerRegisteredForTeam(order.playerId, order.teamId, order.registrationCompletedAt);
+        } catch (e) { console.error("Mark player registered (token):", e); }
         try {
           const { sendRegistrationPDFEmail } = await import("@/lib/registration-email");
           await sendRegistrationPDFEmail(order);
@@ -165,6 +194,92 @@ export async function PUT(request, { params }) {
 
     if (activity.registrationType !== "public") {
       return NextResponse.json({ error: "Registration requires invitation" }, { status: 403 });
+    }
+
+    if (body.orderId) {
+      const existing = await Order.findOne({ _id: body.orderId, activityId });
+      if (!existing) {
+        return NextResponse.json({ error: "Order not found" }, { status: 404 });
+      }
+      if (existing.status === "paid" || (existing.paidCents || 0) > 0) {
+        const populated = await Order.findById(existing._id).populate("teamId", "name season gender").lean();
+        return NextResponse.json({ order: populated });
+      }
+
+      // Pricing fields (`subscriptionPriceCents`, `subscriptionTitle`, `items`)
+      // are NOT accepted from the client — the admin may have overridden them
+      // and a stale client submission would clobber that. We re-derive them
+      // server-side below when the subscription selection actually changes.
+      const fields = [
+        "playerFirstName", "playerLastName", "playerDob", "playerGender",
+        "playerPhonePrefix", "playerPhone", "playerEmail",
+        "parent1FirstName", "parent1LastName", "parent1PhonePrefix", "parent1Phone", "parent1Email",
+        "parent2FirstName", "parent2LastName", "parent2PhonePrefix", "parent2Phone", "parent2Email",
+        "teamId",
+        "formData",
+      ];
+      fields.forEach((f) => { if (body[f] !== undefined) existing[f] = body[f]; });
+
+      if (body.subscriptionId !== undefined && String(body.subscriptionId) !== String(existing.subscriptionId || "")) {
+        const sub = (activity.subscriptions || []).find((s) => String(s._id) === String(body.subscriptionId));
+        existing.subscriptionId = body.subscriptionId;
+        // Subscription changed → previously dismissed line names don't apply.
+        existing.dismissedSubItemNames = [];
+        if (sub) {
+          existing.subscriptionTitle = sub.title || "";
+          existing.subscriptionPriceCents = sub.priceCents || 0;
+          existing.items = (sub.items || [])
+            .filter((i) => !i.expiresAt || new Date(i.expiresAt) >= new Date())
+            .map((i) => ({
+              name: i.name,
+              priceCents: i.priceCents || 0,
+              quantity: i.quantity || 1,
+              isDiscount: !!i.isDiscount,
+              isManual: false,
+            }));
+        } else {
+          existing.subscriptionTitle = "";
+          existing.subscriptionPriceCents = 0;
+          existing.items = [];
+        }
+      }
+
+      if (body.waiverConsents) existing.waiverConsents = body.waiverConsents;
+      if (body.couponCode !== undefined) existing.couponCode = body.couponCode;
+      if (body.couponDiscountCents !== undefined) existing.couponDiscountCents = body.couponDiscountCents;
+      existing.totalCostCents = computeTotal(existing);
+
+      if (!existing.playerId && existing.playerFirstName && existing.playerLastName) {
+        try {
+          existing.playerId = await findOrCreatePlayer(existing.clubId, existing);
+        } catch (e) { console.error("Player creation in public update:", e); }
+      }
+
+      await existing.save();
+
+      if (existing.playerId) {
+        try {
+          await syncParentsToPlayer(existing.clubId, existing.playerId, existing);
+        } catch (e) { console.error("Parent sync in public update:", e); }
+      }
+
+      // Same rationale as the token branch: a 0 total must not auto-paid an
+      // order on an activity that has payment enabled.
+      if (!activity.hasPayment) {
+        existing.registrationCompletedAt = existing.registrationCompletedAt || new Date();
+        existing.status = "paid";
+        await existing.save();
+        try {
+          await markPlayerRegisteredForTeam(existing.playerId, existing.teamId, existing.registrationCompletedAt);
+        } catch (e) { console.error("Mark player registered (public update):", e); }
+        try {
+          const { sendRegistrationPDFEmail } = await import("@/lib/registration-email");
+          await sendRegistrationPDFEmail(existing);
+        } catch (e) { console.error("Registration PDF email (public update):", e); }
+      }
+
+      const populated = await Order.findById(existing._id).populate("teamId", "name season gender").lean();
+      return NextResponse.json({ order: populated });
     }
 
     if (!body.playerFirstName || !body.playerLastName) {
@@ -201,7 +316,13 @@ export async function PUT(request, { params }) {
       subscriptionId: body.subscriptionId || "",
       subscriptionTitle: body.subscriptionTitle || "",
       subscriptionPriceCents: body.subscriptionPriceCents || 0,
-      items: body.items || [],
+      items: (body.items || []).map((i) => ({
+        name: i.name,
+        priceCents: i.priceCents || 0,
+        quantity: i.quantity || 1,
+        isDiscount: !!i.isDiscount,
+        isManual: false,
+      })),
       waiverConsents: body.waiverConsents || [],
       formData: body.formData || {},
       status: "pending",
@@ -210,10 +331,15 @@ export async function PUT(request, { params }) {
 
     const order = await Order.create(orderData);
 
-    if (!activity.hasPayment || orderData.totalCostCents === 0) {
+    // Same rationale as above: never auto-paid a brand-new order on an activity
+    // that has payment enabled, even if the math currently zeros out.
+    if (!activity.hasPayment) {
       order.registrationCompletedAt = new Date();
       order.status = "paid";
       await order.save();
+      try {
+        await markPlayerRegisteredForTeam(order.playerId, order.teamId, order.registrationCompletedAt);
+      } catch (e) { console.error("Mark player registered (public create):", e); }
       try {
         const { sendRegistrationPDFEmail } = await import("@/lib/registration-email");
         await sendRegistrationPDFEmail(order);

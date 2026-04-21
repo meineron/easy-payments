@@ -46,20 +46,24 @@ export async function POST(request, { params }) {
     if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
     if (order.status === "paid") return NextResponse.json({ error: "Already paid" }, { status: 400 });
 
-    if (!order.paymentToken) {
-      order.paymentToken = crypto.randomUUID();
-    }
-    order.paymentLinkSentAt = new Date();
-    await order.save();
-
-    const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
-    const paymentUrl = `${baseUrl}/payment/${order.paymentToken}`;
-    const totalDue = order.totalCostCents - (order.paidCents || 0);
-
     let body = {};
     try { body = await request.json(); } catch { /* empty body ok */ }
 
     const recipients = body.recipients || [];
+    const { channel } = body;
+    const willSend = recipients.length > 0 || channel === "sms" || channel === "email";
+
+    let tokenChanged = false;
+    if (!order.paymentToken) {
+      order.paymentToken = crypto.randomUUID();
+      tokenChanged = true;
+    }
+    if (willSend) order.paymentLinkSentAt = new Date();
+    if (tokenChanged || willSend) await order.save();
+
+    const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
+    const paymentUrl = `${baseUrl}/payment/${order.paymentToken}`;
+    const totalDue = order.totalCostCents - (order.paidCents || 0);
 
     if (recipients.length > 0) {
       const [activity, club] = await Promise.all([
@@ -97,8 +101,6 @@ export async function POST(request, { params }) {
 
       return NextResponse.json({ success: true, paymentUrl, paymentLinkSentAt: order.paymentLinkSentAt, results });
     }
-
-    const { channel } = body;
 
     if (channel === "sms") {
       const phone = toE164(order.parent1PhonePrefix || "+1", order.parent1Phone);

@@ -20,12 +20,17 @@ function computeInstallmentFee(totalCents, chosen, sub) {
 function buildInstallmentSchedule(order, sub, feeCents) {
   const chosen = order.chosenInstallments || 1;
   const feeMode = sub?.installmentFeeMode || "split";
-  let dueAmount = sub?.dueDateAmountCents || order.totalCostCents;
+  // Per-order override wins over the subscription default.
+  const overrideDue = order.dueDateAmountCents || 0;
+  const baseDueAmount = overrideDue > 0
+    ? Math.min(overrideDue, order.totalCostCents)
+    : (sub?.dueDateAmountCents || order.totalCostCents);
+  let dueAmount = baseDueAmount;
   let remaining;
 
   if (feeCents > 0 && feeMode === "due_date") {
     dueAmount += feeCents;
-    remaining = Math.max(0, order.totalCostCents - (sub?.dueDateAmountCents || order.totalCostCents));
+    remaining = Math.max(0, order.totalCostCents - baseDueAmount);
   } else {
     const effectiveTotal = order.totalCostCents + feeCents;
     remaining = Math.max(0, effectiveTotal - dueAmount);

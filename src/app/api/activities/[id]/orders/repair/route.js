@@ -6,18 +6,7 @@ import Order from "@/models/Order";
 import Activity from "@/models/Activity";
 import Player from "@/models/Player";
 import Parent from "@/models/Parent";
-
-function computeTotal(order) {
-  let total = order.subscriptionPriceCents || 0;
-  (order.items || []).forEach((item) => {
-    const amt = (item.priceCents || 0) * (item.quantity || 1);
-    if (item.isDiscount) total -= amt; else total += amt;
-  });
-  if (order.discountType === "amount") total -= order.discountValue || 0;
-  else if (order.discountType === "percentage") total -= Math.round(total * (order.discountValue || 0) / 100);
-  total -= order.couponDiscountCents || 0;
-  return Math.max(0, total);
-}
+import { syncOrderItemsWithSubscription, computeOrderTotalCents, isOrderSyncEligible } from "@/lib/order-sync";
 
 async function findOrCreateParent(clubId, firstName, lastName, email, phone, phonePrefix) {
   if (!firstName || !lastName || !email) return null;
@@ -49,7 +38,6 @@ export async function POST(request, { params }) {
     }
 
     const subscriptions = activity.subscriptions || [];
-    const now = new Date();
 
     const orders = await Order.find({
       activityId: id,
@@ -62,27 +50,22 @@ export async function POST(request, { params }) {
     for (const order of orders) {
       let changed = false;
 
-      // Repair missing items from subscription
-      if (order.status !== "paid") {
-        const sub = subscriptions.find((s) => String(s._id) === order.subscriptionId);
+      // Resync subscription items/discounts into the invoice while preserving manual rows.
+      if (isOrderSyncEligible(order)) {
+        const sub = subscriptions.find((s) => String(s._id) === String(order.subscriptionId));
         if (sub) {
-          const activeItems = (sub.items || []).filter((item) =>
-            !item.expiresAt || new Date(item.expiresAt) >= now
-          );
-          if (activeItems.length > 0 && (order.items || []).length === 0) {
-            order.items = activeItems.map((item) => ({
-              name: item.name,
-              priceCents: item.priceCents,
-              quantity: item.quantity,
-              isRequired: item.isRequired,
-              isDiscount: item.isDiscount || false,
-            }));
-            if (!order.subscriptionPriceCents && sub.priceCents) {
-              order.subscriptionPriceCents = sub.priceCents;
-              order.subscriptionTitle = sub.title;
-            }
-            order.totalCostCents = computeTotal(order);
+          if (!order.subscriptionPriceCents && sub.priceCents) {
+            order.subscriptionPriceCents = sub.priceCents;
+            order.subscriptionTitle = sub.title;
             changed = true;
+          }
+          const { changed: itemsChanged, items } = syncOrderItemsWithSubscription(order, sub);
+          if (itemsChanged) {
+            order.items = items;
+            changed = true;
+          }
+          if (changed) {
+            order.totalCostCents = computeOrderTotalCents(order);
           }
         }
       }

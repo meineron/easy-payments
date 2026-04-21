@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, use } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, use } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
@@ -10,6 +10,7 @@ import SendBulkLinksModal from "@/components/SendBulkLinksModal";
 import SendMessageModal from "@/components/SendMessageModal";
 import PhonePrefixInput from "@/components/PhonePrefixInput";
 import { activityTeamSlotKey } from "@/lib/activity-team-keys";
+import { normalizeCopyUrl } from "@/lib/copy-url";
 
 function centsToDisplay(c) { return ((c || 0) / 100).toFixed(2); }
 function displayToCents(v) { return Math.round(parseFloat(v || 0) * 100); }
@@ -142,22 +143,37 @@ function TabParticipants({ activityId, activity, tc, td }) {
     return () => document.removeEventListener("mousedown", close);
   }, [teamFilterOpen]);
 
-  const activityTeams = (activity?.teams || []).map((row, slotIndex) => ({
+  const activityTeams = useMemo(() => (activity?.teams || []).map((row, slotIndex) => ({
     slotIndex,
     teamId: row.teamId?._id || row.teamId || null,
     name: row.teamId?.name || "Unknown",
     teamType: row.teamId?.teamType || "",
     gender: row.teamId?.gender || "",
-  }));
-  const assignableActivityTeams = activityTeams.filter((t) => t.teamId);
-  const teamTypes = [...new Set(activityTeams.map((team) => team.teamType).filter(Boolean))].sort();
-  const genders = [...new Set(activityTeams.map((team) => team.gender).filter(Boolean))].sort();
-  const activitySubs = (activity?.subscriptions || []).map((s, i) => ({
+  })), [activity]);
+  const assignableActivityTeams = useMemo(() => activityTeams.filter((t) => t.teamId), [activityTeams]);
+  const teamTypes = useMemo(() => [...new Set(activityTeams.map((team) => team.teamType).filter(Boolean))].sort(), [activityTeams]);
+  const genders = useMemo(() => [...new Set(activityTeams.map((team) => team.gender).filter(Boolean))].sort(), [activityTeams]);
+  const activitySubs = useMemo(() => (activity?.subscriptions || []).map((s, i) => ({
     id: s._id || `sub_${i}`, title: s.title, priceCents: s.priceCents || 0,
     includedTeamIds: s.includedTeamIds || [], maxInstallments: s.maxInstallments || 1,
     dueDateAmountCents: s.dueDateAmountCents || 0, firstInstallmentDate: s.firstInstallmentDate,
     items: (s.items || []).map((it) => ({ name: it.name, priceCents: it.priceCents, quantity: it.quantity, isRequired: it.isRequired, isDiscount: it.isDiscount || false })),
-  }));
+  })), [activity]);
+
+  // Precompute the subscription list for each team so each row doesn't have to
+  // re-filter `activitySubs` during render — a hot path when the Actions menu
+  // toggles and the whole table re-renders.
+  const subsByTeamId = useMemo(() => {
+    const map = new Map();
+    for (const s of activitySubs) {
+      for (const tid of s.includedTeamIds || []) {
+        const key = String(tid);
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(s);
+      }
+    }
+    return map;
+  }, [activitySubs]);
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -199,23 +215,86 @@ function TabParticipants({ activityId, activity, tc, td }) {
     }
   }
 
+  function buildAutoSwitchItems(newSub, oldSub, currentItems) {
+    const oldNames = new Set((oldSub?.items || []).map((i) => i.name));
+    const newNames = new Set((newSub?.items || []).map((i) => i.name));
+    const manualItems = (currentItems || [])
+      .filter((it) => !oldNames.has(it.name) && !newNames.has(it.name))
+      .map((it) => ({ name: it.name, priceCents: it.priceCents, quantity: it.quantity || 1, isDiscount: it.isDiscount || false }));
+    const newItems = (newSub?.items || []).map((it) => ({
+      name: it.name, priceCents: it.priceCents, quantity: it.quantity || 1, isDiscount: it.isDiscount || false,
+    }));
+    return [...newItems, ...manualItems];
+  }
+
   function handleInlineTeamChange(orderId, newTeamId) {
     const order = orders.find((o) => o._id === orderId);
     const currentSubId = order?.subscriptionId || "";
     const matchingSubs = newTeamId
       ? activitySubs.filter((s) => (s.includedTeamIds || []).map(String).includes(String(newTeamId)))
       : [];
+    const oldSub = activitySubs.find((s) => s.id === currentSubId) || null;
     const currentSubStillValid = matchingSubs.some((s) => s.id === currentSubId);
 
-    if (currentSubStillValid) {
+    if (!newTeamId) {
       applyInlineTeamChange(orderId, newTeamId, null, null);
-    } else if (matchingSubs.length >= 1) {
-      const newSub = matchingSubs[0];
-      const oldSub = activitySubs.find((s) => s.id === currentSubId) || null;
-      setInlineReviewModal({ orderId, teamId: newTeamId, newSub, oldSub, currentItems: order?.items || [], availableSubs: matchingSubs });
-    } else {
-      applyInlineTeamChange(orderId, newTeamId, null, null);
+      return;
     }
+
+    if (matchingSubs.length === 0) {
+      applyInlineTeamChange(orderId, newTeamId, null, null);
+      return;
+    }
+
+    if (matchingSubs.length === 1) {
+      const only = matchingSubs[0];
+      if (currentSubStillValid && only.id === currentSubId) {
+        applyInlineTeamChange(orderId, newTeamId, null, null);
+        return;
+      }
+      const items = buildAutoSwitchItems(only, oldSub, order?.items || []);
+      applyInlineTeamChange(
+        orderId,
+        newTeamId,
+        { subscriptionId: only.id, subscriptionTitle: only.title, subscriptionPriceCents: only.priceCents || 0 },
+        items,
+      );
+      return;
+    }
+
+    const preSelected = currentSubStillValid
+      ? matchingSubs.find((s) => s.id === currentSubId)
+      : matchingSubs[0];
+    setInlineReviewModal({
+      orderId,
+      teamId: newTeamId,
+      newSub: preSelected,
+      oldSub,
+      currentItems: order?.items || [],
+      availableSubs: matchingSubs,
+    });
+  }
+
+  function handleInlineSubChange(orderId, newSubId) {
+    const order = orders.find((o) => o._id === orderId);
+    if (!order) return;
+    const currentTeamId = order.teamId?._id || order.teamId || null;
+    const currentSubId = order.subscriptionId || "";
+    if (newSubId === currentSubId) return;
+    const matchingSubs = currentTeamId
+      ? activitySubs.filter((s) => (s.includedTeamIds || []).map(String).includes(String(currentTeamId)))
+      : activitySubs;
+    const newSub = activitySubs.find((s) => s.id === newSubId);
+    if (!newSub) return;
+    const oldSub = activitySubs.find((s) => s.id === currentSubId) || null;
+    setInlineReviewModal({
+      orderId,
+      teamId: currentTeamId,
+      newSub,
+      oldSub,
+      currentItems: order.items || [],
+      availableSubs: matchingSubs.length > 0 ? matchingSubs : activitySubs,
+    });
   }
 
   async function applyInlineTeamChange(orderId, teamId, subData, items) {
@@ -254,7 +333,7 @@ function TabParticipants({ activityId, activity, tc, td }) {
     setInlineReviewModal(null);
   }
 
-  const effectiveFilterTeams = (() => {
+  const effectiveFilterTeams = useMemo(() => {
     let teams = assignableActivityTeams;
     if (filterTeamType) teams = teams.filter((team) => team.teamType === filterTeamType);
     if (filterGender) teams = teams.filter((team) => team.gender === filterGender);
@@ -265,19 +344,24 @@ function TabParticipants({ activityId, activity, tc, td }) {
     }
     if (typeOrGenderActive) return new Set(teams.map((team) => String(team.teamId)));
     return filterTeams;
-  })();
+  }, [assignableActivityTeams, filterTeamType, filterGender, filterTeams]);
 
-  const allRows = [...orders, ...expectedPlayers];
-  const filteredRows = allRows.filter((r) => {
-    if (effectiveFilterTeams.size > 0) { const tid = String(r.teamId?._id || r.teamId || ""); if (!effectiveFilterTeams.has(tid)) return false; }
-    if (filterSub && (r.subscriptionId || "") !== filterSub) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      const hay = [r.playerFirstName, r.playerLastName, r.parent1FirstName, r.parent1LastName, r.parent1Email, r.parent1Phone, r.parent2FirstName, r.parent2LastName, r.parent2Email, r.parent2Phone].join(" ").toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    return true;
-  });
+  const filteredRows = useMemo(() => {
+    const rows = [...orders, ...expectedPlayers];
+    const q = search ? search.toLowerCase() : "";
+    return rows.filter((r) => {
+      if (effectiveFilterTeams.size > 0) {
+        const tid = String(r.teamId?._id || r.teamId || "");
+        if (!effectiveFilterTeams.has(tid)) return false;
+      }
+      if (filterSub && (r.subscriptionId || "") !== filterSub) return false;
+      if (q) {
+        const hay = [r.playerFirstName, r.playerLastName, r.parent1FirstName, r.parent1LastName, r.parent1Email, r.parent1Phone, r.parent2FirstName, r.parent2LastName, r.parent2Email, r.parent2Phone].join(" ").toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [orders, expectedPlayers, effectiveFilterTeams, filterSub, search]);
 
   let statExpected = 0, statCollected = 0, statFullyPaid = 0, statPartialPaid = 0;
   filteredRows.forEach((r) => {
@@ -336,6 +420,7 @@ function TabParticipants({ activityId, activity, tc, td }) {
       subscriptionId: order.subscriptionId || "",
       subscriptionTitle: order.subscriptionTitle || "",
       subscriptionPriceCents: order.subscriptionPriceCents || 0,
+      dueDateAmountCents: order.dueDateAmountCents || 0,
       items: JSON.parse(JSON.stringify(order.items || [])),
       discountType: order.discountType || "none",
       discountValue: order.discountValue || 0,
@@ -419,6 +504,7 @@ function TabParticipants({ activityId, activity, tc, td }) {
         setOrders((prev) => prev.map((o) => (o._id === data.order._id ? data.order : o)));
         setEditOrder(data.order);
         setEditForm((prev) => ({ ...prev, _reason: "" }));
+        if (Array.isArray(data.logs)) setEditLogs(data.logs);
         setToast({ message: td("invoiceSaved"), type: "success" });
       } else setToast({ message: data.error || tc("failedToSave"), type: "error" });
     } catch { setToast({ message: tc("failedToSave"), type: "error" }); }
@@ -426,64 +512,6 @@ function TabParticipants({ activityId, activity, tc, td }) {
   }
 
   /* --- Actions --- */
-  async function copyRegistrationLink(orderId) {
-    setActionBusy(orderId);
-    try {
-      const res = await fetch(`/api/activities/${activityId}/orders/${orderId}/send-link`, { method: "POST" });
-      const data = await res.json();
-      if (data.success && data.registrationUrl) {
-        await navigator.clipboard.writeText(data.registrationUrl);
-        setToast({ message: td("regLinkCopied"), type: "success" });
-      } else setToast({ message: data.error || tc("somethingWentWrong"), type: "error" });
-    } catch { setToast({ message: tc("somethingWentWrong"), type: "error" }); }
-    finally { setActionBusy(null); }
-  }
-
-  async function copyRegistrationLinkForExpected(ep) {
-    setActionBusy(ep._id);
-    try {
-      const order = await ensureOrder(ep);
-      if (!order) { setToast({ message: tc("somethingWentWrong"), type: "error" }); return; }
-      const res = await fetch(`/api/activities/${activityId}/orders/${order._id}/send-link`, { method: "POST" });
-      const data = await res.json();
-      if (data.success && data.registrationUrl) {
-        await navigator.clipboard.writeText(data.registrationUrl);
-        setToast({ message: td("regLinkCopied"), type: "success" });
-      } else setToast({ message: data.error || tc("somethingWentWrong"), type: "error" });
-    } catch { setToast({ message: tc("somethingWentWrong"), type: "error" }); }
-    finally { setActionBusy(null); }
-  }
-
-  async function sendPaymentLink(orderId) {
-    setActionBusy(orderId);
-    try {
-      const res = await fetch(`/api/activities/${activityId}/orders/${orderId}/send-payment-link`, { method: "POST" });
-      const data = await res.json();
-      if (data.success && data.paymentUrl) {
-        await navigator.clipboard.writeText(data.paymentUrl);
-        setOrders((prev) => prev.map((o) => o._id === orderId ? { ...o, paymentLinkSentAt: data.paymentLinkSentAt } : o));
-        setToast({ message: td("paymentLinkCopied"), type: "success" });
-      } else setToast({ message: data.error || tc("somethingWentWrong"), type: "error" });
-    } catch { setToast({ message: tc("somethingWentWrong"), type: "error" }); }
-    finally { setActionBusy(null); }
-  }
-
-  async function sendPaymentLinkForExpected(ep) {
-    setActionBusy(ep._id);
-    try {
-      const order = await ensureOrder(ep);
-      if (!order) { setToast({ message: tc("somethingWentWrong"), type: "error" }); return; }
-      const res = await fetch(`/api/activities/${activityId}/orders/${order._id}/send-payment-link`, { method: "POST" });
-      const data = await res.json();
-      if (data.success && data.paymentUrl) {
-        await navigator.clipboard.writeText(data.paymentUrl);
-        setOrders((prev) => prev.map((o) => o._id === order._id ? { ...o, paymentLinkSentAt: data.paymentLinkSentAt } : o));
-        setToast({ message: td("paymentLinkCopied"), type: "success" });
-      } else setToast({ message: data.error || tc("somethingWentWrong"), type: "error" });
-    } catch { setToast({ message: tc("somethingWentWrong"), type: "error" }); }
-    finally { setActionBusy(null); }
-  }
-
   async function payFromAdmin(orderId) {
     setActionBusy(orderId);
     try {
@@ -902,19 +930,50 @@ function TabParticipants({ activityId, activity, tc, td }) {
                     <td className="py-2.5 px-2 w-8"><input type="checkbox" checked={selected.has(rowId)} onChange={() => toggleSelect(rowId)} className="rounded" /></td>
                     <td className="py-2.5 px-2">
                       <div className={`font-medium ${isExpected ? "text-gray-700" : "text-gray-900"}`}>{r.playerFirstName} {r.playerLastName}</div>
-                      <div className="text-xs text-gray-400 truncate">{r.subscriptionTitle || ""}</div>
                     </td>
                     <td className="py-2.5 px-2 hidden sm:table-cell">
-                      <select
-                        value={r.teamId?._id || r.teamId || ""}
-                        onChange={(e) => isExpected ? handleExpectedTeamChange(r, e.target.value) : handleInlineTeamChange(r._id, e.target.value)}
-                        className={`text-xs px-2 py-1 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500 ${!r.teamId ? "border-orange-300 bg-orange-50 text-orange-700" : "border-gray-200 text-gray-700"}`}
-                      >
-                        <option value="">{td("unassigned")}</option>
-                        {assignableActivityTeams.map((at) => (
-                          <option key={activityTeamSlotKey(at, at.slotIndex)} value={String(at.teamId)}>{at.name}</option>
-                        ))}
-                      </select>
+                      {(() => {
+                        const rowTeamId = r.teamId?._id || r.teamId || "";
+                        const rowSubsForTeam = rowTeamId ? (subsByTeamId.get(String(rowTeamId)) || []) : [];
+                        const rowSubId = r.subscriptionId || "";
+                        const rowSubOptions = rowSubId && !rowSubsForTeam.some((s) => s.id === rowSubId)
+                          ? [...rowSubsForTeam, activitySubs.find((s) => s.id === rowSubId)].filter(Boolean)
+                          : rowSubsForTeam;
+                        const canChangeSub = !isExpected && rowSubOptions.length > 1;
+                        return (
+                          <div className="flex flex-col gap-1">
+                            <select
+                              value={rowTeamId}
+                              onChange={(e) => isExpected ? handleExpectedTeamChange(r, e.target.value) : handleInlineTeamChange(r._id, e.target.value)}
+                              className={`text-xs px-2 py-1 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500 ${!r.teamId ? "border-orange-300 bg-orange-50 text-orange-700" : "border-gray-200 text-gray-700"}`}
+                            >
+                              <option value="">{td("unassigned")}</option>
+                              {assignableActivityTeams.map((at) => (
+                                <option key={activityTeamSlotKey(at, at.slotIndex)} value={String(at.teamId)}>{at.name}</option>
+                              ))}
+                            </select>
+                            {canChangeSub ? (
+                              <select
+                                value={rowSubId}
+                                onChange={(e) => handleInlineSubChange(r._id, e.target.value)}
+                                className="text-[11px] px-2 py-1 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-gray-600"
+                                title={r.subscriptionTitle || ""}
+                              >
+                                {!rowSubId && <option value="">—</option>}
+                                {rowSubOptions.map((s) => (
+                                  <option key={s.id} value={s.id}>{s.title}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              r.subscriptionTitle ? (
+                                <div className="text-[11px] text-gray-400 truncate max-w-[160px]" title={r.subscriptionTitle}>
+                                  {r.subscriptionTitle}
+                                </div>
+                              ) : null
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="py-2.5 px-2 text-gray-500 text-xs hidden md:table-cell">{regDate ? fmtDate(regDate) : "—"}</td>
                     {detailed && (
@@ -970,18 +1029,12 @@ function TabParticipants({ activityId, activity, tc, td }) {
                                   <button onClick={() => { setActionsOpen(null); openPlayerCard(r.playerId); }}
                                     className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("playerCard")}</button>
                                 )}
-                                <button onClick={() => { setActionsOpen(null); copyRegistrationLinkForExpected(r); }}
-                                  className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("copyRegistrationLink")}</button>
-                                {hasAnyContact && !r.registrationCompletedAt && (
+                                {!r.registrationCompletedAt && (
                                   <button onClick={async () => { setActionsOpen(null); const order = await ensureOrder(r); if (order) setSendLinkModal({ type: "registration", orderId: order._id, row: { ...r, _id: order._id } }); }}
                                     className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("sendRegistrationLink")}</button>
                                 )}
-                                {hasAnyContact && (
-                                  <button onClick={async () => { setActionsOpen(null); const order = await ensureOrder(r); if (order) setSendLinkModal({ type: "payment", orderId: order._id, row: { ...r, _id: order._id } }); }}
-                                    className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("sendPaymentLink")}</button>
-                                )}
-                                <button onClick={() => { setActionsOpen(null); sendPaymentLinkForExpected(r); }}
-                                  className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("copyPaymentLink")}</button>
+                                <button onClick={async () => { setActionsOpen(null); const order = await ensureOrder(r); if (order) setSendLinkModal({ type: "payment", orderId: order._id, row: { ...r, _id: order._id } }); }}
+                                  className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("sendPaymentLink")}</button>
                                 <button onClick={() => { setActionsOpen(null); payFromAdminForExpected(r); }}
                                   className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("payFromAdmin")}</button>
                                 {hasAnyContact && (
@@ -997,25 +1050,13 @@ function TabParticipants({ activityId, activity, tc, td }) {
                                 <button onClick={() => { setActionsOpen(null); openPlayerCard(r.playerId || null, r); }}
                                   className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("playerCard")}</button>
                                 {!r.registrationCompletedAt && (
-                                  <button onClick={() => { setActionsOpen(null); copyRegistrationLink(r._id); }}
-                                    className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-                                    {td("copyRegistrationLink")}
-                                  </button>
-                                )}
-                                {!r.registrationCompletedAt && hasAnyContact && (
                                   <button onClick={() => { setActionsOpen(null); setSendLinkModal({ type: "registration", orderId: r._id, row: r }); }}
                                     className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("sendRegistrationLink")}</button>
                                 )}
-                                {r.status !== "paid" && hasAnyContact && (
-                                  <button onClick={() => { setActionsOpen(null); setSendLinkModal({ type: "payment", orderId: r._id, row: r }); }}
-                                    className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("sendPaymentLink")}</button>
-                                )}
                                 {r.status !== "paid" && (
                                   <>
-                                    <button onClick={() => { setActionsOpen(null); sendPaymentLink(r._id); }}
-                                      className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">
-                                      {td("copyPaymentLink")}
-                                    </button>
+                                    <button onClick={() => { setActionsOpen(null); setSendLinkModal({ type: "payment", orderId: r._id, row: r }); }}
+                                      className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("sendPaymentLink")}</button>
                                     <button onClick={() => { setActionsOpen(null); payFromAdmin(r._id); }}
                                       className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("payFromAdmin")}</button>
                                   </>
@@ -1160,6 +1201,42 @@ function TabParticipants({ activityId, activity, tc, td }) {
 function SendLinkRecipientModal({ type, orderId, row, activityId, onClose, onDone, onError, tc, td }) {
   const [selections, setSelections] = useState({});
   const [sending, setSending] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkLoading, setLinkLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadLink() {
+      setLinkLoading(true);
+      try {
+        const endpoint = type === "registration"
+          ? `/api/activities/${activityId}/orders/${orderId}/send-registration-link`
+          : `/api/activities/${activityId}/orders/${orderId}/send-payment-link`;
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ recipients: [] }),
+        });
+        const data = await res.json();
+        if (cancelled) return;
+        const url = type === "registration" ? data.registrationUrl : data.paymentUrl;
+        if (url) setLinkUrl(normalizeCopyUrl(url));
+      } catch { /* silent */ }
+      finally { if (!cancelled) setLinkLoading(false); }
+    }
+    loadLink();
+    return () => { cancelled = true; };
+  }, [type, orderId, activityId]);
+
+  async function handleCopy() {
+    if (!linkUrl) return;
+    try {
+      await navigator.clipboard.writeText(linkUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch { onError(tc("somethingWentWrong")); }
+  }
 
   const targets = [
     {
@@ -1241,7 +1318,49 @@ function SendLinkRecipientModal({ type, orderId, row, activityId, onClose, onDon
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg">×</button>
         </div>
         <div className="p-6">
-          <p className="text-sm text-gray-500 mb-4">{td("selectRecipientsAndChannels")}</p>
+          <label className="block text-xs font-medium text-gray-500 mb-1.5">
+            {type === "registration" ? td("registrationLink") : td("paymentLink")}
+          </label>
+          <div className="flex items-stretch gap-2 mb-5">
+            <input
+              readOnly
+              value={linkLoading ? td("loadingLink") : linkUrl}
+              onFocus={(e) => e.target.select()}
+              className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-xs bg-gray-50 text-gray-700 font-mono truncate focus:outline-none focus:ring-2 focus:ring-blue-500"
+              dir="ltr"
+            />
+            <button
+              type="button"
+              onClick={handleCopy}
+              disabled={!linkUrl || linkLoading}
+              title={td("copyLink")}
+              className={`shrink-0 inline-flex items-center gap-1.5 px-3 rounded-lg border text-xs font-medium transition ${
+                copied
+                  ? "bg-green-50 border-green-300 text-green-700"
+                  : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              }`}
+            >
+              {copied ? (
+                <>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                  {td("linkCopied")}
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                  {td("copyLink")}
+                </>
+              )}
+            </button>
+          </div>
+
+          {targets.length > 0 && (
+            <p className="text-sm text-gray-500 mb-4">{td("orSendTo")}</p>
+          )}
           <div className="space-y-3">
             {targets.map((t) => (
               <div key={t.key} className="border rounded-lg p-3">

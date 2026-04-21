@@ -50,7 +50,7 @@ export default function LoginPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
+            <div suppressHydrationWarning>
               <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-1">
                 Username
               </label>
@@ -65,7 +65,7 @@ export default function LoginPage() {
               />
             </div>
 
-            <div>
+            <div suppressHydrationWarning>
               <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
                 Password
               </label>

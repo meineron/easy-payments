@@ -436,7 +436,7 @@ export default function PaymentPage() {
   const [locale, setLocale] = useState(defaultLocale);
 
   useEffect(() => {
-    fetch(`/api/payment/${token}`)
+    fetch(`/api/payment/${token}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => {
         if (d.error) { setError(d.error); }

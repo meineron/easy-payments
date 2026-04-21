@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import SubscriptionItemReviewModal from "@/components/SubscriptionItemReviewModal";
 import { activityTeamSlotKey } from "@/lib/activity-team-keys";
+import { normalizeCopyUrl } from "@/lib/copy-url";
 
 function centsToDisplay(c) { return ((c || 0) / 100).toFixed(2); }
 
@@ -305,7 +306,7 @@ function CreatePaymentForm({ order, activityId, outstanding, maxInstallments, on
       const data = await res.json();
       if (data.success) {
         if (sendMethod === "copy_only" && data.paymentUrl) {
-          await navigator.clipboard.writeText(data.paymentUrl);
+          await navigator.clipboard.writeText(normalizeCopyUrl(data.paymentUrl));
         }
         onCreated(data);
       } else {
@@ -474,17 +475,24 @@ export default function InvoiceSlideOver({
     : activitySubs;
 
   function addItem() {
-    onUpdateForm("items", [...(editForm.items || []), { name: "", priceCents: 0, quantity: 1, isDiscount: false }]);
+    // Manually added rows are never overwritten by the subscription auto-sync.
+    onUpdateForm("items", [...(editForm.items || []), { name: "", priceCents: 0, quantity: 1, isDiscount: false, isManual: true }]);
   }
 
   function updateItem(idx, field, value) {
     const items = [...(editForm.items || [])];
-    items[idx] = { ...items[idx], [field]: value };
+    // Any manual edit — name, price, quantity, discount toggle — locks the row from auto-sync.
+    items[idx] = { ...items[idx], [field]: value, isManual: true };
     onUpdateForm("items", items);
   }
 
   function removeItem(idx) {
     onUpdateForm("items", (editForm.items || []).filter((_, i) => i !== idx));
+  }
+
+  function handleDueDateAmountChange(cents) {
+    setPendingChange({ field: "dueDateAmountCents", value: cents });
+    setReasonModal({ field: "dueDateAmountCents" });
   }
 
   function handleSubChange(subId) {
@@ -607,7 +615,7 @@ export default function InvoiceSlideOver({
       onUpdateForm("_reason", reason);
     } else if (field === "itemPrice") {
       const items = [...(editForm.items || [])];
-      items[pendingChange.idx] = { ...items[pendingChange.idx], priceCents: pendingChange.value };
+      items[pendingChange.idx] = { ...items[pendingChange.idx], priceCents: pendingChange.value, isManual: true };
       onUpdateForm("items", items);
       onUpdateForm("_reason", reason);
     } else {
@@ -749,19 +757,62 @@ export default function InvoiceSlideOver({
                 </div>
 
                 {/* Subscription price */}
-                <div className="mt-3">
-                  <label className="block text-xs font-medium text-gray-500 mb-1">{td("subscriptionPrice")}</label>
-                  <div className="flex items-center">
-                    <span className="text-sm font-medium text-gray-900">${centsToDisplay(editForm.subscriptionPriceCents)}</span>
-                    <PenButton onClick={() => setEditingField("subPrice")} />
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">{td("subscriptionPrice")}</label>
+                    <div className="flex items-center">
+                      <span className="text-sm font-medium text-gray-900">${centsToDisplay(editForm.subscriptionPriceCents)}</span>
+                      <PenButton onClick={() => setEditingField("subPrice")} />
+                    </div>
+                    {editingField === "subPrice" && (
+                      <input type="text" inputMode="decimal" autoFocus
+                        defaultValue={(editForm.subscriptionPriceCents / 100).toFixed(2)}
+                        onBlur={(e) => { setEditingField(null); const cents = Math.round(parseFloat(e.target.value || 0) * 100); if (cents !== editForm.subscriptionPriceCents) handleSubPriceChange(cents); }}
+                        onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setEditingField(null); }}
+                        className="w-32 border rounded px-2 py-1 text-sm mt-1" />
+                    )}
                   </div>
-                  {editingField === "subPrice" && (
-                    <input type="text" inputMode="decimal" autoFocus
-                      defaultValue={(editForm.subscriptionPriceCents / 100).toFixed(2)}
-                      onBlur={(e) => { setEditingField(null); const cents = Math.round(parseFloat(e.target.value || 0) * 100); if (cents !== editForm.subscriptionPriceCents) handleSubPriceChange(cents); }}
-                      onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setEditingField(null); }}
-                      className="w-32 border rounded px-2 py-1 text-sm mt-1" />
-                  )}
+                  {(() => {
+                    const currentSub = (activitySubs || []).find((s) => String(s.id) === String(editForm.subscriptionId));
+                    const subMax = currentSub?.maxInstallments || 1;
+                    if (subMax <= 1) return null;
+                    const subDefault = currentSub?.dueDateAmountCents || 0;
+                    const override = editForm.dueDateAmountCents || 0;
+                    const effective = override > 0 ? override : subDefault;
+                    return (
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">{td("dueDateAmount")}</label>
+                        <div className="flex items-center">
+                          <span className="text-sm font-medium text-gray-900">
+                            ${centsToDisplay(effective)}
+                          </span>
+                          {override > 0 && (
+                            <span className="ms-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">
+                              {td("overridden")}
+                            </span>
+                          )}
+                          <PenButton onClick={() => setEditingField("dueDateAmount")} />
+                        </div>
+                        {editingField === "dueDateAmount" && (
+                          <input type="text" inputMode="decimal" autoFocus
+                            defaultValue={(effective / 100).toFixed(2)}
+                            onBlur={(e) => {
+                              setEditingField(null);
+                              const raw = parseFloat(e.target.value || 0);
+                              const cents = isNaN(raw) ? 0 : Math.round(raw * 100);
+                              // Clearing or matching the sub default resets the override.
+                              const next = cents === subDefault ? 0 : cents;
+                              if (next !== (editForm.dueDateAmountCents || 0)) handleDueDateAmountChange(next);
+                            }}
+                            onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setEditingField(null); }}
+                            className="w-32 border rounded px-2 py-1 text-sm mt-1" />
+                        )}
+                        <p className="text-[11px] text-gray-400 mt-1">
+                          {td("dueDateAmountInvoiceHint", { amount: `$${centsToDisplay(subDefault)}` })}
+                        </p>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 

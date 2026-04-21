@@ -51,6 +51,7 @@ export async function POST(request, { params }) {
           priceCents: item.priceCents || 0,
           quantity: item.quantity || 1,
           isDiscount: item.isDiscount || false,
+          isManual: true,
         };
         const oldItems = JSON.stringify(order.items || []);
         order.items = [...(order.items || []), newItem];

@@ -181,6 +181,11 @@ export async function POST(request) {
             await order.save();
 
             try {
+              const { markPlayerRegisteredForTeam } = await import("@/lib/order-sync");
+              await markPlayerRegisteredForTeam(order.playerId, order.teamId, order.registrationCompletedAt);
+            } catch (e) { console.error("Mark player registered (webhook):", e.message); }
+
+            try {
               const { sendInvoiceEmail } = await import("@/lib/email");
               const Activity = (await import("@/models/Activity")).default;
               const activityDoc = await Activity.findById(order.activityId, "title clubId").lean();

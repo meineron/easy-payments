@@ -5,6 +5,9 @@ const OrderItemSchema = new mongoose.Schema({
   priceCents: { type: Number, default: 0 },
   quantity: { type: Number, default: 1 },
   isDiscount: { type: Boolean, default: false },
+  // true  = item was added or edited manually via the invoice UI (never overwritten by auto-sync)
+  // false = item was seeded from the subscription (replaced whenever the subscription changes, until paid)
+  isManual: { type: Boolean, default: false },
 }, { _id: false });
 
 const InstallmentSchema = new mongoose.Schema({
@@ -45,8 +48,15 @@ const OrderSchema = new mongoose.Schema({
   subscriptionId: { type: String, default: "" },
   subscriptionTitle: { type: String, default: "" },
   subscriptionPriceCents: { type: Number, default: 0 },
+  // Per-order override of the subscription's dueDateAmountCents (0 = fall back to subscription default).
+  dueDateAmountCents: { type: Number, default: 0 },
 
   items: [OrderItemSchema],
+  // Names of subscription-template items the admin has explicitly removed from
+  // this order. The auto-sync that keeps unpaid orders in step with their
+  // subscription will NOT re-add any item whose name is in this list — this is
+  // the only way to "dismiss" a template-sourced line permanently.
+  dismissedSubItemNames: { type: [String], default: [] },
 
   discountType: { type: String, enum: ["none", "amount", "percentage"], default: "none" },
   discountValue: { type: Number, default: 0 },

@@ -18,6 +18,16 @@ body {
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
 
+/* Prevent date/time inputs from overflowing their container on iOS/Safari */
+input[type="date"],
+input[type="datetime-local"],
+input[type="time"],
+input[type="month"],
+input[type="week"] {
+  min-width: 0;
+  max-width: 100%;
+}
+
 [dir="rtl"] {
   text-align: right;
 }

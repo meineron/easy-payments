@@ -5,11 +5,13 @@ import { authOptions } from "@/lib/auth";
 import dbConnect from "@/lib/mongodb";
 import Order from "@/models/Order";
 import OrderLog from "@/models/OrderLog";
+import Activity from "@/models/Activity";
 import Club from "@/models/Club";
 import Transaction from "@/models/Transaction";
 import PaymentRequest from "@/models/PaymentRequest";
 import Player from "@/models/Player";
 import Parent from "@/models/Parent";
+import { computeDismissedSubItemNames } from "@/lib/order-sync";
 
 function computeTotal(order) {
   let total = order.subscriptionPriceCents || 0;
@@ -125,8 +127,9 @@ export async function GET(request, { params }) {
 }
 
 const TRACKED_FIELDS = [
-  "teamId", "subscriptionId", "subscriptionTitle", "subscriptionPriceCents",
-  "items", "discountType", "discountValue", "couponCode", "couponDiscountCents",
+  "teamId", "subscriptionId", "subscriptionTitle", "subscriptionPriceCents", "dueDateAmountCents",
+  "items", "dismissedSubItemNames",
+  "discountType", "discountValue", "couponCode", "couponDiscountCents",
   "paidCents", "refundedCents", "status", "installmentSchedule",
   "playerFirstName", "playerLastName", "playerDob", "playerGender",
   "playerPhonePrefix", "playerPhone", "playerEmail",
@@ -153,6 +156,49 @@ export async function PUT(request, { params }) {
     const userName = session.user.name || session.user.username || "Admin";
     const changeReason = body._reason || "";
 
+    // Resolve the subscription's default due-date amount so due-date logs can
+    // describe the _effective_ value (a 0 override means "use sub default").
+    // We also reuse the same lookup to figure out which template items the
+    // admin just dismissed when saving `items`.
+    let subDueDefaultCents = 0;
+    let activitySub = null;
+    const needsSubLookup =
+      (body.dueDateAmountCents !== undefined || body.items !== undefined) && order.subscriptionId;
+    if (needsSubLookup) {
+      try {
+        const activity = await Activity.findById(id, "subscriptions").lean();
+        activitySub = (activity?.subscriptions || []).find(
+          (s) => String(s._id) === String(order.subscriptionId),
+        ) || null;
+        subDueDefaultCents = activitySub?.dueDateAmountCents || 0;
+      } catch { /* best-effort lookup */ }
+    }
+
+    // If the admin changed `items`, record any template lines they removed so
+    // the subscription auto-sync doesn't silently put them back on the next
+    // dashboard load. The list only grows; if the admin re-adds a dismissed
+    // item later (as a manual row, say), the sync already preserves it.
+    if (body.items !== undefined) {
+      const existingDismissed = Array.isArray(order.dismissedSubItemNames)
+        ? order.dismissedSubItemNames.map(String)
+        : [];
+      const newlyDismissed = computeDismissedSubItemNames(order.items, body.items, activitySub);
+      if (newlyDismissed.length > 0) {
+        const merged = Array.from(new Set([...existingDismissed, ...newlyDismissed]));
+        body.dismissedSubItemNames = merged;
+      }
+      // If the admin re-added an item that was previously dismissed, un-dismiss it.
+      const submittedNames = new Set((body.items || []).map((i) => i?.name).filter(Boolean));
+      const stillDismissed = (body.dismissedSubItemNames || existingDismissed).filter(
+        (name) => !submittedNames.has(name),
+      );
+      if (
+        stillDismissed.length !== (body.dismissedSubItemNames || existingDismissed).length
+      ) {
+        body.dismissedSubItemNames = stillDismissed;
+      }
+    }
+
     for (const field of TRACKED_FIELDS) {
       if (body[field] === undefined) continue;
       const oldVal = field === "items" ? JSON.stringify(order[field]) : String(order[field] ?? "");
@@ -161,6 +207,14 @@ export async function PUT(request, { params }) {
         let desc = `Changed ${field}`;
         if (field === "subscriptionPriceCents") {
           desc = `Subscription price: ${formatCents(order[field])} → ${formatCents(body[field])}`;
+        } else if (field === "dueDateAmountCents") {
+          const oldOverride = order[field] || 0;
+          const newOverride = body[field] || 0;
+          const oldEffective = oldOverride > 0 ? oldOverride : subDueDefaultCents;
+          const newEffective = newOverride > 0 ? newOverride : subDueDefaultCents;
+          const oldLabel = oldOverride > 0 ? formatCents(oldEffective) : `${formatCents(oldEffective)} (default)`;
+          const newLabel = newOverride > 0 ? `${formatCents(newEffective)} (overridden)` : `${formatCents(newEffective)} (default)`;
+          desc = `Due-date amount: ${oldLabel} → ${newLabel}`;
         } else if (field === "paidCents") {
           desc = `Paid: ${formatCents(order[field])} → ${formatCents(body[field])}`;
         } else if (field === "refundedCents") {
@@ -188,8 +242,9 @@ export async function PUT(request, { params }) {
     }
 
     const allowed = [
-      "teamId", "subscriptionId", "subscriptionTitle", "subscriptionPriceCents",
-      "items", "discountType", "discountValue", "couponCode", "couponDiscountCents",
+      "teamId", "subscriptionId", "subscriptionTitle", "subscriptionPriceCents", "dueDateAmountCents",
+      "items", "dismissedSubItemNames",
+      "discountType", "discountValue", "couponCode", "couponDiscountCents",
       "paidCents", "refundedCents", "status", "installmentSchedule",
       "playerFirstName", "playerLastName", "playerDob", "playerGender",
       "playerPhonePrefix", "playerPhone", "playerEmail",
@@ -255,11 +310,12 @@ export async function PUT(request, { params }) {
       stripeSync = await syncInstallmentsToStripe(order);
     }
 
-    const populated = await Order.findById(order._id)
-      .populate("teamId", "name season gender")
-      .lean();
+    const [populated, refreshedLogs] = await Promise.all([
+      Order.findById(order._id).populate("teamId", "name season gender").lean(),
+      OrderLog.find({ orderId }).sort({ createdAt: -1 }).lean(),
+    ]);
 
-    return NextResponse.json({ order: populated, stripeSync });
+    return NextResponse.json({ order: populated, logs: refreshedLogs, stripeSync });
   } catch (error) {
     console.error("Update order error:", error);
     return NextResponse.json({ error: "Failed to update order" }, { status: 500 });

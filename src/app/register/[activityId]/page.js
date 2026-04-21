@@ -67,15 +67,16 @@ function buildSteps(hasWaivers, t) {
 
 function StepIndicator({ current, completed, steps }) {
   return (
-    <div className="flex items-center justify-center gap-0 mb-8 overflow-x-auto px-2">
+    <div className="flex items-center justify-center gap-0 mb-8 px-2 w-full">
       {steps.map((s, idx) => {
         const isDone = completed.includes(s.num);
         const isActive = s.num === current;
+        const isLast = idx === steps.length - 1;
         return (
-          <div key={s.num} className="flex items-center">
+          <div key={s.num} className={`flex items-center ${isLast ? "" : "flex-1 min-w-0"}`}>
             <div className="flex flex-col items-center">
               <div
-                className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-all ${
+                className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-xs sm:text-sm font-bold transition-all shrink-0 ${
                   isDone
                     ? "bg-green-600 text-white"
                     : isActive
@@ -84,7 +85,7 @@ function StepIndicator({ current, completed, steps }) {
                 }`}
               >
                 {isDone ? (
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                  <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                 ) : (
@@ -92,13 +93,13 @@ function StepIndicator({ current, completed, steps }) {
                 )}
               </div>
               <span
-                className={`text-xs mt-1.5 font-medium whitespace-nowrap ${isActive ? "text-blue-600" : isDone ? "text-green-600" : "text-gray-400"}`}
+                className={`text-[10px] sm:text-xs mt-1.5 font-medium whitespace-nowrap ${isActive ? "text-blue-600" : isDone ? "text-green-600" : "text-gray-400"}`}
               >
                 {s.label}
               </span>
             </div>
-            {idx < steps.length - 1 && (
-              <div className={`w-16 sm:w-24 h-0.5 ms-2 me-2 mb-5 ${isDone ? "bg-green-400" : "bg-gray-200"}`} />
+            {!isLast && (
+              <div className={`flex-1 min-w-[12px] h-0.5 ms-1 me-1 sm:ms-2 sm:me-2 mb-5 ${isDone ? "bg-green-400" : "bg-gray-200"}`} />
             )}
           </div>
         );
@@ -257,9 +258,13 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
   const tc = useTranslations("common");
   const tp = useTranslations("payment");
 
-  const orderPaid = initialOrder && (initialOrder.status === "paid" || initialOrder.status === "partial") && (initialOrder.paidCents || 0) > 0;
-  const orderPaidNoRegistration = orderPaid && !initialOrder.registrationCompletedAt;
-  const orderFullyRegisteredAndPaid = orderPaid && !!initialOrder.registrationCompletedAt;
+  // Keep a mutable copy of the order so admin edits made after the parent loaded
+  // the page can be pulled in (on entering the Invoice step, or before payment).
+  const [liveOrder, setLiveOrder] = useState(initialOrder);
+
+  const orderPaid = liveOrder && (liveOrder.status === "paid" || liveOrder.status === "partial") && (liveOrder.paidCents || 0) > 0;
+  const orderPaidNoRegistration = orderPaid && !liveOrder.registrationCompletedAt;
+  const orderFullyRegisteredAndPaid = orderPaid && !!liveOrder.registrationCompletedAt;
 
   const hasWaivers = (activity?.waivers || []).length > 0;
   const waiversComplete = hasWaivers ? (initialOrder?.waiverConsents || []).length > 0 : true;
@@ -281,6 +286,8 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
     return [];
   });
   const [paying, setPaying] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [savedOrderId, setSavedOrderId] = useState(() => initialOrder?._id || null);
 
   const [parent1, setParent1] = useState(() => initParent1(initialOrder));
   const [parent2, setParent2] = useState(() => initParent2(initialOrder));
@@ -289,6 +296,15 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
   const [subscriptionId, setSubscriptionId] = useState(() => initialOrder?.subscriptionId || "");
   const [subscriptionTitle, setSubscriptionTitle] = useState(() => initialOrder?.subscriptionTitle || "");
   const [subscriptionPriceCents, setSubscriptionPriceCents] = useState(() => initialOrder?.subscriptionPriceCents || 0);
+
+  // The invoice line items displayed at step 4. When the parent is editing an
+  // existing order (token / orderId flow), these are sourced from `order.items`
+  // — which is what the admin sees and edits in the dashboard. If the parent
+  // changes team/subscription, we fall back to the subscription template.
+  const [orderItems, setOrderItems] = useState(() => initialOrder?.items || null);
+  // Per-order due-date override; mirrors admin's dashboard override.
+  const [dueDateOverrideCents, setDueDateOverrideCents] = useState(() => initialOrder?.dueDateAmountCents || 0);
+  const [refreshingOrder, setRefreshingOrder] = useState(false);
 
   const [formData, setFormData] = useState(() => initialOrder?.formData || {});
 
@@ -341,6 +357,10 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
       setSubscriptionTitle("");
       setSubscriptionPriceCents(0);
     }
+    // Parent picked a different team → the saved order's line items and the
+    // override no longer apply. Fall back to the subscription template.
+    setOrderItems(null);
+    setDueDateOverrideCents(0);
     setCouponResult(null);
   }
 
@@ -350,27 +370,49 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
       setSubscriptionId("");
       setSubscriptionTitle("");
       setSubscriptionPriceCents(0);
+      setOrderItems(null);
+      setDueDateOverrideCents(0);
       return;
     }
     setSubscriptionId(s._id);
     setSubscriptionTitle(s.title);
     setSubscriptionPriceCents(s.priceCents || 0);
+    setOrderItems(null);
+    setDueDateOverrideCents(0);
     setCouponResult(null);
+  }
+
+  // Resolve the invoice line items for display and for total calculation.
+  // If the admin has curated the order (orderItems set), use those verbatim —
+  // they're the source of truth. Otherwise, use the subscription template's
+  // required + discount items (same shape as what the server will snapshot).
+  function getDisplayItems() {
+    if (Array.isArray(orderItems)) {
+      return orderItems.map((i) => ({
+        name: i.name,
+        priceCents: i.priceCents || 0,
+        quantity: i.quantity || 1,
+        isDiscount: !!i.isDiscount,
+      }));
+    }
+    const sub = subscriptions.find((s) => s._id === subscriptionId);
+    return (sub?.items || [])
+      .filter((i) => (i.isRequired && !i.isDiscount) || i.isDiscount)
+      .map((i) => ({
+        name: i.name,
+        priceCents: i.priceCents || 0,
+        quantity: i.quantity || 1,
+        isDiscount: !!i.isDiscount,
+      }));
   }
 
   function computeTotal() {
     let total = subscriptionPriceCents;
-    const sub = subscriptions.find((s) => s._id === subscriptionId);
-    (sub?.items || [])
-      .filter((i) => i.isRequired && !i.isDiscount)
-      .forEach((i) => {
-        total += (i.priceCents || 0) * (i.quantity || 1);
-      });
-    (sub?.items || [])
-      .filter((i) => i.isDiscount)
-      .forEach((i) => {
-        total -= (i.priceCents || 0) * (i.quantity || 1);
-      });
+    getDisplayItems().forEach((i) => {
+      const amt = (i.priceCents || 0) * (i.quantity || 1);
+      if (i.isDiscount) total -= amt;
+      else total += amt;
+    });
     if (couponResult?.discountCents) total -= couponResult.discountCents;
     return Math.max(0, total);
   }
@@ -399,6 +441,9 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
 
   function goToStep(target) {
     setStep(target);
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
   }
 
   function completeStep1() {
@@ -412,20 +457,141 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
   const waiverStepNum = hasWaivers ? 3 : null;
   const invoiceStepNum = hasWaivers ? 4 : 3;
 
-  function completeStep2() {
+  // If the parent lands directly on the invoice step (auto-resume of an
+  // existing order), pull the latest admin-side invoice state on mount so any
+  // dashboard edits made after the link was opened are visible.
+  useEffect(() => {
+    if (step === invoiceStepNum && (token || savedOrderId)) {
+      refreshOrderFromServer();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, invoiceStepNum]);
+
+  function buildSavePayload() {
+    const sub = subscriptions.find((s) => s._id === subscriptionId);
+    const reqItems = (sub?.items || [])
+      .filter((i) => i.isRequired || i.isDiscount)
+      .map((i) => ({
+        name: i.name,
+        priceCents: i.priceCents,
+        quantity: i.quantity || 1,
+        isDiscount: i.isDiscount || false,
+        isManual: false,
+      }));
+
+    const waiverConsentData = waivers.map((w) => ({
+      waiverId: String(w._id),
+      title: w.title,
+      agreedAt: waiverConsents[w._id] ? new Date().toISOString() : null,
+      agreedByName: `${parent1.firstName} ${parent1.lastName}`.trim(),
+      agreedByEmail: parent1.email,
+    }));
+
+    return {
+      token: token || undefined,
+      orderId: savedOrderId || undefined,
+      playerFirstName: player.firstName,
+      playerLastName: player.lastName,
+      playerDob: player.dob || null,
+      playerGender: player.gender,
+      playerPhonePrefix: player.phonePrefix || "+1",
+      playerPhone: player.phone,
+      playerEmail: player.email,
+      parent1FirstName: parent1.firstName,
+      parent1LastName: parent1.lastName,
+      parent1PhonePrefix: parent1.phonePrefix || "+1",
+      parent1Phone: parent1.phone,
+      parent1Email: parent1.email,
+      parent2FirstName: parent2.firstName,
+      parent2LastName: parent2.lastName,
+      parent2PhonePrefix: parent2.phonePrefix || "+1",
+      parent2Phone: parent2.phone,
+      parent2Email: parent2.email,
+      teamId: teamId || null,
+      subscriptionId,
+      subscriptionTitle,
+      subscriptionPriceCents,
+      items: reqItems,
+      formData,
+      waiverConsents: waiverConsentData,
+      couponCode: couponResult?.couponCode || "",
+      couponDiscountCents: couponResult?.discountCents || 0,
+    };
+  }
+
+  async function saveRegistrationData() {
+    const res = await fetch(`/api/register/${activityId}/save`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildSavePayload()),
+    });
+    const data = await res.json();
+    if (data.order?._id) setSavedOrderId(data.order._id);
+    if (data.order) applyLiveOrder(data.order);
+    return data;
+  }
+
+  // Copy the authoritative admin-side invoice state (items, subscription price,
+  // due-date override) from a fresh order document into local state so the
+  // summary at step 4 reflects the DB rather than the stale initial snapshot.
+  function applyLiveOrder(order) {
+    if (!order) return;
+    setLiveOrder(order);
+    if (order.subscriptionId !== undefined) setSubscriptionId(order.subscriptionId || "");
+    if (order.subscriptionTitle !== undefined) setSubscriptionTitle(order.subscriptionTitle || "");
+    if (typeof order.subscriptionPriceCents === "number") setSubscriptionPriceCents(order.subscriptionPriceCents);
+    if (Array.isArray(order.items)) setOrderItems(order.items);
+    if (typeof order.dueDateAmountCents === "number") setDueDateOverrideCents(order.dueDateAmountCents);
+  }
+
+  async function refreshOrderFromServer() {
+    if (!token && !savedOrderId) return;
+    setRefreshingOrder(true);
+    try {
+      const url = `/api/register/${activityId}${token ? `?token=${token}` : ""}`;
+      const res = await fetch(url, { cache: "no-store" });
+      const data = await res.json();
+      if (data.order) applyLiveOrder(data.order);
+    } catch { /* keep the current state on transient failure */ }
+    finally { setRefreshingOrder(false); }
+  }
+
+  async function persistStep3AndAdvance() {
+    setSavingDraft(true);
+    try {
+      const data = await saveRegistrationData();
+      if (!data.order) {
+        alert(data.error || tc("failedToSave"));
+        return;
+      }
+      // Pull the freshest admin-side invoice state before showing the total.
+      await refreshOrderFromServer();
+      goToStep(invoiceStepNum);
+    } catch {
+      alert(tc("somethingWentWrong"));
+    } finally {
+      setSavingDraft(false);
+    }
+  }
+
+  async function completeStep2() {
     if (!player.firstName || !player.lastName || !player.gender || !player.dob) return;
     const missingRequired = playerCustomFields.some((f) => f.required && !formData[f.key]);
     if (missingRequired) return;
     setCompletedSteps((prev) => (prev.includes(2) ? prev : [...prev, 2]));
-    goToStep(hasWaivers ? 3 : 3);
+
+    if (hasWaivers) {
+      goToStep(3);
+      return;
+    }
+    await persistStep3AndAdvance();
   }
 
-  function completeWaivers() {
+  async function completeWaivers() {
     const allRequired = waivers.filter((w) => w.isRequired);
     const allAgreed = allRequired.every((w) => waiverConsents[w._id]);
     if (!allAgreed) return;
     setCompletedSteps((prev) => (prev.includes(waiverStepNum) ? prev : [...prev, waiverStepNum]));
-    goToStep(invoiceStepNum);
 
     const newConsents = waivers
       .filter((w) => waiverConsents[w._id] && !savedWaiverIds.has(String(w._id)))
@@ -437,13 +603,15 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
         agreedByEmail: parent1.email,
       }));
 
+    await persistStep3AndAdvance();
+
     if (newConsents.length > 0) {
       fetch(`/api/register/${activityId}/waiver-confirmation`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           token: token || undefined,
-          orderId: initialOrder?._id || undefined,
+          orderId: savedOrderId || initialOrder?._id || undefined,
           waiverConsents: newConsents,
         }),
       }).catch(() => {});
@@ -453,60 +621,7 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
   async function saveAndPay() {
     setPaying(true);
     try {
-      const sub = subscriptions.find((s) => s._id === subscriptionId);
-      const reqItems = (sub?.items || [])
-        .filter((i) => i.isRequired)
-        .map((i) => ({
-          name: i.name,
-          priceCents: i.priceCents,
-          quantity: i.quantity || 1,
-          isDiscount: false,
-        }));
-
-      const waiverConsentData = waivers.map((w) => ({
-        waiverId: String(w._id),
-        title: w.title,
-        agreedAt: waiverConsents[w._id] ? new Date().toISOString() : null,
-        agreedByName: `${parent1.firstName} ${parent1.lastName}`.trim(),
-        agreedByEmail: parent1.email,
-      }));
-
-      const payload = {
-        token: token || undefined,
-        playerFirstName: player.firstName,
-        playerLastName: player.lastName,
-        playerDob: player.dob || null,
-        playerGender: player.gender,
-        playerPhonePrefix: player.phonePrefix || "+1",
-        playerPhone: player.phone,
-        playerEmail: player.email,
-        parent1FirstName: parent1.firstName,
-        parent1LastName: parent1.lastName,
-        parent1PhonePrefix: parent1.phonePrefix || "+1",
-        parent1Phone: parent1.phone,
-        parent1Email: parent1.email,
-        parent2FirstName: parent2.firstName,
-        parent2LastName: parent2.lastName,
-        parent2PhonePrefix: parent2.phonePrefix || "+1",
-        parent2Phone: parent2.phone,
-        parent2Email: parent2.email,
-        teamId: teamId || null,
-        subscriptionId,
-        subscriptionTitle,
-        subscriptionPriceCents,
-        items: reqItems,
-        formData,
-        waiverConsents: waiverConsentData,
-        couponCode: couponResult?.couponCode || "",
-        couponDiscountCents: couponResult?.discountCents || 0,
-      };
-
-      const saveRes = await fetch(`/api/register/${activityId}/save`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const saveData = await saveRes.json();
+      const saveData = await saveRegistrationData();
       if (!saveData.order) {
         alert(saveData.error || tc("failedToSave"));
         setPaying(false);
@@ -546,15 +661,20 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
 
   const { schedule, feeCents } = useMemo(() => {
     if (!currentSub || total <= 0) return { schedule: [], feeCents: 0 };
+    // Prefer a per-order override if the admin set one on the invoice.
+    const override = dueDateOverrideCents || 0;
+    const dueDateAmount = override > 0
+      ? Math.min(override, total)
+      : currentSub.dueDateAmountCents;
     return buildPreviewSchedule(
       total,
-      currentSub.dueDateAmountCents,
+      dueDateAmount,
       chosenInstallments,
       currentSub.firstInstallmentDate,
       { payInFull: tp("payInFull"), dueNow: tp("dueNow") },
       currentSub,
     );
-  }, [total, currentSub, chosenInstallments, tp]);
+  }, [total, currentSub, chosenInstallments, tp, dueDateOverrideCents]);
 
   if (orderFullyRegisteredAndPaid) {
     return (
@@ -578,11 +698,11 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
               <h2 className="text-xl font-bold text-gray-900 mb-1">{t("alreadyRegistered")}</h2>
               <p className="text-sm text-gray-500">{t("alreadyRegisteredDesc")}</p>
               <div className="mt-3 inline-block bg-green-50 text-green-700 px-3 py-1.5 rounded-full text-sm font-medium">
-                {tp("alreadyPaid")} — ${centsToDisplay(initialOrder.paidCents)}
+                {tp("alreadyPaid")} — ${centsToDisplay(liveOrder.paidCents)}
               </div>
             </div>
             <hr className="my-6" />
-            <ContactForm activityId={activityId} activity={activity} order={initialOrder} t={t} tc={tc} />
+            <ContactForm activityId={activityId} activity={activity} order={liveOrder} t={t} tc={tc} />
           </div>
         </div>
       </div>
@@ -855,10 +975,10 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                 </button>
                 <button
                   onClick={completeStep2}
-                  disabled={!player.firstName || !player.lastName || !player.gender || !player.dob || playerCustomFields.some((f) => f.required && !formData[f.key])}
+                  disabled={savingDraft || !player.firstName || !player.lastName || !player.gender || !player.dob || playerCustomFields.some((f) => f.required && !formData[f.key])}
                   className="bg-blue-600 text-white px-8 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition"
                 >
-                  {tc("continue")}
+                  {savingDraft ? tc("saving") : tc("continue")}
                 </button>
               </div>
             </div>
@@ -922,10 +1042,10 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                 </button>
                 <button
                   onClick={completeWaivers}
-                  disabled={waivers.filter((w) => w.isRequired).some((w) => !waiverConsents[w._id])}
+                  disabled={savingDraft || waivers.filter((w) => w.isRequired).some((w) => !waiverConsents[w._id])}
                   className="bg-blue-600 text-white px-8 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition"
                 >
-                  {tc("continue")}
+                  {savingDraft ? tc("saving") : tc("continue")}
                 </button>
               </div>
             </div>
@@ -940,12 +1060,12 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                   </svg>
                 </div>
                 <p className="text-sm font-semibold text-green-800">{t("paymentAlreadyMade")}</p>
-                <p className="text-xs text-green-600 mt-1">{tp("alreadyPaid")} — ${centsToDisplay(initialOrder.paidCents)}</p>
+                <p className="text-xs text-green-600 mt-1">{tp("alreadyPaid")} — ${centsToDisplay(liveOrder.paidCents)}</p>
               </div>
 
               <p className="text-sm text-gray-500 mb-4">{t("paymentAlreadyMadeDesc")}</p>
 
-              <ContactForm activityId={activityId} activity={activity} order={initialOrder} t={t} tc={tc} />
+              <ContactForm activityId={activityId} activity={activity} order={liveOrder} t={t} tc={tc} />
 
               <div className="flex justify-start pt-4">
                 <button onClick={() => goToStep(hasWaivers ? waiverStepNum : 2)} className="text-sm text-gray-500 hover:text-gray-700 font-medium">
@@ -985,20 +1105,20 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                     <span className="font-medium">${centsToDisplay(subscriptionPriceCents)}</span>
                   </div>
                 )}
-                {currentSub?.items
-                  ?.filter((i) => i.isRequired && !i.isDiscount)
+                {getDisplayItems()
+                  .filter((i) => !i.isDiscount)
                   .map((item, idx) => (
-                    <div key={idx} className="flex justify-between text-sm">
+                    <div key={`chg-${idx}`} className="flex justify-between text-sm">
                       <span className="text-gray-600">
                         {item.name}{(item.quantity || 1) > 1 ? ` × ${item.quantity}` : ""}
                       </span>
                       <span className="font-medium">${centsToDisplay((item.priceCents || 0) * (item.quantity || 1))}</span>
                     </div>
                   ))}
-                {currentSub?.items
-                  ?.filter((i) => i.isDiscount)
+                {getDisplayItems()
+                  .filter((i) => i.isDiscount)
                   .map((item, idx) => (
-                    <div key={idx} className="flex justify-between text-sm text-green-700">
+                    <div key={`dsc-${idx}`} className="flex justify-between text-sm text-green-700">
                       <span>
                         {item.name}{(item.quantity || 1) > 1 ? ` × ${item.quantity}` : ""}
                       </span>
