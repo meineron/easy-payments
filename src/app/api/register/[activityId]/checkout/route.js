@@ -163,16 +163,19 @@ export async function POST(request, { params }) {
         stripeCoupon = await stripeClient.coupons.create({ amount_off: totalDiscount, currency: "usd", duration: "once", name: "Registration Discount" });
       }
 
+      let sessionProcFee = 0;
       if (activity?.passStripeFeeToCustomer) {
         const subtotal = lineItems.reduce((s, li) => s + li.price_data.unit_amount * li.quantity, 0) - totalDiscount;
         const procFee = computeProcessingFee(Math.max(0, subtotal));
         if (procFee > 0) {
           lineItems.push({ price_data: { currency: "usd", product_data: { name: "Processing Fee" }, unit_amount: procFee }, quantity: 1 });
           order.processingFeeCents = procFee;
+          sessionProcFee = procFee;
         }
       }
 
-      const sessionConfig = { mode: "payment", line_items: lineItems, success_url: successUrl, cancel_url: cancelUrl, customer_email: order.parent1Email || undefined, metadata, ...connectedArgs };
+      const sessionMetadata = { ...metadata, processingFeeCents: String(sessionProcFee) };
+      const sessionConfig = { mode: "payment", line_items: lineItems, success_url: successUrl, cancel_url: cancelUrl, customer_email: order.parent1Email || undefined, metadata: sessionMetadata, ...connectedArgs };
       if (stripeCoupon) sessionConfig.discounts = [{ coupon: stripeCoupon.id }];
 
       const session = await stripeClient.checkout.sessions.create(sessionConfig);
@@ -198,11 +201,13 @@ export async function POST(request, { params }) {
 
     const lineItems = [{ price_data: { currency: "usd", product_data: { name: `${order.subscriptionTitle || "Registration"} — Due Now` }, unit_amount: dueDateAmount }, quantity: 1 }];
 
+    let sessionProcFee = 0;
     if (activity?.passStripeFeeToCustomer) {
       const procFee = computeProcessingFee(dueDateAmount);
       if (procFee > 0) {
         lineItems.push({ price_data: { currency: "usd", product_data: { name: "Processing Fee" }, unit_amount: procFee }, quantity: 1 });
         order.processingFeeCents = procFee;
+        sessionProcFee = procFee;
       }
     }
 
@@ -217,7 +222,7 @@ export async function POST(request, { params }) {
         metadata,
         ...(connectedArgs.payment_intent_data || {}),
       },
-      metadata: { ...metadata, setupSubscription: "true", recurringAmount: String(recurringAmount), recurringCount: String(recurringCount), firstInstDate: firstInstDate ? firstInstDate.toISOString() : "" },
+      metadata: { ...metadata, setupSubscription: "true", recurringAmount: String(recurringAmount), recurringCount: String(recurringCount), firstInstDate: firstInstDate ? firstInstDate.toISOString() : "", processingFeeCents: String(sessionProcFee) },
     };
 
     const session = await stripeClient.checkout.sessions.create(sessionConfig);

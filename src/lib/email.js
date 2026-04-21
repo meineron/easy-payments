@@ -297,6 +297,33 @@ export async function sendStaffResetPasswordEmail(to, { staffName, clubName, tem
   await transporter.sendMail({ from: FROM(), to, subject: t(locale, "email", "staffResetSubject", { club: clubName }), html, attachments: logo.attachments });
 }
 
+function replacePersonalLinkTokens(html, url, buttonLabel, buttonColor) {
+  if (!html) return { html, replaced: false };
+  const tokens = ["personal_registration_link", "personal_payment_link", "personal_link"];
+  let replaced = false;
+  let out = html;
+
+  for (const name of tokens) {
+    const attrRe = new RegExp(`((?:href|src)\\s*=\\s*["'])(?:\\{|%7B)${name}(?:\\}|%7D)(["'])`, "gi");
+    if (attrRe.test(out)) {
+      replaced = true;
+      out = out.replace(attrRe, `$1${url}$2`);
+    }
+  }
+
+  const buttonHtml = `<div style="text-align:center;margin:16px 0;"><a href="${url}" style="display:inline-block;background:${buttonColor};color:#fff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:16px;">${buttonLabel}</a></div>`;
+
+  for (const name of tokens) {
+    const textRe = new RegExp(`(?:\\{|%7B)${name}(?:\\}|%7D)`, "gi");
+    if (textRe.test(out)) {
+      replaced = true;
+      out = out.replace(textRe, buttonHtml);
+    }
+  }
+
+  return { html: out, replaced };
+}
+
 export async function sendCustomRegistrationEmail(to, { subject, bodyHtml, playerName, clubName, activityTitle, registrationUrl, logoUrl, locale = "en" }) {
   const dir = getDir(locale);
   const attachments = [];
@@ -313,8 +340,23 @@ export async function sendCustomRegistrationEmail(to, { subject, bodyHtml, playe
     idx++;
   }
 
+  const tokenResult = replacePersonalLinkTokens(
+    processedBody,
+    registrationUrl,
+    t(locale, "email", "regLinkButton"),
+    "#2563eb",
+  );
+  processedBody = tokenResult.html;
+
   const logo = prepareLogoHeader(logoUrl, clubName);
   attachments.push(...logo.attachments);
+
+  const fallbackCta = tokenResult.replaced ? "" : `
+      <div style="text-align: center; margin-bottom: 24px;">
+        <a href="${registrationUrl}" style="display: inline-block; background: #2563eb; color: #fff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px;">
+          ${t(locale, "email", "regLinkButton")}
+        </a>
+      </div>`;
 
   const html = `
     <div dir="${dir}" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 40px 20px; direction: ${dir};">
@@ -326,11 +368,7 @@ export async function sendCustomRegistrationEmail(to, { subject, bodyHtml, playe
         <p style="margin:0 0 4px;color:#6b7280;">${t(locale, "email", "paymentPlayer")} <strong style="color:#111827;">${playerName}</strong></p>
         <p style="margin:0 0 4px;color:#6b7280;">${t(locale, "email", "invoiceActivity")} <strong style="color:#111827;">${activityTitle}</strong></p>
       </div>
-      <div style="text-align: center; margin-bottom: 24px;">
-        <a href="${registrationUrl}" style="display: inline-block; background: #2563eb; color: #fff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px;">
-          ${t(locale, "email", "regLinkButton")}
-        </a>
-      </div>
+      ${fallbackCta}
       <p style="color: #9ca3af; font-size: 12px;">
         ${t(locale, "email", "regLinkIgnore")}
       </p>
@@ -361,8 +399,23 @@ export async function sendCustomPaymentEmail(to, { subject, bodyHtml, playerName
     idx++;
   }
 
+  const tokenResult = replacePersonalLinkTokens(
+    processedBody,
+    paymentUrl,
+    t(locale, "email", "payNowButton"),
+    "#16a34a",
+  );
+  processedBody = tokenResult.html;
+
   const logo = prepareLogoHeader(logoUrl, clubName);
   attachments.push(...logo.attachments);
+
+  const fallbackCta = tokenResult.replaced ? "" : `
+      <div style="text-align: center; margin-bottom: 24px;">
+        <a href="${paymentUrl}" style="display: inline-block; background: #16a34a; color: #fff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px;">
+          ${t(locale, "email", "payNowButton")}
+        </a>
+      </div>`;
 
   const html = `
     <div dir="${dir}" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 40px 20px; direction: ${dir};">
@@ -375,11 +428,7 @@ export async function sendCustomPaymentEmail(to, { subject, bodyHtml, playerName
         <p style="margin:0 0 4px;color:#6b7280;">${t(locale, "email", "invoiceActivity")} <strong style="color:#111827;">${activityTitle}</strong></p>
         ${totalAmount ? `<p style="margin:0;color:#6b7280;">${t(locale, "email", "paymentAmount", { amount: `<strong style="color:#111827;">${totalAmount}</strong>` })}</p>` : ""}
       </div>
-      <div style="text-align: center; margin-bottom: 24px;">
-        <a href="${paymentUrl}" style="display: inline-block; background: #16a34a; color: #fff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px;">
-          ${t(locale, "email", "payNowButton")}
-        </a>
-      </div>
+      ${fallbackCta}
       <p style="color: #9ca3af; font-size: 12px;">
         ${t(locale, "email", "paymentIgnore")}
       </p>

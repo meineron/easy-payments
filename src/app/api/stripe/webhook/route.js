@@ -8,6 +8,11 @@ import Registration from "@/models/Registration";
 import Order from "@/models/Order";
 import PaymentRequest from "@/models/PaymentRequest";
 
+// Generating the registration PDF + sending multiple emails can easily exceed
+// the default 10s serverless timeout. 60s is the hard ceiling Vercel allows
+// for standard serverless functions and gives us ample headroom.
+export const maxDuration = 60;
+
 export async function POST(request) {
   const body = await request.text();
   const signature = request.headers.get("stripe-signature");
@@ -52,13 +57,18 @@ export async function POST(request) {
 
       if (!clubId) break;
 
-      const existing = await Transaction.findOne({ stripeSessionId: session.id });
-      if (existing) break;
+      // We used to `break` here on duplicate delivery, but that also skipped
+      // the email side-effects. Now we just skip the Transaction.create so
+      // Stripe's automatic retries can re-attempt any email that hasn't
+      // been recorded as sent yet. Each downstream side-effect is guarded
+      // by its own idempotency marker (paidCents via stripeSessionId check,
+      // invoiceSentAt, registrationEmailSentAt, etc.).
+      const alreadyRecordedTransaction = !!(await Transaction.findOne({ stripeSessionId: session.id }));
 
       let invoiceUrl = null;
       let invoicePdf = null;
 
-      if (session.invoice) {
+      if (!alreadyRecordedTransaction && session.invoice) {
         try {
           const invoice = await stripe.invoices.retrieve(session.invoice);
           invoiceUrl = invoice.hosted_invoice_url;
@@ -68,19 +78,28 @@ export async function POST(request) {
         }
       }
 
-      await Transaction.create({
-        clubId,
-        orderId: session.metadata?.orderId || null,
-        stripeSessionId: session.id,
-        stripePaymentIntentId: session.payment_intent,
-        amount: session.amount_total,
-        applicationFee: 100,
-        currency: session.currency,
-        status: session.payment_status === "paid" ? "succeeded" : "pending",
-        invoiceUrl,
-        invoicePdf,
-        customerEmail: session.customer_details?.email || null,
-      });
+      if (!alreadyRecordedTransaction) {
+        try {
+          await Transaction.create({
+            clubId,
+            orderId: session.metadata?.orderId || null,
+            stripeSessionId: session.id,
+            stripePaymentIntentId: session.payment_intent,
+            amount: session.amount_total,
+            applicationFee: 100,
+            currency: session.currency,
+            status: session.payment_status === "paid" ? "succeeded" : "pending",
+            invoiceUrl,
+            invoicePdf,
+            customerEmail: session.customer_details?.email || null,
+          });
+        } catch (err) {
+          // Duplicate key is fine — another retry beat us to it.
+          if (err.code !== 11000) {
+            console.error("Failed to record transaction:", err.message);
+          }
+        }
+      }
 
       const registrationId = session.metadata?.registrationId;
       if (registrationId && session.payment_status === "paid") {
@@ -119,78 +138,96 @@ export async function POST(request) {
         try {
           const order = await Order.findById(activityOrderId);
           if (order) {
-            order.paidCents = (order.paidCents || 0) + session.amount_total;
-            order.stripeSessionId = session.id;
-            order.stripePaymentIntentId = session.payment_intent || "";
-            order.registrationCompletedAt = order.registrationCompletedAt || new Date();
+            // The parent may have been charged a pass-through Stripe processing fee
+            // on top of the order amount. Exclude that fee when tallying paidCents
+            // so the club only sees what was actually applied to the invoice.
+            const procFeeInSession = parseInt(session.metadata?.processingFeeCents || "0", 10) || 0;
+            const netAmountPaid = Math.max(0, (session.amount_total || 0) - procFeeInSession);
 
-            if (order.installmentSchedule?.length > 0) {
-              const firstPending = order.installmentSchedule.find((i) => i.status === "pending");
-              if (firstPending) { firstPending.status = "paid"; firstPending.paidAt = new Date(); firstPending.paymentMethod = "card"; }
-            }
+            // Idempotency guard: if this exact session was already applied to this
+            // order, skip the financial mutation so retries don't double-add paidCents.
+            // Emails further below still re-attempt based on their own markers.
+            const alreadyApplied = order.stripeSessionId === session.id && !!order.registrationCompletedAt;
 
-            const needsSubscription = session.metadata?.setupSubscription === "true";
-            const recurringAmount = parseInt(session.metadata?.recurringAmount || "0", 10);
-            const recurringCount = parseInt(session.metadata?.recurringCount || "0", 10);
+            if (!alreadyApplied) {
+              order.paidCents = (order.paidCents || 0) + netAmountPaid;
+              order.stripeSessionId = session.id;
+              order.stripePaymentIntentId = session.payment_intent || "";
+              order.registrationCompletedAt = order.registrationCompletedAt || new Date();
 
-            if (needsSubscription && recurringAmount > 0 && recurringCount > 0) {
-              order.status = "partial";
-              try {
-                const clubForSub = await Club.findById(order.clubId, "hasDirectStripeAccess stripeSecretKey stripeAccountId").lean();
-                let subStripe;
-                if (clubForSub.hasDirectStripeAccess && clubForSub.stripeSecretKey) {
-                  subStripe = new Stripe(clubForSub.stripeSecretKey);
-                } else {
-                  subStripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-                }
+              if (order.installmentSchedule?.length > 0) {
+                const firstPending = order.installmentSchedule.find((i) => i.status === "pending");
+                if (firstPending) { firstPending.status = "paid"; firstPending.paidAt = new Date(); firstPending.paymentMethod = "card"; }
+              }
 
-                const customerId = order.stripeCustomerId || session.customer;
-                if (customerId) {
-                  const price = await subStripe.prices.create({
-                    currency: "usd", unit_amount: recurringAmount,
-                    recurring: { interval: "month" },
-                    product_data: { name: `${order.subscriptionTitle || "Registration"} Installment` },
-                  });
+              const needsSubscription = session.metadata?.setupSubscription === "true";
+              const recurringAmount = parseInt(session.metadata?.recurringAmount || "0", 10);
+              const recurringCount = parseInt(session.metadata?.recurringCount || "0", 10);
 
-                  const firstInstDate = session.metadata?.firstInstDate;
-                  const billingAnchor = firstInstDate ? Math.floor(new Date(firstInstDate).getTime() / 1000) : undefined;
-
-                  const subParams = {
-                    customer: customerId,
-                    items: [{ price: price.id }],
-                    default_payment_method: session.payment_intent ? (await subStripe.paymentIntents.retrieve(session.payment_intent)).payment_method : undefined,
-                    metadata: { orderId: String(order._id), activityId: String(order.activityId), clubId: String(order.clubId) },
-                    cancel_after: recurringCount,
-                  };
-                  if (billingAnchor) {
-                    subParams.billing_cycle_anchor = billingAnchor;
-                    subParams.proration_behavior = "none";
+              if (needsSubscription && recurringAmount > 0 && recurringCount > 0 && !order.stripeSubscriptionId) {
+                order.status = "partial";
+                try {
+                  const clubForSub = await Club.findById(order.clubId, "hasDirectStripeAccess stripeSecretKey stripeAccountId").lean();
+                  let subStripe;
+                  if (clubForSub.hasDirectStripeAccess && clubForSub.stripeSecretKey) {
+                    subStripe = new Stripe(clubForSub.stripeSecretKey);
+                  } else {
+                    subStripe = new Stripe(process.env.STRIPE_SECRET_KEY);
                   }
 
-                  const stripeSub = await subStripe.subscriptions.create(subParams);
-                  order.stripeSubscriptionId = stripeSub.id;
-                  order.stripeCustomerId = customerId;
+                  const customerId = order.stripeCustomerId || session.customer;
+                  if (customerId) {
+                    const price = await subStripe.prices.create({
+                      currency: "usd", unit_amount: recurringAmount,
+                      recurring: { interval: "month" },
+                      product_data: { name: `${order.subscriptionTitle || "Registration"} Installment` },
+                    });
+
+                    const firstInstDate = session.metadata?.firstInstDate;
+                    const billingAnchor = firstInstDate ? Math.floor(new Date(firstInstDate).getTime() / 1000) : undefined;
+
+                    const subParams = {
+                      customer: customerId,
+                      items: [{ price: price.id }],
+                      default_payment_method: session.payment_intent ? (await subStripe.paymentIntents.retrieve(session.payment_intent)).payment_method : undefined,
+                      metadata: { orderId: String(order._id), activityId: String(order.activityId), clubId: String(order.clubId) },
+                      cancel_after: recurringCount,
+                    };
+                    if (billingAnchor) {
+                      subParams.billing_cycle_anchor = billingAnchor;
+                      subParams.proration_behavior = "none";
+                    }
+
+                    const stripeSub = await subStripe.subscriptions.create(subParams);
+                    order.stripeSubscriptionId = stripeSub.id;
+                    order.stripeCustomerId = customerId;
+                  }
+                } catch (subErr) {
+                  console.error("Failed to create installment subscription:", subErr.message);
                 }
-              } catch (subErr) {
-                console.error("Failed to create installment subscription:", subErr.message);
+              } else {
+                order.status = order.paidCents >= order.totalCostCents ? "paid" : "partial";
               }
-            } else {
-              order.status = order.paidCents >= order.totalCostCents ? "paid" : "partial";
+
+              await order.save();
+
+              try {
+                const { markPlayerRegisteredForTeam } = await import("@/lib/order-sync");
+                await markPlayerRegisteredForTeam(order.playerId, order.teamId, order.registrationCompletedAt);
+              } catch (e) { console.error("Mark player registered (webhook):", e.message); }
             }
 
-            await order.save();
+            // --- EMAIL SIDE-EFFECTS (idempotent, retry-safe) -----------------
+            // Each email is gated by its own "sentAt" marker so that a retried
+            // webhook will only re-attempt whichever emails didn't succeed on
+            // the previous try.
 
-            try {
-              const { markPlayerRegisteredForTeam } = await import("@/lib/order-sync");
-              await markPlayerRegisteredForTeam(order.playerId, order.teamId, order.registrationCompletedAt);
-            } catch (e) { console.error("Mark player registered (webhook):", e.message); }
-
-            try {
-              const { sendInvoiceEmail } = await import("@/lib/email");
-              const Activity = (await import("@/models/Activity")).default;
-              const activityDoc = await Activity.findById(order.activityId, "title clubId").lean();
-              const clubDoc = await Club.findById(order.clubId, "name logoUrl language").lean();
-              if (order.parent1Email) {
+            if (!order.invoiceSentAt && order.parent1Email) {
+              try {
+                const { sendInvoiceEmail } = await import("@/lib/email");
+                const Activity = (await import("@/models/Activity")).default;
+                const activityDoc = await Activity.findById(order.activityId, "title clubId").lean();
+                const clubDoc = await Club.findById(order.clubId, "name logoUrl language").lean();
                 await sendInvoiceEmail(order.parent1Email, {
                   playerName: `${order.playerFirstName} ${order.playerLastName}`,
                   clubName: clubDoc?.name || "",
@@ -199,25 +236,29 @@ export async function POST(request) {
                   subscriptionTitle: order.subscriptionTitle || "",
                   items: order.items || [],
                   totalCents: order.totalCostCents,
-                  paidCents: session.amount_total,
+                  paidCents: netAmountPaid,
                   logoUrl: clubDoc?.logoUrl || null,
                   locale: clubDoc?.language || "en",
                 });
                 order.invoiceSentAt = new Date();
                 await order.save();
+              } catch (emailErr) {
+                console.error("Failed to send invoice email:", emailErr.message);
               }
-            } catch (emailErr) {
-              console.error("Failed to send invoice email:", emailErr.message);
             }
 
-            try {
-              const { sendRegistrationPDFEmail } = await import("@/lib/registration-email");
-              await sendRegistrationPDFEmail(order);
-            } catch (pdfErr) {
-              console.error("Failed to send registration PDF:", pdfErr.message);
+            if (!order.registrationEmailSentAt) {
+              try {
+                const { sendRegistrationPDFEmail } = await import("@/lib/registration-email");
+                await sendRegistrationPDFEmail(order);
+                order.registrationEmailSentAt = new Date();
+                await order.save();
+              } catch (pdfErr) {
+                console.error("Failed to send registration PDF:", pdfErr.message);
+              }
             }
 
-            console.log(`Activity order ${activityOrderId} updated: paid ${session.amount_total}`);
+            console.log(`Activity order ${activityOrderId} processed: net paid ${netAmountPaid} (gross ${session.amount_total}, proc fee ${procFeeInSession}), applied=${!alreadyApplied}, invoiceSent=${!!order.invoiceSentAt}, regEmailSent=${!!order.registrationEmailSentAt}`);
           }
         } catch (orderErr) {
           console.error("Failed to update activity order:", orderErr.message);

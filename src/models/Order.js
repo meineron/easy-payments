@@ -87,6 +87,7 @@ const OrderSchema = new mongoose.Schema({
   stripePaymentIntentId: { type: String, default: "" },
   registrationCompletedAt: { type: Date, default: null },
   invoiceSentAt: { type: Date, default: null },
+  registrationEmailSentAt: { type: Date, default: null },
   linkSentAt: { type: Date, default: null },
   paymentLinkSentAt: { type: Date, default: null },
 

@@ -47,6 +47,14 @@ export default function SendBulkLinksModal({ type, activityId, activity, orders,
     if (url) execCmd("createLink", url);
   }
 
+  const personalLinkToken = type === "payment" ? "{personal_payment_link}" : "{personal_registration_link}";
+
+  function insertPersonalLink() {
+    bodyRef.current?.focus();
+    document.execCommand("insertText", false, personalLinkToken);
+    if (bodyRef.current) setBodyHtml(bodyRef.current.innerHTML);
+  }
+
   function handleImageUpload(e) {
     const file = e.target.files?.[0];
     if (!file || !file.type.startsWith("image/")) return;
@@ -213,6 +221,19 @@ export default function SendBulkLinksModal({ type, activityId, activity, orders,
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">{td("emailMessage")}</label>
+
+                <div className="mb-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+                  <p className="font-semibold mb-1">
+                    {td(type === "payment" ? "personalLinkBoxTitlePayment" : "personalLinkBoxTitleRegistration")}
+                  </p>
+                  <p className="mb-1">
+                    {td(type === "payment" ? "personalLinkBoxLine1Payment" : "personalLinkBoxLine1Registration")}
+                    {" "}
+                    <code className="inline-block bg-white border border-blue-200 rounded px-1.5 py-0.5 font-mono text-[11px] text-blue-700 select-all">{personalLinkToken}</code>
+                  </p>
+                  <p>{td("personalLinkBoxLine2")}</p>
+                </div>
+
                 <div className="border rounded-lg overflow-hidden">
                   <div className="flex items-center gap-0.5 px-2 py-1.5 bg-gray-50 border-b flex-wrap">
                     <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("bold"); }} className="px-2 py-1 rounded text-sm font-bold hover:bg-gray-200">{td("bold")}</button>
@@ -225,6 +246,10 @@ export default function SendBulkLinksModal({ type, activityId, activity, orders,
                     <button type="button" onMouseDown={(e) => { e.preventDefault(); insertLink(); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200 text-blue-600">{td("link")}</button>
                     <button type="button" onMouseDown={(e) => { e.preventDefault(); imgInputRef.current?.click(); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200">{td("image")}</button>
                     <input ref={imgInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+                    <div className="w-px h-5 bg-gray-300 mx-1" />
+                    <button type="button" onMouseDown={(e) => { e.preventDefault(); insertPersonalLink(); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200 text-purple-600 font-medium" title={personalLinkToken}>
+                      {td("insertPersonalLink")}
+                    </button>
                   </div>
                   <div ref={bodyRef} contentEditable suppressContentEditableWarning
                     onBlur={() => { if (bodyRef.current) setBodyHtml(bodyRef.current.innerHTML); }}
