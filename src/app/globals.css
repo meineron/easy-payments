@@ -18,14 +18,30 @@ body {
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
 
-/* Prevent date/time inputs from overflowing their container on iOS/Safari */
+/* iOS Safari renders native date/time controls using OS chrome that ignores
+ * `max-width` — it sizes to the intrinsic width of the picker indicator plus
+ * the formatted date text, which overflows narrow grid columns. Stripping
+ * `-webkit-appearance` restores box-model sizing so `width: 100%` is honored.
+ * `display: block` kills the residual baseline/inline-block intrinsic width
+ * some WebKit builds still apply. */
 input[type="date"],
 input[type="datetime-local"],
 input[type="time"],
 input[type="month"],
 input[type="week"] {
+  display: block;
+  width: 100%;
   min-width: 0;
   max-width: 100%;
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* On empty state iOS sometimes centers the placeholder via text-align; keep
+ * content aligned with the other inputs. */
+input[type="date"]::-webkit-date-and-time-value {
+  text-align: start;
 }
 
 [dir="rtl"] {

@@ -7,16 +7,18 @@ export async function GET(request, { params }) {
   const { id } = await params;
 
   await dbConnect();
-  const club = await Club.findById(id).select("-password -stripeSecretKey");
+  const club = await Club.findById(id).select("-password -stripeSecretKey -stripeWebhookSecret");
 
   if (!club) {
     return NextResponse.json({ error: "Club not found" }, { status: 404 });
   }
 
-  const hasKey = !!(await Club.findById(id).select("stripeSecretKey")).stripeSecretKey;
+  const secrets = await Club.findById(id).select("stripeSecretKey stripeWebhookSecret");
+  const hasKey = !!secrets?.stripeSecretKey;
+  const hasWebhookSecret = !!secrets?.stripeWebhookSecret;
 
   return NextResponse.json({
-    club: { ...club.toObject(), hasStripeKey: hasKey },
+    club: { ...club.toObject(), hasStripeKey: hasKey, hasWebhookSecret },
   });
 }
 
@@ -25,7 +27,7 @@ export async function PUT(request, { params }) {
 
   try {
     const body = await request.json();
-    const { name, hasDirectStripeAccess, stripeSecretKey } = body;
+    const { name, hasDirectStripeAccess, stripeSecretKey, stripeWebhookSecret } = body;
 
     await dbConnect();
     const club = await Club.findById(id);
@@ -55,6 +57,7 @@ export async function PUT(request, { params }) {
 
       club.hasDirectStripeAccess = false;
       club.stripeSecretKey = null;
+      club.stripeWebhookSecret = null;
       club.stripeAccountId = account.id;
       club.onboardingComplete = false;
     } else if (!wasDirectAccess && wantDirectAccess) {
@@ -76,12 +79,18 @@ export async function PUT(request, { params }) {
 
       club.hasDirectStripeAccess = true;
       club.stripeSecretKey = stripeSecretKey;
+      if (typeof stripeWebhookSecret === "string" && stripeWebhookSecret.trim()) {
+        club.stripeWebhookSecret = stripeWebhookSecret.trim();
+      }
       club.stripeAccountId = null;
       club.onboardingComplete = true;
     } else if (wantDirectAccess && wasDirectAccess) {
-      // Staying on Direct Access — update the key if provided
+      // Staying on Direct Access — update the key/webhook secret if provided
       if (stripeSecretKey) {
         club.stripeSecretKey = stripeSecretKey;
+      }
+      if (typeof stripeWebhookSecret === "string" && stripeWebhookSecret.trim()) {
+        club.stripeWebhookSecret = stripeWebhookSecret.trim();
       }
     }
 
@@ -95,6 +104,7 @@ export async function PUT(request, { params }) {
         stripeAccountId: club.stripeAccountId,
         hasDirectStripeAccess: club.hasDirectStripeAccess,
         onboardingComplete: club.onboardingComplete,
+        hasWebhookSecret: !!club.stripeWebhookSecret,
       },
     });
   } catch (error) {

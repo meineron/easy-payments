@@ -12,7 +12,7 @@ export async function GET() {
 
 export async function POST(request) {
   try {
-    const { name, username, password, hasDirectStripeAccess, stripeSecretKey } = await request.json();
+    const { name, username, password, hasDirectStripeAccess, stripeSecretKey, stripeWebhookSecret } = await request.json();
 
     if (!name || !username || !password) {
       return NextResponse.json({ error: "All fields are required" }, { status: 400 });
@@ -44,6 +44,9 @@ export async function POST(request) {
 
     if (hasDirectStripeAccess) {
       clubData.stripeSecretKey = stripeSecretKey;
+      if (typeof stripeWebhookSecret === "string" && stripeWebhookSecret.trim()) {
+        clubData.stripeWebhookSecret = stripeWebhookSecret.trim();
+      }
       clubData.onboardingComplete = true;
     } else {
       const account = await stripe.accounts.create({

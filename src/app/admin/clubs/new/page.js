@@ -11,6 +11,7 @@ export default function CreateClub() {
   const [password, setPassword] = useState("");
   const [hasDirectStripeAccess, setHasDirectStripeAccess] = useState(false);
   const [stripeSecretKey, setStripeSecretKey] = useState("");
+  const [stripeWebhookSecret, setStripeWebhookSecret] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -22,6 +23,9 @@ export default function CreateClub() {
     const payload = { name, username, password, hasDirectStripeAccess };
     if (hasDirectStripeAccess) {
       payload.stripeSecretKey = stripeSecretKey;
+      if (stripeWebhookSecret) {
+        payload.stripeWebhookSecret = stripeWebhookSecret;
+      }
     }
 
     const res = await fetch("/api/admin/clubs", {
@@ -106,7 +110,10 @@ export default function CreateClub() {
                 checked={hasDirectStripeAccess}
                 onChange={(e) => {
                   setHasDirectStripeAccess(e.target.checked);
-                  if (!e.target.checked) setStripeSecretKey("");
+                  if (!e.target.checked) {
+                    setStripeSecretKey("");
+                    setStripeWebhookSecret("");
+                  }
                 }}
                 className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
               />
@@ -132,6 +139,25 @@ export default function CreateClub() {
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-gray-900 font-mono text-sm"
                   placeholder="sk_test_... or sk_live_..."
                 />
+
+                <div className="mt-3">
+                  <label htmlFor="stripeWebhookSecret" className="block text-sm font-medium text-gray-700 mb-1">
+                    Stripe Webhook Signing Secret
+                    <span className="text-xs text-gray-400 font-normal ml-2">(optional — can be added later)</span>
+                  </label>
+                  <input
+                    id="stripeWebhookSecret"
+                    type="password"
+                    value={stripeWebhookSecret}
+                    onChange={(e) => setStripeWebhookSecret(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-gray-900 font-mono text-sm"
+                    placeholder="whsec_..."
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    From this club&apos;s Stripe Dashboard → Developers → Webhooks → endpoint for{" "}
+                    <code className="bg-gray-100 px-1 rounded">payments.easycoach.club/api/stripe/webhook</code> → Signing secret.
+                  </p>
+                </div>
               </div>
             )}
           </div>
