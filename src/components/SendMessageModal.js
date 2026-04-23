@@ -2,10 +2,25 @@
 
 import { useState, useRef } from "react";
 import { useTranslations } from "next-intl";
+import RichTextEditor from "@/components/RichTextEditor";
 
-export default function SendMessageModal({ recipient, onClose, onSent }) {
+export default function SendMessageModal({
+  recipient,
+  recipients: recipientsProp,
+  onClose,
+  onSent,
+  endpoint = "/api/messages",
+  extraPayload = null,
+}) {
   const t = useTranslations("messages");
   const tc = useTranslations("common");
+
+  const recipientsList = Array.isArray(recipientsProp) && recipientsProp.length > 0
+    ? recipientsProp
+    : recipient
+      ? [recipient]
+      : [];
+  const isBulk = recipientsList.length > 1;
 
   const [channel, setChannel] = useState("email");
   const [subject, setSubject] = useState("");
@@ -15,21 +30,27 @@ export default function SendMessageModal({ recipient, onClose, onSent }) {
   const [smsNotificationText, setSmsNotificationText] = useState("");
   const [sending, setSending] = useState(false);
   const [toast, setToast] = useState(null);
-  const bodyRef = useRef(null);
+  const editorRef = useRef(null);
 
-  function execCmd(cmd, val = null) {
-    bodyRef.current?.focus();
-    document.execCommand(cmd, false, val);
-  }
-
-  function insertLink() {
-    const url = prompt(t("enterUrl"));
-    if (url) execCmd("createLink", url);
+  function buildRecipientsPayload() {
+    return recipientsList.map((r) => ({
+      type: r.type,
+      id: r.id,
+      name: r.name,
+      email: r.email || "",
+      phonePrefix: r.phonePrefix || "",
+      phone: r.phone || "",
+    }));
   }
 
   async function handleSend() {
+    if (recipientsList.length === 0) {
+      setToast({ message: t("recipientsRequired"), type: "error" });
+      return;
+    }
+
     if (channel === "email") {
-      const html = bodyRef.current?.innerHTML || bodyHtml;
+      const html = editorRef.current?.getHtml() || bodyHtml;
       if (!subject.trim()) { setToast({ message: t("subjectRequired"), type: "error" }); return; }
       if (!html.trim() || html === "<br>") { setToast({ message: t("bodyRequired"), type: "error" }); return; }
 
@@ -39,14 +60,15 @@ export default function SendMessageModal({ recipient, onClose, onSent }) {
           channel: "email",
           subject: subject.trim(),
           bodyHtml: html,
-          recipients: [{ type: recipient.type, id: recipient.id, name: recipient.name, email: recipient.email }],
+          recipients: buildRecipientsPayload(),
+          ...(extraPayload || {}),
         };
         if (smsNotification) {
           payload.smsNotification = true;
           const rawText = smsNotificationText || `${t("smsNotificationPrefix")}\n${t("smsNotificationSubjectLabel")} {email_subject}`;
           payload.smsText = rawText.replace(/\{email_subject\}/g, subject.trim());
         }
-        const res = await fetch("/api/messages", {
+        const res = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -67,14 +89,15 @@ export default function SendMessageModal({ recipient, onClose, onSent }) {
 
       setSending(true);
       try {
-        const res = await fetch("/api/messages", {
+        const res = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             channel: "sms",
             subject: "SMS",
             bodyText: bodyText.trim(),
-            recipients: [{ type: recipient.type, id: recipient.id, name: recipient.name, email: recipient.email, phonePrefix: recipient.phonePrefix || "", phone: recipient.phone || "" }],
+            recipients: buildRecipientsPayload(),
+            ...(extraPayload || {}),
           }),
         });
         const d = await res.json();
@@ -91,6 +114,8 @@ export default function SendMessageModal({ recipient, onClose, onSent }) {
     }
   }
 
+  const primary = recipientsList[0];
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
@@ -100,15 +125,35 @@ export default function SendMessageModal({ recipient, onClose, onSent }) {
         </div>
         <div className="p-6 space-y-4">
 
-          {/* Recipient */}
-          <div className="bg-gray-50 rounded-lg p-3 flex items-center gap-2">
-            <span className="text-sm font-medium text-gray-500">{t("to")}:</span>
-            <span className="text-sm font-medium text-gray-900">{recipient.name}</span>
-            {recipient.email && <span className="text-xs text-gray-400">{recipient.email}</span>}
-            {recipient.phone && <span className="text-xs text-gray-400">{recipient.phone}</span>}
+          <div className="bg-gray-50 rounded-lg p-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-medium text-gray-500">{t("to")}:</span>
+              {isBulk ? (
+                <span className="text-sm font-medium text-gray-900">
+                  {recipientsList.length} {t("recipients")}
+                </span>
+              ) : primary ? (
+                <>
+                  <span className="text-sm font-medium text-gray-900">{primary.name}</span>
+                  {primary.email && <span className="text-xs text-gray-400">{primary.email}</span>}
+                  {primary.phone && <span className="text-xs text-gray-400" dir="ltr">{primary.phonePrefix} {primary.phone}</span>}
+                </>
+              ) : null}
+            </div>
+            {isBulk && (
+              <div className="mt-2 flex flex-wrap gap-1 max-h-20 overflow-y-auto">
+                {recipientsList.slice(0, 20).map((r, i) => (
+                  <span key={i} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-700">
+                    {r.name}
+                  </span>
+                ))}
+                {recipientsList.length > 20 && (
+                  <span className="text-xs text-gray-400">+{recipientsList.length - 20}</span>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* Channel */}
           <div className="flex items-center gap-3">
             <div className="flex bg-gray-100 rounded-lg p-0.5">
               <button type="button" onClick={() => setChannel("email")}
@@ -128,20 +173,14 @@ export default function SendMessageModal({ recipient, onClose, onSent }) {
                 placeholder={t("subjectPlaceholder")}
                 className="w-full border rounded-lg px-3 py-2 text-sm" />
 
-              <div className="border rounded-lg overflow-hidden">
-                <div className="flex items-center gap-0.5 px-2 py-1.5 bg-gray-50 border-b flex-wrap">
-                  <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("bold"); }} className="px-2 py-1 rounded text-sm font-bold hover:bg-gray-200">B</button>
-                  <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("italic"); }} className="px-2 py-1 rounded text-sm italic hover:bg-gray-200">I</button>
-                  <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("underline"); }} className="px-2 py-1 rounded text-sm underline hover:bg-gray-200">U</button>
-                  <div className="w-px h-5 bg-gray-300 mx-1" />
-                  <button type="button" onMouseDown={(e) => { e.preventDefault(); insertLink(); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200 text-blue-600">{t("link")}</button>
-                </div>
-                <div ref={bodyRef} contentEditable suppressContentEditableWarning
-                  onBlur={() => { if (bodyRef.current) setBodyHtml(bodyRef.current.innerHTML); }}
-                  className="px-3 py-2 text-sm min-h-[150px] focus:outline-none"
-                  style={{ overflowY: "auto", maxHeight: "250px" }}
-                />
-              </div>
+              <RichTextEditor
+                ref={editorRef}
+                value={bodyHtml}
+                onChange={setBodyHtml}
+                minHeight={150}
+                maxHeight={250}
+                compact
+              />
 
               <label className="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" checked={smsNotification} onChange={(e) => {

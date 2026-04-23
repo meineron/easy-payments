@@ -189,6 +189,12 @@ export async function PUT(request, { params }) {
           const { sendRegistrationPDFEmail } = await import("@/lib/registration-email");
           await sendRegistrationPDFEmail(order);
         } catch (e) { console.error("Registration PDF email (token):", e); }
+        try {
+          if ((activity.waivers || []).length > 0 && !activity.waiverEmailConfirmation) {
+            const { sendWaiverConfirmationPDFEmail } = await import("@/lib/waiver-confirmation-email");
+            await sendWaiverConfirmationPDFEmail(order);
+          }
+        } catch (e) { console.error("Waiver PDF email (token):", e); }
       }
 
       const populated = await Order.findById(order._id).populate("teamId", "name season gender").lean();
@@ -282,6 +288,12 @@ export async function PUT(request, { params }) {
           const { sendRegistrationPDFEmail } = await import("@/lib/registration-email");
           await sendRegistrationPDFEmail(existing);
         } catch (e) { console.error("Registration PDF email (public update):", e); }
+        try {
+          if ((activity.waivers || []).length > 0 && !activity.waiverEmailConfirmation) {
+            const { sendWaiverConfirmationPDFEmail } = await import("@/lib/waiver-confirmation-email");
+            await sendWaiverConfirmationPDFEmail(existing);
+          }
+        } catch (e) { console.error("Waiver PDF email (public update):", e); }
       }
 
       const populated = await Order.findById(existing._id).populate("teamId", "name season gender").lean();
@@ -350,6 +362,12 @@ export async function PUT(request, { params }) {
         const { sendRegistrationPDFEmail } = await import("@/lib/registration-email");
         await sendRegistrationPDFEmail(order);
       } catch (e) { console.error("Registration PDF email:", e); }
+      try {
+        if ((activity.waivers || []).length > 0 && !activity.waiverEmailConfirmation) {
+          const { sendWaiverConfirmationPDFEmail } = await import("@/lib/waiver-confirmation-email");
+          await sendWaiverConfirmationPDFEmail(order);
+        }
+      } catch (e) { console.error("Waiver PDF email (public create):", e); }
     }
 
     const populated = await Order.findById(order._id).populate("teamId", "name season gender").lean();

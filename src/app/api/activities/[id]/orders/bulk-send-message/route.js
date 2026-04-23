@@ -1,0 +1,220 @@
+import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import dbConnect from "@/lib/mongodb";
+import crypto from "crypto";
+import Order from "@/models/Order";
+import Activity from "@/models/Activity";
+import Club from "@/models/Club";
+import Message from "@/models/Message";
+import { sendCustomRegistrationEmail } from "@/lib/email";
+import { sendSMS, toE164 } from "@/lib/sms";
+
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+function contactsForOrder(order, target) {
+  const out = [];
+  const pushParent = (idx) => {
+    const prefix = `parent${idx}`;
+    const firstName = order[`${prefix}FirstName`];
+    if (!firstName) return;
+    const lastName = order[`${prefix}LastName`] || "";
+    const email = order[`${prefix}Email`] || "";
+    const phonePrefix = order[`${prefix}PhonePrefix`] || "+1";
+    const phone = order[`${prefix}Phone`] || "";
+    if (!email && !phone) return;
+    out.push({
+      role: prefix,
+      type: "parent",
+      id: String(order._id),
+      name: `${firstName} ${lastName}`.trim(),
+      email,
+      phonePrefix,
+      phone,
+    });
+  };
+  const pushPlayer = () => {
+    const email = order.playerEmail || "";
+    const phone = order.playerPhone || "";
+    if (!email && !phone) return;
+    out.push({
+      role: "player",
+      type: "player",
+      id: String(order.playerId || order._id),
+      name: `${order.playerFirstName || ""} ${order.playerLastName || ""}`.trim(),
+      email,
+      phonePrefix: order.playerPhonePrefix || "+1",
+      phone,
+    });
+  };
+
+  if (target === "parents" || target === "both") {
+    pushParent(1);
+    pushParent(2);
+  }
+  if (target === "player" || target === "both") {
+    pushPlayer();
+  }
+  return out;
+}
+
+function substituteTextTokens(text, url) {
+  if (!text) return text;
+  return text
+    .replace(/\{personal_registration_link\}/gi, url)
+    .replace(/\{personal_link\}/gi, url)
+    .replace(/\{link\}/gi, url);
+}
+
+export async function POST(request, { params }) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session || session.user.role !== "club") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const { id } = await params;
+    const body = await request.json();
+    const {
+      orderIds = [],
+      target = "parents",
+      channel = "email",
+      subject = "",
+      bodyHtml = "",
+      bodyText = "",
+      smsNotification = false,
+      smsText = "",
+    } = body;
+
+    if (!Array.isArray(orderIds) || orderIds.length === 0) {
+      return NextResponse.json({ error: "No recipients selected" }, { status: 400 });
+    }
+    if (!["parents", "player", "both"].includes(target)) {
+      return NextResponse.json({ error: "Invalid target" }, { status: 400 });
+    }
+    if (channel === "email") {
+      if (!subject.trim()) return NextResponse.json({ error: "Subject is required" }, { status: 400 });
+      if (!bodyHtml.trim()) return NextResponse.json({ error: "Message body is required" }, { status: 400 });
+    } else if (channel === "sms") {
+      if (!bodyText.trim()) return NextResponse.json({ error: "SMS message is required" }, { status: 400 });
+    } else {
+      return NextResponse.json({ error: "Invalid channel" }, { status: 400 });
+    }
+
+    await dbConnect();
+
+    const [activity, club] = await Promise.all([
+      Activity.findById(id, "title").lean(),
+      Club.findById(session.user.id, "name logoUrl language").lean(),
+    ]);
+    if (!activity || !club) {
+      return NextResponse.json({ error: "Activity or club not found" }, { status: 404 });
+    }
+
+    const orders = await Order.find({
+      _id: { $in: orderIds },
+      activityId: id,
+      clubId: session.user.id,
+    });
+
+    if (orders.length === 0) {
+      return NextResponse.json({ error: "No orders found" }, { status: 404 });
+    }
+
+    const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
+    let sent = 0;
+    let failed = 0;
+    const errors = [];
+    const loggedRecipients = [];
+    const locale = club.language || "en";
+
+    for (const order of orders) {
+      if (!order.registrationToken || (order.registrationTokenExpiresAt && order.registrationTokenExpiresAt < new Date())) {
+        order.registrationToken = crypto.randomUUID();
+        order.registrationTokenExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      }
+      order.linkSentAt = new Date();
+      await order.save();
+
+      const registrationUrl = `${baseUrl}/register/${id}?token=${order.registrationToken}`;
+      const contacts = contactsForOrder(order, target);
+
+      for (const c of contacts) {
+        try {
+          if (channel === "email") {
+            if (!c.email) { failed++; errors.push(`${c.name}: no email`); continue; }
+            await sendCustomRegistrationEmail(c.email, {
+              subject: subject.trim(),
+              bodyHtml,
+              playerName: `${order.playerFirstName || ""} ${order.playerLastName || ""}`.trim(),
+              clubName: club.name || "",
+              activityTitle: activity.title || "",
+              registrationUrl,
+              logoUrl: club.logoUrl || null,
+              locale,
+            });
+            sent++;
+
+            if (smsNotification && c.phone) {
+              const e164 = toE164(c.phonePrefix || "+1", c.phone);
+              if (e164) {
+                const text = (smsText || `You have received an email. Subject: ${subject.trim()}`)
+                  .replace(/\{email_subject\}/g, subject.trim());
+                try { await sendSMS({ to: e164, message: text }); } catch { /* best-effort */ }
+              }
+            }
+          } else {
+            const e164 = toE164(c.phonePrefix || "+1", c.phone);
+            if (!e164) { failed++; errors.push(`${c.name}: no phone`); continue; }
+            const msg = substituteTextTokens(bodyText.trim(), registrationUrl);
+            await sendSMS({ to: e164, message: msg });
+            sent++;
+          }
+
+          loggedRecipients.push({
+            type: c.type,
+            id: c.id,
+            name: c.name,
+            email: c.email || "",
+            phonePrefix: c.phonePrefix || "",
+            phone: c.phone || "",
+          });
+        } catch (err) {
+          failed++;
+          errors.push(`${c.name}: ${err.message}`);
+          console.error(`Bulk message send failed for ${c.email || c.phone}:`, err.message);
+        }
+      }
+
+      if (sent % 5 === 0 && sent > 0) await sleep(400);
+    }
+
+    const status = sent > 0 ? "sent" : "failed";
+    try {
+      await Message.create({
+        clubId: session.user.id,
+        channel,
+        subject: channel === "email" ? subject.trim() : "SMS",
+        bodyHtml: channel === "email" ? bodyHtml : "",
+        bodyText: channel === "sms" ? bodyText.trim() : "",
+        recipients: loggedRecipients,
+        recipientCount: loggedRecipients.length,
+        status,
+        smsNotification: channel === "email" ? !!smsNotification : false,
+        smsNotificationText: channel === "email" ? (smsText || "") : "",
+      });
+    } catch (err) {
+      console.error("Failed to log bulk message:", err.message);
+    }
+
+    return NextResponse.json({
+      success: sent > 0,
+      sent,
+      failed,
+      total: sent + failed,
+      errors: errors.slice(0, 10),
+    });
+  } catch (error) {
+    console.error("Bulk send message error:", error);
+    return NextResponse.json({ error: "Failed to send messages" }, { status: 500 });
+  }
+}

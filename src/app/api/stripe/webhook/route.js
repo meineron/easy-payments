@@ -258,6 +258,27 @@ export async function POST(request) {
               }
             }
 
+            // Deferred waiver-confirmation email (OFF-path): when the activity
+            // does NOT require email verification before payment, the dedicated
+            // waiver PDF is delivered after the payment succeeds instead.
+            if (!order.waiverConfirmationSentAt) {
+              try {
+                const ActivityModel = (await import("@/models/Activity")).default;
+                const activityDocForWaiver = await ActivityModel.findById(
+                  order.activityId,
+                  "waivers waiverEmailConfirmation",
+                ).lean();
+                const hasWaivers = (activityDocForWaiver?.waivers || []).length > 0;
+                const hasSignedConsents = (order.waiverConsents || []).some((c) => c.agreedAt);
+                if (hasWaivers && hasSignedConsents && !activityDocForWaiver?.waiverEmailConfirmation) {
+                  const { sendWaiverConfirmationPDFEmail } = await import("@/lib/waiver-confirmation-email");
+                  await sendWaiverConfirmationPDFEmail(order);
+                }
+              } catch (waiverErr) {
+                console.error("Failed to send waiver PDF (post-payment):", waiverErr.message);
+              }
+            }
+
             console.log(`Activity order ${activityOrderId} processed: net paid ${netAmountPaid} (gross ${session.amount_total}, proc fee ${procFeeInSession}), applied=${!alreadyApplied}, invoiceSent=${!!order.invoiceSentAt}, regEmailSent=${!!order.registrationEmailSentAt}`);
           }
         } catch (orderErr) {

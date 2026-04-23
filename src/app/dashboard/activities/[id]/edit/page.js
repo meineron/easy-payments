@@ -1084,6 +1084,7 @@ function TabPayment({ activity, onSave, saving, t, tc, td }) {
 /* ============== TAB: Waivers ============== */
 function TabWaivers({ activity, onSave, saving, tc, td }) {
   const [waivers, setWaivers] = useState([]);
+  const [emailConfirmation, setEmailConfirmation] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [expandedIdx, setExpandedIdx] = useState(null);
   const fileInputRef = useRef(null);
@@ -1099,6 +1100,7 @@ function TabWaivers({ activity, onSave, saving, tc, td }) {
         order: w.order || 0,
       })));
     }
+    setEmailConfirmation(!!activity?.waiverEmailConfirmation);
   }, [activity]);
 
   function addWaiver() {
@@ -1151,11 +1153,27 @@ function TabWaivers({ activity, onSave, saving, tc, td }) {
   }
 
   function save() {
-    onSave({ waivers: waivers.map((w, i) => ({ ...w, order: i })) });
+    onSave({
+      waivers: waivers.map((w, i) => ({ ...w, order: i })),
+      waiverEmailConfirmation: emailConfirmation,
+    });
   }
 
   return (
     <div className="space-y-6">
+      <label className="flex items-start gap-3 border rounded-lg px-4 py-3 cursor-pointer hover:bg-gray-50 transition">
+        <input
+          type="checkbox"
+          checked={emailConfirmation}
+          onChange={(e) => setEmailConfirmation(e.target.checked)}
+          className="mt-0.5 rounded border-gray-300"
+        />
+        <span className="flex-1">
+          <span className="block text-sm font-medium text-gray-900">{td("requireWaiverEmailConfirmation")}</span>
+          <span className="block text-xs text-gray-500 mt-0.5">{td("requireWaiverEmailConfirmationHint")}</span>
+        </span>
+      </label>
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h3 className="font-semibold text-gray-900">{`${td("waivers")} (${waivers.length})`}</h3>

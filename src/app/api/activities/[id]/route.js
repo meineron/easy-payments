@@ -49,6 +49,7 @@ export async function PUT(request, { params }) {
       "startDate", "endDate", "lastRegisterDate",
       "status", "registrationType", "hiddenLink", "onlyAssignedPlayers", "playerAssignment",
       "teams", "formSections", "subscriptions", "coupons", "waivers",
+      "waiverEmailConfirmation",
       "passStripeFeeToCustomer", "afterRegistrationMessage",
     ];
 

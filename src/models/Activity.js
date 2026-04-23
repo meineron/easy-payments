@@ -135,6 +135,11 @@ const ActivitySchema = new mongoose.Schema({
   subscriptions: [SubscriptionSchema],
   coupons: [CouponSchema],
   waivers: [WaiverSchema],
+  // When true, the public register flow forces the parent to verify their
+  // email with a one-time code immediately after signing waivers, before
+  // continuing to payment. When false, waiver confirmation PDF is delayed
+  // until after payment succeeds.
+  waiverEmailConfirmation: { type: Boolean, default: false },
 
   passStripeFeeToCustomer: { type: Boolean, default: false },
   afterRegistrationMessage: { type: String, default: "" },

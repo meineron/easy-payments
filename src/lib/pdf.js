@@ -246,9 +246,17 @@ export async function generateRegistrationPDF({
   });
 }
 
+// Keys already rendered in the Player Details block — skip them when listing
+// dynamic form answers so we don't double-print first name / DOB / etc.
+const BUILTIN_PLAYER_KEYS = new Set([
+  "firstName", "lastName", "dob", "dateOfBirth", "gender",
+  "phone", "phoneNumber", "phonePrefix", "email",
+]);
+
 /**
  * Generates a waiver confirmation PDF.
- * Contains each waiver title, full text, and signature details.
+ * Contains registration details (player + parents + dynamic form answers)
+ * followed by each waiver title, full text, and signature details.
  */
 export async function generateWaiverPDF({
   waiverConsents,
@@ -258,6 +266,8 @@ export async function generateWaiverPDF({
   clubName,
   activityTitle,
   clubLogoUrl,
+  order,
+  formSections,
 }) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: "A4", margins: { top: 50, bottom: 50, left: 50, right: 50 } });
@@ -297,12 +307,72 @@ export async function generateWaiverPDF({
       doc.fontSize(10).fillColor("#9ca3af")
         .text(clubName, { width: pageWidth, align: "center" });
     }
-    doc.moveDown(0.5);
-    if (playerName) {
+    doc.moveDown(1);
+
+    // ── Shared helpers ──
+    function sectionHeader(title) {
+      doc.moveDown(0.5);
+      doc.fontSize(11).font("Helvetica-Bold").fillColor("#1e40af").text(title.toUpperCase());
+      doc.moveTo(leftX, doc.y).lineTo(leftX + pageWidth, doc.y).strokeColor("#dbeafe").lineWidth(1).stroke();
+      doc.moveDown(0.3);
+    }
+    function row(label, value) {
+      if (value === null || value === undefined || value === "") return;
+      doc.fontSize(10).font("Helvetica-Bold").fillColor("#374151").text(`${label}: `, { continued: true });
+      doc.font("Helvetica").fillColor("#111827").text(String(value));
+    }
+
+    // ── Registration Details (player, parents, dynamic form answers) ──
+    if (order) {
+      sectionHeader("Player Details");
+      row("Name", `${order.playerFirstName || ""} ${order.playerLastName || ""}`.trim());
+      row("Date of Birth", fmtDob(order.playerDob));
+      row("Gender", order.playerGender);
+      row("Phone", order.playerPhone ? `${order.playerPhonePrefix || ""} ${order.playerPhone}`.trim() : null);
+      row("Email", order.playerEmail);
+
+      if (order.parent1FirstName || order.parent1Email) {
+        sectionHeader("Parent / Guardian 1");
+        row("Name", `${order.parent1FirstName || ""} ${order.parent1LastName || ""}`.trim());
+        row("Phone", order.parent1Phone ? `${order.parent1PhonePrefix || ""} ${order.parent1Phone}`.trim() : null);
+        row("Email", order.parent1Email);
+      }
+
+      if (order.parent2FirstName || order.parent2Email) {
+        sectionHeader("Parent / Guardian 2");
+        row("Name", `${order.parent2FirstName || ""} ${order.parent2LastName || ""}`.trim());
+        row("Phone", order.parent2Phone ? `${order.parent2PhonePrefix || ""} ${order.parent2Phone}`.trim() : null);
+        row("Email", order.parent2Email);
+      }
+
+      const formData = order.formData || {};
+      const extraRows = [];
+      for (const section of (formSections || [])) {
+        for (const field of (section.fields || [])) {
+          if (field.hidden) continue;
+          if (field.type === "title_description") continue;
+          if (field.isDefault && BUILTIN_PLAYER_KEYS.has(field.key)) continue;
+          const raw = formData[field.key];
+          if (raw === undefined || raw === null || raw === "") continue;
+          const value = Array.isArray(raw) ? raw.join(", ") : String(raw);
+          if (!value) continue;
+          extraRows.push({ label: field.label || field.key, value });
+        }
+      }
+      if (extraRows.length > 0) {
+        sectionHeader("Additional Information");
+        for (const r of extraRows) row(r.label, r.value);
+      }
+
+      doc.moveDown(0.6);
+    } else if (playerName) {
       doc.fontSize(10).font("Helvetica").fillColor("#374151")
         .text(`Player: ${playerName}`, { width: pageWidth, align: "center" });
+      doc.moveDown(1);
     }
-    doc.moveDown(1);
+
+    // Silence unused-var warning when caller only passed the legacy parentName.
+    void parentName;
 
     const waiverMap = {};
     (waivers || []).forEach((w) => { waiverMap[String(w._id)] = w; });

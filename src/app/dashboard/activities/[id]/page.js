@@ -9,6 +9,7 @@ import SubscriptionItemReviewModal from "@/components/SubscriptionItemReviewModa
 import SendBulkLinksModal from "@/components/SendBulkLinksModal";
 import SendMessageModal from "@/components/SendMessageModal";
 import PhonePrefixInput from "@/components/PhonePrefixInput";
+import RichTextEditor from "@/components/RichTextEditor";
 import { activityTeamSlotKey } from "@/lib/activity-team-keys";
 import { normalizeCopyUrl } from "@/lib/copy-url";
 import { formatDob, dobToInputValue } from "@/lib/dob";
@@ -106,6 +107,7 @@ function TabParticipants({ activityId, activity, tc, td }) {
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [showRegModal, setShowRegModal] = useState(false);
   const [sendMessageTarget, setSendMessageTarget] = useState(null);
+  const [bulkMessageOpen, setBulkMessageOpen] = useState(false);
   const [sendLinkModal, setSendLinkModal] = useState(null);
   const [headerActionsOpen, setHeaderActionsOpen] = useState(false);
   const headerActionsRef = useRef(null);
@@ -579,6 +581,26 @@ function TabParticipants({ activityId, activity, tc, td }) {
     finally { setActionBusy(null); }
   }
 
+  async function sendWaiversConfirmationEmail(orderId) {
+    setActionBusy(orderId);
+    try {
+      const res = await fetch(`/api/activities/${activityId}/orders/${orderId}/send-waivers-email`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (data.success) {
+        const count = (data.sentTo || []).length;
+        setToast({ message: td("waiversEmailSent", { count }), type: "success" });
+      } else {
+        setToast({ message: data.error || tc("somethingWentWrong"), type: "error" });
+      }
+    } catch {
+      setToast({ message: tc("somethingWentWrong"), type: "error" });
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
   async function sendPaymentLinkVia(orderId, channel) {
     setActionBusy(orderId);
     try {
@@ -867,6 +889,10 @@ function TabParticipants({ activityId, activity, tc, td }) {
               className="bg-white border border-red-300 text-red-600 px-3 py-1.5 rounded text-sm font-medium hover:bg-red-50">
               {td("removeItemBtn")}
             </button>
+            <button onClick={() => setBulkMessageOpen(true)}
+              className="bg-white border border-blue-300 text-blue-700 px-3 py-1.5 rounded text-sm font-medium hover:bg-blue-100">
+              {td("sendMessage")}
+            </button>
             <button onClick={() => setSelected(new Set())}
               className="text-sm text-gray-500 hover:text-gray-700 ms-2">{td("clear")}</button>
           </div>
@@ -1062,6 +1088,10 @@ function TabParticipants({ activityId, activity, tc, td }) {
                                       className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("payFromAdmin")}</button>
                                   </>
                                 )}
+                                {(r.waiverConsents || []).some((c) => c.agreedAt) && (
+                                  <button onClick={() => { setActionsOpen(null); sendWaiversConfirmationEmail(r._id); }}
+                                    className="w-full text-start px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">{td("sendWaiversConfirmationEmail")}</button>
+                                )}
                                 {hasAnyContact && (
                                   <button onClick={() => { setActionsOpen(null); openSendMessage(r); }}
                                     className="w-full text-start px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 border-t mt-1 pt-1.5">{td("sendMessage")}</button>
@@ -1130,6 +1160,21 @@ function TabParticipants({ activityId, activity, tc, td }) {
           recipient={sendMessageTarget}
           onClose={() => setSendMessageTarget(null)}
           onSent={(msg) => setToast({ message: msg, type: "success" })}
+        />
+      )}
+
+      {/* BULK SEND MESSAGE MODAL */}
+      {bulkMessageOpen && (
+        <BulkSendMessageModal
+          activityId={activityId}
+          activity={activity}
+          rows={filteredRows.filter((r) => selected.has(r._id))}
+          ensureOrder={ensureOrder}
+          onClose={() => setBulkMessageOpen(false)}
+          onDone={(msg) => { setBulkMessageOpen(false); setSelected(new Set()); setToast({ message: msg, type: "success" }); fetchOrders(); }}
+          onError={(msg) => setToast({ message: msg, type: "error" })}
+          tc={tc}
+          td={td}
         />
       )}
 
@@ -1404,6 +1449,259 @@ function SendLinkRecipientModal({ type, orderId, row, activityId, onClose, onDon
             {sending ? td("sending") : td("sendSelected", { count: selectedCount })}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============== BULK SEND MESSAGE MODAL ============== */
+function BulkSendMessageModal({ activityId, activity, rows, ensureOrder, onClose, onDone, onError, tc, td }) {
+  const tm = useTranslations("messages");
+
+  const [selectedRows, setSelectedRows] = useState(rows);
+  const [target, setTarget] = useState("parents");
+  const [channel, setChannel] = useState("email");
+  const [subject, setSubject] = useState(`${activity?.title || ""} — ${td("sendRegistrationLink")}`.trim());
+  const [bodyHtml, setBodyHtml] = useState(td("defaultRegistrationEmailBody"));
+  const [bodyText, setBodyText] = useState(td("defaultRegistrationSmsBody", { activity: activity?.title || "", link: "{personal_registration_link}" }));
+  const [smsNotification, setSmsNotification] = useState(false);
+  const [smsNotificationText, setSmsNotificationText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [toastLocal, setToastLocal] = useState(null);
+  const editorRef = useRef(null);
+
+  function removeRow(rowId) {
+    setSelectedRows((prev) => prev.filter((r) => r._id !== rowId));
+  }
+
+  function rowContactCount(r) {
+    let count = 0;
+    const hasContact = (email, phone) => channel === "email" ? !!email : !!phone;
+    if (target === "parents" || target === "both") {
+      if (r.parent1FirstName && hasContact(r.parent1Email, r.parent1Phone)) count++;
+      if (r.parent2FirstName && hasContact(r.parent2Email, r.parent2Phone)) count++;
+    }
+    if (target === "player" || target === "both") {
+      if (hasContact(r.playerEmail, r.playerPhone)) count++;
+    }
+    return count;
+  }
+
+  const reachableCount = useMemo(
+    () => selectedRows.reduce((sum, r) => sum + rowContactCount(r), 0),
+    [selectedRows, target, channel]
+  );
+
+  function insertPersonalLink() {
+    const token = "{personal_registration_link}";
+    if (channel === "email") {
+      const current = editorRef.current?.getHtml() ?? bodyHtml;
+      const next = current + ` ${token}`;
+      if (editorRef.current?.setHtml) editorRef.current.setHtml(next);
+      setBodyHtml(next);
+    } else {
+      setBodyText((prev) => (prev ? `${prev} ${token}` : token));
+    }
+  }
+
+  async function handleSend() {
+    if (selectedRows.length === 0) { onError(td("bulkMessageNoRecipients")); return; }
+
+    if (channel === "email") {
+      const html = editorRef.current?.getHtml() || bodyHtml;
+      if (!subject.trim()) { setToastLocal({ message: tm("subjectRequired"), type: "error" }); return; }
+      if (!html.trim() || html === "<br>") { setToastLocal({ message: tm("bodyRequired"), type: "error" }); return; }
+      setBodyHtml(html);
+    } else {
+      if (!bodyText.trim()) { setToastLocal({ message: tm("smsBodyRequired"), type: "error" }); return; }
+    }
+
+    setSending(true);
+    try {
+      const orderIds = [];
+      for (const r of selectedRows) {
+        if (r._isExpected) {
+          const order = await ensureOrder(r);
+          if (order?._id) orderIds.push(order._id);
+        } else if (r._id) {
+          orderIds.push(r._id);
+        }
+      }
+      if (orderIds.length === 0) { onError(td("bulkMessageNoRecipients")); setSending(false); return; }
+
+      const payload = {
+        orderIds,
+        target,
+        channel,
+      };
+      if (channel === "email") {
+        payload.subject = subject.trim();
+        payload.bodyHtml = editorRef.current?.getHtml() || bodyHtml;
+        if (smsNotification) {
+          payload.smsNotification = true;
+          const rawText = smsNotificationText || `${tm("smsNotificationPrefix")}\n${tm("smsNotificationSubjectLabel")} {email_subject}`;
+          payload.smsText = rawText.replace(/\{email_subject\}/g, subject.trim());
+        }
+      } else {
+        payload.bodyText = bodyText.trim();
+      }
+
+      const res = await fetch(`/api/activities/${activityId}/orders/bulk-send-message`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.success) {
+        let msg = td("bulkMessageSent", { count: data.sent });
+        if (data.failed > 0) msg += ` (${td("failedCount", { count: data.failed })})`;
+        onDone(msg);
+      } else {
+        onError(data.error || tc("somethingWentWrong"));
+      }
+    } catch {
+      onError(tc("somethingWentWrong"));
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b flex items-center justify-between">
+          <h3 className="font-bold text-gray-900">{td("bulkMessageTitle")}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg">×</button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {/* Recipients */}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1.5">{td("bulkMessageRecipients", { count: selectedRows.length })}</label>
+            <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto border rounded-lg p-2 bg-gray-50">
+              {selectedRows.length === 0 ? (
+                <span className="text-xs text-gray-400">{td("bulkMessageNoRecipients")}</span>
+              ) : (
+                selectedRows.map((r) => {
+                  const teamName = r.teamId?.name || td("unassigned");
+                  const name = `${r.playerFirstName || ""} ${r.playerLastName || ""}`.trim();
+                  return (
+                    <span key={r._id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-700 border border-blue-100">
+                      <span>{name} — {teamName}</span>
+                      <button onClick={() => removeRow(r._id)} className="text-blue-400 hover:text-blue-700" title={tc("remove")}>×</button>
+                    </span>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          {/* Target */}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1.5">{td("bulkMessageTarget")}</label>
+            <div className="flex bg-gray-100 rounded-lg p-0.5 w-fit">
+              {[
+                { v: "parents", label: td("bulkMessageTargetParents") },
+                { v: "player", label: td("bulkMessageTargetPlayer") },
+                { v: "both", label: td("bulkMessageTargetBoth") },
+              ].map((opt) => (
+                <button key={opt.v} type="button" onClick={() => setTarget(opt.v)}
+                  className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${target === opt.v ? "bg-white shadow text-blue-600" : "text-gray-500"}`}>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Channel */}
+          <div className="flex items-center gap-3">
+            <div className="flex bg-gray-100 rounded-lg p-0.5">
+              <button type="button" onClick={() => setChannel("email")}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${channel === "email" ? "bg-white shadow text-blue-600" : "text-gray-500"}`}>
+                {tm("channelEmail")}
+              </button>
+              <button type="button" onClick={() => setChannel("sms")}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${channel === "sms" ? "bg-white shadow text-blue-600" : "text-gray-500"}`}>
+                {tm("channelSMS")}
+              </button>
+            </div>
+          </div>
+
+          {channel === "email" ? (
+            <>
+              <input type="text" value={subject} onChange={(e) => setSubject(e.target.value)}
+                placeholder={tm("subjectPlaceholder")}
+                className="w-full border rounded-lg px-3 py-2 text-sm" />
+
+              <div>
+                <RichTextEditor
+                  ref={editorRef}
+                  value={bodyHtml}
+                  onChange={setBodyHtml}
+                  minHeight={180}
+                  maxHeight={300}
+                  compact
+                />
+                <div className="flex items-center justify-between mt-1.5">
+                  <p className="text-xs text-gray-400">{td("personalLinkBoxLine1Registration")}</p>
+                  <button type="button" onClick={insertPersonalLink}
+                    className="text-xs font-medium text-purple-600 hover:text-purple-800 whitespace-nowrap">
+                    + {td("insertPersonalLink")}
+                  </button>
+                </div>
+              </div>
+
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={smsNotification} onChange={(e) => {
+                  setSmsNotification(e.target.checked);
+                  if (e.target.checked && !smsNotificationText) {
+                    setSmsNotificationText(`${tm("smsNotificationPrefix")}\n${tm("smsNotificationSubjectLabel")} {email_subject}`);
+                  }
+                }} className="rounded" />
+                <span className="text-sm text-gray-700">{tm("smsNotification")}</span>
+              </label>
+              {smsNotification && (
+                <>
+                  <textarea value={smsNotificationText} onChange={(e) => setSmsNotificationText(e.target.value)}
+                    rows={2} className="w-full border rounded-lg px-3 py-2 text-sm resize-none" />
+                  <p className="text-xs text-gray-400">{tm("smsVariableHint")}</p>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <textarea value={bodyText} onChange={(e) => setBodyText(e.target.value)}
+                placeholder={tm("smsBodyPlaceholder")}
+                rows={5} className="w-full border rounded-lg px-3 py-2 text-sm resize-none" />
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-gray-400">{tm("smsCharCount", { count: bodyText.length })}</p>
+                <button type="button" onClick={insertPersonalLink}
+                  className="text-xs font-medium text-purple-600 hover:text-purple-800 whitespace-nowrap">
+                  + {td("insertPersonalLink")}
+                </button>
+              </div>
+            </>
+          )}
+
+          <div className="bg-gray-50 rounded-lg p-3">
+            <p className="text-sm text-gray-700">{td("bulkMessageSummary", { count: reachableCount })}</p>
+            {reachableCount === 0 && <p className="text-xs text-orange-600 mt-1">{td("bulkMessageNoContacts")}</p>}
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">{tc("cancel")}</button>
+          <button onClick={handleSend} disabled={sending || reachableCount === 0 || selectedRows.length === 0}
+            className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+            {sending ? tm("sending") : tm("send")}
+          </button>
+        </div>
+
+        {toastLocal && (
+          <div className={`fixed bottom-6 right-6 px-5 py-3 rounded-lg shadow-lg text-sm font-medium z-[60] ${
+            toastLocal.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"
+          }`} onClick={() => setToastLocal(null)}>{toastLocal.message}</div>
+        )}
       </div>
     </div>
   );
@@ -2177,33 +2475,7 @@ function SendPaymentEmailsModal({ activityId, activity, orders, expectedPlayers,
   const [subject, setSubject] = useState(`Payment link for ${activity?.title || "Activity"}`);
   const [bodyHtml, setBodyHtml] = useState("<p>Dear parent,</p><p>Please complete your payment using the link below.</p>");
   const [sending, setSending] = useState(false);
-  const bodyRef = useRef(null);
-  const imgInputRef = useRef(null);
-
-  function execCmd(cmd, val = null) {
-    bodyRef.current?.focus();
-    document.execCommand(cmd, false, val);
-  }
-
-  function insertLink() {
-    const url = prompt("Enter URL:");
-    if (url) execCmd("createLink", url);
-  }
-
-  function handleImageUpload(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith("image/")) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      bodyRef.current?.focus();
-      document.execCommand("insertImage", false, reader.result);
-      const imgs = bodyRef.current?.querySelectorAll("img");
-      if (imgs) imgs.forEach((img) => { img.style.maxWidth = "100%"; img.style.width = "100%"; img.style.height = "auto"; img.style.display = "block"; img.style.borderRadius = "8px"; img.style.margin = "8px 0"; });
-    };
-    reader.readAsDataURL(file);
-    e.target.value = "";
-  }
+  const editorRef = useRef(null);
 
   function toggleTeam(tid) {
     const id = String(tid);
@@ -2235,7 +2507,7 @@ function SendPaymentEmailsModal({ activityId, activity, orders, expectedPlayers,
   }).length;
 
   async function handleSend() {
-    const html = bodyRef.current?.innerHTML || bodyHtml;
+    const html = editorRef.current?.getHtml() || bodyHtml;
     if (!subject.trim()) { onError(td("subjectRequired")); return; }
     if (!html.trim() || html.trim() === "<br>") { onError(td("messageBodyRequired")); return; }
     if (selectedTeams.size === 0) { onError(td("selectAtLeastOneTeam")); return; }
@@ -2293,35 +2565,14 @@ function SendPaymentEmailsModal({ activityId, activity, orders, expectedPlayers,
 
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">{td("emailMessage")}</label>
-            <div className="border rounded-lg overflow-hidden">
-              <div className="flex items-center gap-0.5 px-2 py-1.5 bg-gray-50 border-b flex-wrap">
-                <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("bold"); }} className="px-2 py-1 rounded text-sm font-bold hover:bg-gray-200" title={td("bold")}>{td("bold")}</button>
-                <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("italic"); }} className="px-2 py-1 rounded text-sm italic hover:bg-gray-200" title={td("italic")}>{td("italic")}</button>
-                <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("underline"); }} className="px-2 py-1 rounded text-sm underline hover:bg-gray-200" title={td("underline")}>{td("underline")}</button>
-                <div className="w-px h-5 bg-gray-300 mx-1" />
-                <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("insertUnorderedList"); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200" title={td("bulletList")}>{td("bulletList")}</button>
-                <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("insertOrderedList"); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200" title={td("numberedList")}>{td("numberedList")}</button>
-                <div className="w-px h-5 bg-gray-300 mx-1" />
-                <button type="button" onMouseDown={(e) => { e.preventDefault(); insertLink(); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200 text-blue-600" title={td("link")}>{td("link")}</button>
-                <button type="button" onMouseDown={(e) => { e.preventDefault(); imgInputRef.current?.click(); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200" title={td("image")}>{td("image")}</button>
-                <input ref={imgInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
-                <div className="w-px h-5 bg-gray-300 mx-1" />
-                <select onChange={(e) => { if (e.target.value) { execCmd("fontSize", "7"); const sel = window.getSelection(); if (sel.rangeCount) { const span = sel.anchorNode?.parentElement; if (span && span.style) span.style.fontSize = e.target.value; } } e.target.value = ""; }}
-                  className="text-xs border-0 bg-transparent py-1 pr-1 text-gray-600 cursor-pointer hover:bg-gray-200 rounded" defaultValue="">
-                  <option value="" disabled>{td("size")}</option>
-                  <option value="12px">{td("small")}</option>
-                  <option value="16px">{td("normal")}</option>
-                  <option value="20px">{td("large")}</option>
-                  <option value="24px">{td("xl")}</option>
-                </select>
-              </div>
-              <div ref={bodyRef} contentEditable suppressContentEditableWarning
-                onBlur={() => { if (bodyRef.current) setBodyHtml(bodyRef.current.innerHTML); }}
-                className="px-3 py-2 text-sm min-h-[150px] focus:outline-none prose prose-sm max-w-none"
-                style={{ overflowY: "auto", maxHeight: "300px" }}
-                dangerouslySetInnerHTML={{ __html: bodyHtml }}
-              />
-            </div>
+            <RichTextEditor
+              ref={editorRef}
+              value={bodyHtml}
+              onChange={setBodyHtml}
+              minHeight={150}
+              maxHeight={300}
+              compact
+            />
             <p className="text-xs text-gray-400 mt-1">{td("emailMessageHint")}</p>
           </div>
 
@@ -2617,32 +2868,7 @@ function RespondModal({ request, onClose, onSent, tc, td }) {
   const [smsNotificationText, setSmsNotificationText] = useState("");
   const [sending, setSending] = useState(false);
   const [toast, setToast] = useState(null);
-  const bodyRef = useRef(null);
-  const imgInputRef = useRef(null);
-
-  function execCmd(cmd, val = null) {
-    bodyRef.current?.focus();
-    document.execCommand(cmd, false, val);
-  }
-
-  function insertLink() {
-    const url = prompt(t("enterUrl"));
-    if (url) execCmd("createLink", url);
-  }
-
-  function handleImageUpload(e) {
-    const file = e.target.files?.[0];
-    if (!file || !file.type.startsWith("image/")) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      bodyRef.current?.focus();
-      document.execCommand("insertImage", false, reader.result);
-      const imgs = bodyRef.current?.querySelectorAll("img");
-      if (imgs) imgs.forEach((img) => { img.style.maxWidth = "100%"; img.style.width = "100%"; img.style.height = "auto"; img.style.display = "block"; img.style.borderRadius = "8px"; img.style.margin = "8px 0"; });
-    };
-    reader.readAsDataURL(file);
-    e.target.value = "";
-  }
+  const editorRef = useRef(null);
 
   function toggleRecipient(key) {
     setSelected((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
@@ -2653,7 +2879,7 @@ function RespondModal({ request, onClose, onSent, tc, td }) {
     if (chosenRecipients.length === 0) { setToast({ message: td("selectAtLeastOneRecipient"), type: "error" }); return; }
 
     if (channel === "email") {
-      const html = bodyRef.current?.innerHTML || bodyHtml;
+      const html = editorRef.current?.getHtml() || bodyHtml;
       if (!subject.trim()) { setToast({ message: t("subjectRequired"), type: "error" }); return; }
       if (!html.trim() || html === "<br>") { setToast({ message: t("bodyRequired"), type: "error" }); return; }
 
@@ -2764,34 +2990,14 @@ function RespondModal({ request, onClose, onSent, tc, td }) {
                 placeholder={t("subjectPlaceholder")}
                 className="w-full border rounded-lg px-3 py-2 text-sm" />
 
-              <div className="border rounded-lg overflow-hidden">
-                <div className="flex items-center gap-0.5 px-2 py-1.5 bg-gray-50 border-b flex-wrap">
-                  <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("bold"); }} className="px-2 py-1 rounded text-sm font-bold hover:bg-gray-200" title={td("bold")}>{td("bold")}</button>
-                  <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("italic"); }} className="px-2 py-1 rounded text-sm italic hover:bg-gray-200" title={td("italic")}>{td("italic")}</button>
-                  <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("underline"); }} className="px-2 py-1 rounded text-sm underline hover:bg-gray-200" title={td("underline")}>{td("underline")}</button>
-                  <div className="w-px h-5 bg-gray-300 mx-1" />
-                  <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("insertUnorderedList"); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200" title={td("bulletList")}>{td("bulletList")}</button>
-                  <button type="button" onMouseDown={(e) => { e.preventDefault(); execCmd("insertOrderedList"); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200" title={td("numberedList")}>{td("numberedList")}</button>
-                  <div className="w-px h-5 bg-gray-300 mx-1" />
-                  <button type="button" onMouseDown={(e) => { e.preventDefault(); insertLink(); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200 text-blue-600" title={td("link")}>{td("link")}</button>
-                  <button type="button" onMouseDown={(e) => { e.preventDefault(); imgInputRef.current?.click(); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200" title={td("image")}>{td("image")}</button>
-                  <input ref={imgInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
-                  <div className="w-px h-5 bg-gray-300 mx-1" />
-                  <select onChange={(e) => { if (e.target.value) { execCmd("fontSize", "7"); const sel = window.getSelection(); if (sel.rangeCount) { const span = sel.anchorNode?.parentElement; if (span && span.style) span.style.fontSize = e.target.value; } } e.target.value = ""; }}
-                    className="text-xs border-0 bg-transparent py-1 pr-1 text-gray-600 cursor-pointer hover:bg-gray-200 rounded" defaultValue="">
-                    <option value="" disabled>{td("size")}</option>
-                    <option value="12px">{td("small")}</option>
-                    <option value="16px">{td("normal")}</option>
-                    <option value="20px">{td("large")}</option>
-                    <option value="24px">{td("xl")}</option>
-                  </select>
-                </div>
-                <div ref={bodyRef} contentEditable suppressContentEditableWarning
-                  onBlur={() => { if (bodyRef.current) setBodyHtml(bodyRef.current.innerHTML); }}
-                  className="px-3 py-2 text-sm min-h-[150px] focus:outline-none prose prose-sm max-w-none"
-                  style={{ overflowY: "auto", maxHeight: "250px" }}
-                />
-              </div>
+              <RichTextEditor
+                ref={editorRef}
+                value={bodyHtml}
+                onChange={setBodyHtml}
+                minHeight={150}
+                maxHeight={250}
+                compact
+              />
 
               <label className="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" checked={smsNotification} onChange={(e) => {

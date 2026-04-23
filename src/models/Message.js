@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 
 const RecipientSchema = new mongoose.Schema({
-  type: { type: String, enum: ["player", "parent", "custom"], required: true },
+  type: { type: String, enum: ["player", "parent", "custom", "lead"], required: true },
   id: { type: String, required: true },
   name: { type: String, required: true },
   email: { type: String, default: "" },

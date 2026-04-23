@@ -71,6 +71,7 @@ export async function GET(request, { params }) {
       waivers: (activity.waivers || []).map((w) => ({
         _id: w._id, title: w.title, contentHtml: w.contentHtml, isRequired: w.isRequired, order: w.order,
       })),
+      waiverEmailConfirmation: !!activity.waiverEmailConfirmation,
       clubName: club?.name || "",
       clubLogoUrl: club?.logoUrl || null,
       clubLanguage: club?.language || "en",

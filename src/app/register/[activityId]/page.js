@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, use } from "react";
+import { useState, useEffect, useMemo, useRef, use } from "react";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import IntlProvider from "@/components/IntlProvider";
@@ -331,6 +331,16 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
     return ids;
   }, [initialOrder, hasCompletedRegistration]);
 
+  // Stages: "waivers" (list) → "otp" (enter code) → "processing" (finalizing
+  // after successful verification, until the step actually advances).
+  const [verifyStage, setVerifyStage] = useState("waivers");
+  const [verifyCode, setVerifyCode] = useState("");
+  const [verifyError, setVerifyError] = useState("");
+  const [verifyInfo, setVerifyInfo] = useState("");
+  const [sendingCode, setSendingCode] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const otpPanelRef = useRef(null);
+
   const [waiverConsents, setWaiverConsents] = useState(() => {
     const init = {};
     if (!hasCompletedRegistration) return init;
@@ -471,6 +481,19 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
   const waivers = activity?.waivers || [];
   const STEPS = buildSteps(hasWaivers, t);
   const waiverStepNum = hasWaivers ? 3 : null;
+
+  // If the user navigates away from the waivers step (either forward after a
+  // successful verification, or back via the stepper), reset the verify stage
+  // so re-entering step 3 shows the waivers list rather than a stale OTP /
+  // processing card.
+  useEffect(() => {
+    if (step !== waiverStepNum && verifyStage !== "waivers") {
+      setVerifyStage("waivers");
+      setVerifyCode("");
+      setVerifyError("");
+      setVerifyInfo("");
+    }
+  }, [step, waiverStepNum, verifyStage]);
   const invoiceStepNum = hasWaivers ? 4 : 3;
 
   // If the parent lands directly on the invoice step (auto-resume of an
@@ -603,13 +626,8 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
     await persistStep3AndAdvance();
   }
 
-  async function completeWaivers() {
-    const allRequired = waivers.filter((w) => w.isRequired);
-    const allAgreed = allRequired.every((w) => waiverConsents[w._id]);
-    if (!allAgreed) return;
-    setCompletedSteps((prev) => (prev.includes(waiverStepNum) ? prev : [...prev, waiverStepNum]));
-
-    const newConsents = waivers
+  function buildNewConsents() {
+    return waivers
       .filter((w) => waiverConsents[w._id] && !savedWaiverIds.has(String(w._id)))
       .map((w) => ({
         waiverId: String(w._id),
@@ -618,20 +636,134 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
         agreedByName: `${parent1.firstName} ${parent1.lastName}`.trim(),
         agreedByEmail: parent1.email,
       }));
+  }
 
+  async function finalizeWaiversAndAdvance() {
+    setCompletedSteps((prev) => (prev.includes(waiverStepNum) ? prev : [...prev, waiverStepNum]));
     await persistStep3AndAdvance();
+  }
 
-    if (newConsents.length > 0) {
-      fetch(`/api/register/${activityId}/waiver-confirmation`, {
+  // Fire-and-forget: ask the server to email the dedicated waiver-PDF right
+  // now. Used only on the ON (email-confirmation) path — the OFF path defers
+  // this email until payment succeeds (or registration completes for free
+  // activities), handled server-side in the Stripe webhook + save route.
+  function triggerWaiverConfirmationEmail(newConsents) {
+    if (!newConsents || newConsents.length === 0) return;
+    fetch(`/api/register/${activityId}/waiver-confirmation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: token || undefined,
+        orderId: savedOrderId || initialOrder?._id || undefined,
+        waiverConsents: newConsents,
+      }),
+    }).catch(() => {});
+  }
+
+  async function requestVerificationCode() {
+    setVerifyError("");
+    setVerifyInfo("");
+    setSendingCode(true);
+    try {
+      const res = await fetch(`/api/register/${activityId}/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          token: token || undefined,
-          orderId: savedOrderId || initialOrder?._id || undefined,
-          waiverConsents: newConsents,
-        }),
-      }).catch(() => {});
+        body: JSON.stringify({ email: parent1.email, token: token || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setVerifyError(data.error || tc("somethingWentWrong"));
+        return false;
+      }
+      return true;
+    } catch {
+      setVerifyError(tc("somethingWentWrong"));
+      return false;
+    } finally {
+      setSendingCode(false);
     }
+  }
+
+  async function completeWaivers() {
+    if (sendingCode || savingDraft) return;
+    const allRequired = waivers.filter((w) => w.isRequired);
+    const allAgreed = allRequired.every((w) => waiverConsents[w._id]);
+    if (!allAgreed) return;
+
+    const newConsents = buildNewConsents();
+
+    if (activity?.waiverEmailConfirmation && newConsents.length > 0 && parent1.email) {
+      setVerifyCode("");
+      setVerifyError("");
+      setVerifyInfo("");
+      // Flip to the OTP view immediately so the user sees the code request
+      // progress inline instead of sitting on an unresponsive Continue button.
+      setVerifyStage("otp");
+      await requestVerificationCode();
+      return;
+    }
+
+    // OFF path — just persist + advance; the waiver PDF email is deferred
+    // until after payment succeeds (or registration completes for free
+    // activities), handled server-side.
+    await finalizeWaiversAndAdvance();
+  }
+
+  async function submitVerificationCode() {
+    if (!verifyCode || verifyCode.trim().length < 4) {
+      setVerifyError(t("verifyCodeInvalid"));
+      return;
+    }
+    setVerifying(true);
+    setVerifyError("");
+    try {
+      const res = await fetch(`/api/register/${activityId}/verify-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: parent1.email, code: verifyCode.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.verified) {
+        setVerifyError(data.error || t("verifyCodeInvalid"));
+        return;
+      }
+      const newConsents = buildNewConsents();
+      setVerifyCode("");
+      // Flip to the "processing" stage so the OTP card turns into a visible
+      // "Finalizing..." spinner. This gives the user immediate feedback while
+      // we persist the consents and move to the next step. Scroll the panel
+      // into view in case the keyboard / small viewport hid it.
+      setVerifyStage("processing");
+      requestAnimationFrame(() => {
+        if (otpPanelRef.current) {
+          otpPanelRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      });
+      await finalizeWaiversAndAdvance();
+      // ON path: persist-and-advance has already saved the consents; now
+      // explicitly trigger the dedicated waiver-PDF email. The helper on the
+      // server is idempotent via `waiverConfirmationSentAt`.
+      triggerWaiverConfirmationEmail(newConsents);
+    } catch {
+      setVerifyError(tc("somethingWentWrong"));
+      setVerifyStage("otp");
+    } finally {
+      setVerifying(false);
+    }
+  }
+
+  async function resendVerificationCode() {
+    setVerifyInfo("");
+    const ok = await requestVerificationCode();
+    if (ok) setVerifyInfo(t("verifyCodeResent"));
+  }
+
+  function editEmailFromOtp() {
+    setVerifyStage("waivers");
+    setVerifyCode("");
+    setVerifyError("");
+    setVerifyInfo("");
+    goToStep(1);
   }
 
   async function saveAndPay() {
@@ -750,7 +882,8 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
             <div className="space-y-5">
               <h3 className="font-semibold text-gray-900">{t("parentGuardian")}</h3>
               <div>
-                <h4 className="text-sm font-medium text-gray-700 mb-3">{t("parent1Required")}</h4>
+                <h4 className="text-sm font-medium text-gray-700 mb-1">{t("parent1Required")}</h4>
+                <p className="text-xs text-gray-400 mb-3">{t("parent1FillsHint")}</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1 text-start">{t("firstNameRequired")}</label>
@@ -1000,7 +1133,99 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
             </div>
           )}
 
-          {hasWaivers && step === waiverStepNum && (
+          {hasWaivers && step === waiverStepNum && verifyStage === "processing" && (
+            <div ref={otpPanelRef} className="flex flex-col items-center justify-center py-10 space-y-4 text-center">
+              <div className="relative">
+                <div className="h-14 w-14 rounded-full bg-green-50 flex items-center justify-center">
+                  <svg className="h-7 w-7 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <svg className="absolute -right-1.5 -bottom-1.5 h-6 w-6 animate-spin text-blue-600" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                </svg>
+              </div>
+              <h3 className="font-semibold text-gray-900">{t("verifyingFinalizing")}</h3>
+              <p className="text-sm text-gray-500 max-w-sm">{t("verifyingFinalizingDesc")}</p>
+            </div>
+          )}
+
+          {hasWaivers && step === waiverStepNum && verifyStage === "otp" && (
+            <div ref={otpPanelRef} className="space-y-5">
+              <h3 className="font-semibold text-gray-900">{t("verifyWaiverEmailTitle")}</h3>
+              <p className="text-sm text-gray-500">
+                {t("verifyWaiverEmailDescPrefix")} <strong className="text-gray-900">{parent1.email}</strong>. {t("verifyWaiverEmailDescSuffix")}
+              </p>
+              <button
+                type="button"
+                onClick={editEmailFromOtp}
+                className="text-xs text-blue-600 hover:text-blue-800 font-medium underline"
+              >
+                {t("verifyWrongEmail")}
+              </button>
+
+              <div>
+                <label className="block text-xs text-gray-500 mb-1 text-start">{t("verificationCode")}</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  value={verifyCode}
+                  disabled={sendingCode}
+                  onChange={(e) => { setVerifyCode(e.target.value.replace(/\D/g, "")); setVerifyError(""); }}
+                  className="w-full border rounded-lg px-3 py-2 text-lg tracking-[0.5em] font-semibold text-center disabled:bg-gray-50 disabled:text-gray-400"
+                  placeholder="000000"
+                />
+                {sendingCode && !verifyError && (
+                  <p className="mt-2 text-xs text-gray-500 flex items-center gap-1.5">
+                    <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                    </svg>
+                    {t("sending")}
+                  </p>
+                )}
+                {verifyError && (
+                  <p className="mt-2 text-xs text-red-600">{verifyError}</p>
+                )}
+                {!verifyError && !sendingCode && verifyInfo && (
+                  <p className="mt-2 text-xs text-green-600">{verifyInfo}</p>
+                )}
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-2">
+                <div className="flex items-center gap-4">
+                  <button
+                    type="button"
+                    onClick={() => { setVerifyStage("waivers"); setVerifyError(""); setVerifyInfo(""); }}
+                    className="text-sm text-gray-500 hover:text-gray-700 font-medium"
+                  >
+                    {t("backToWaivers")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={resendVerificationCode}
+                    disabled={sendingCode}
+                    className="text-sm text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50"
+                  >
+                    {sendingCode ? t("sending") : t("resendCode")}
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={submitVerificationCode}
+                  disabled={verifying || !verifyCode}
+                  className="bg-blue-600 text-white px-8 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition"
+                >
+                  {verifying ? t("verifying") : t("verifyAndContinue")}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {hasWaivers && step === waiverStepNum && verifyStage === "waivers" && (
             <div className="space-y-5">
               <h3 className="font-semibold text-gray-900">{t("waiversTitle")}</h3>
               <p className="text-sm text-gray-500">{t("waiversDesc")}</p>
@@ -1058,10 +1283,16 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                 </button>
                 <button
                   onClick={completeWaivers}
-                  disabled={savingDraft || waivers.filter((w) => w.isRequired).some((w) => !waiverConsents[w._id])}
-                  className="bg-blue-600 text-white px-8 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition"
+                  disabled={savingDraft || sendingCode || waivers.filter((w) => w.isRequired).some((w) => !waiverConsents[w._id])}
+                  className="bg-blue-600 text-white px-8 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition inline-flex items-center justify-center gap-2"
                 >
-                  {savingDraft ? tc("saving") : tc("continue")}
+                  {(savingDraft || sendingCode) && (
+                    <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                    </svg>
+                  )}
+                  {sendingCode ? t("sending") : (savingDraft ? tc("saving") : tc("continue"))}
                 </button>
               </div>
             </div>

@@ -52,6 +52,7 @@ function DashboardLayoutInner({ children }) {
     { href: "/dashboard/parents", label: t("parents"), active: pathname === "/dashboard/parents" },
     { href: "/dashboard/players", label: t("players"), active: pathname === "/dashboard/players" },
     { href: "/dashboard/users", label: t("users"), active: pathname.startsWith("/dashboard/users") },
+    { href: "/dashboard/leads", label: t("leads"), active: pathname.startsWith("/dashboard/leads") },
     { href: "/dashboard/messages", label: t("messages"), active: pathname.startsWith("/dashboard/messages") },
   ];
 

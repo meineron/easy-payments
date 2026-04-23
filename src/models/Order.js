@@ -99,6 +99,10 @@ const OrderSchema = new mongoose.Schema({
     agreedByName: { type: String, default: "" },
     agreedByEmail: { type: String, default: "" },
   }],
+  // Stamp for the dedicated waiver-confirmation PDF email. Used as an
+  // idempotency guard so we never double-send across the ON path
+  // (post-OTP-verification) and the OFF path (post-payment webhook).
+  waiverConfirmationSentAt: { type: Date, default: null },
 
   formData: { type: mongoose.Schema.Types.Mixed, default: {} },
 }, {
