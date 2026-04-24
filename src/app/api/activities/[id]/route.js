@@ -51,6 +51,7 @@ export async function PUT(request, { params }) {
       "teams", "formSections", "subscriptions", "coupons", "waivers",
       "waiverEmailConfirmation",
       "passStripeFeeToCustomer", "afterRegistrationMessage",
+      "registrationInvitation",
     ];
 
     for (const key of allowed) {

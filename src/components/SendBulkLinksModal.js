@@ -1,13 +1,27 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations, useLocale } from "next-intl";
 import { activityTeamSlotKey } from "@/lib/activity-team-keys";
+import {
+  getDefaultInvitationEmailHtml,
+  getDefaultInvitationSms,
+  getDefaultInvitationSubject,
+} from "@/lib/registration-invitation";
+
+const INVITATION_VARIABLE_TOKENS = [
+  { key: "player_name", labelKey: "insertPlayerName" },
+  { key: "activity_name", labelKey: "insertActivityName" },
+  { key: "team_name", labelKey: "insertTeamName" },
+  { key: "club_name", labelKey: "insertClubName" },
+];
 
 export default function SendBulkLinksModal({ type, activityId, activity, orders, expectedPlayers, onClose, onDone, onError }) {
   const td = useTranslations("activityDetail");
   const tm = useTranslations("messages");
   const tc = useTranslations("common");
+  const te = useTranslations("email");
+  const locale = useLocale();
 
   const activityTeams = (activity?.teams || []).map((row, slotIndex) => ({
     slotIndex,
@@ -16,21 +30,36 @@ export default function SendBulkLinksModal({ type, activityId, activity, orders,
   }));
   const linkTeams = activityTeams.filter((t) => t.teamId);
 
+  const savedInvitation = type === "registration" ? (activity?.registrationInvitation || null) : null;
+  const hasSavedInvitation = !!(
+    savedInvitation && (savedInvitation.subject || savedInvitation.bodyHtml || savedInvitation.smsText)
+  );
+
   const [selectedTeams, setSelectedTeams] = useState(() => new Set(linkTeams.map((row) => String(row.teamId))));
   const [channel, setChannel] = useState("email");
-  const [subject, setSubject] = useState(
-    type === "payment"
-      ? `${activity?.title || "Activity"} — Payment Link`
-      : `${activity?.title || "Activity"} — Registration Link`
-  );
-  const [bodyHtml, setBodyHtml] = useState(
-    type === "payment" ? td("defaultPaymentEmailBody") : td("defaultRegistrationEmailBody")
-  );
-  const [smsText, setSmsText] = useState(
-    type === "payment"
-      ? td("defaultPaymentSmsBody", { activity: activity?.title || "" , link: "{link}" })
-      : td("defaultRegistrationSmsBody", { activity: activity?.title || "" , link: "{link}" })
-  );
+  const [subject, setSubject] = useState(() => {
+    if (type === "registration") {
+      return savedInvitation?.subject || getDefaultInvitationSubject(locale);
+    }
+    return `${activity?.title || "Activity"} — Payment Link`;
+  });
+  const [bodyHtml, setBodyHtml] = useState(() => {
+    if (type === "registration") {
+      // Prefer the activity's saved Registration Invitation Template;
+      // otherwise fall back to the locale-default invitation template
+      // (which is the same one shown in the per-row Send Link modal).
+      return savedInvitation?.bodyHtml || getDefaultInvitationEmailHtml(locale);
+    }
+    // `.raw` — the default body contains literal `<p>` HTML; next-intl would
+    // otherwise interpret them as rich-text tag placeholders and throw.
+    return td.raw("defaultPaymentEmailBody");
+  });
+  const [smsText, setSmsText] = useState(() => {
+    if (type === "registration") {
+      return savedInvitation?.smsText || getDefaultInvitationSms(locale);
+    }
+    return td("defaultPaymentSmsBody", { activity: activity?.title || "" , link: "{link}" });
+  });
   const [smsNotification, setSmsNotification] = useState(false);
   const [smsNotificationText, setSmsNotificationText] = useState("");
   const [sending, setSending] = useState(false);
@@ -50,9 +79,25 @@ export default function SendBulkLinksModal({ type, activityId, activity, orders,
   const personalLinkToken = type === "payment" ? "{personal_payment_link}" : "{personal_registration_link}";
 
   function insertPersonalLink() {
+    const label = type === "payment" ? te("payNowButton") : te("regLinkButton");
+    const color = type === "payment" ? "#16a34a" : "#2563eb";
+    const html =
+      `<div style="text-align:center;margin:16px 0;">` +
+      `<a href="${personalLinkToken}" style="display:inline-block;background:${color};color:#fff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:16px;">${label}</a>` +
+      `</div><p><br/></p>`;
     bodyRef.current?.focus();
-    document.execCommand("insertText", false, personalLinkToken);
+    document.execCommand("insertHTML", false, html);
     if (bodyRef.current) setBodyHtml(bodyRef.current.innerHTML);
+  }
+
+  function insertVariableToken(token) {
+    bodyRef.current?.focus();
+    document.execCommand("insertText", false, token);
+    if (bodyRef.current) setBodyHtml(bodyRef.current.innerHTML);
+  }
+
+  function insertSmsToken(token) {
+    setSmsText((prev) => (prev || "") + token);
   }
 
   function handleImageUpload(e) {
@@ -232,6 +277,11 @@ export default function SendBulkLinksModal({ type, activityId, activity, orders,
                     <code className="inline-block bg-white border border-blue-200 rounded px-1.5 py-0.5 font-mono text-[11px] text-blue-700 select-all">{personalLinkToken}</code>
                   </p>
                   <p>{td("personalLinkBoxLine2")}</p>
+                  {type === "registration" && (
+                    <p className="mt-1 pt-1 border-t border-blue-100">
+                      {td.raw("templateVariablesHint")}
+                    </p>
+                  )}
                 </div>
 
                 <div className="border rounded-lg overflow-hidden">
@@ -250,6 +300,17 @@ export default function SendBulkLinksModal({ type, activityId, activity, orders,
                     <button type="button" onMouseDown={(e) => { e.preventDefault(); insertPersonalLink(); }} className="px-2 py-1 rounded text-sm hover:bg-gray-200 text-purple-600 font-medium" title={personalLinkToken}>
                       {td("insertPersonalLink")}
                     </button>
+                    {type === "registration" && INVITATION_VARIABLE_TOKENS.map((v) => (
+                      <button
+                        key={v.key}
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); insertVariableToken(`{${v.key}}`); }}
+                        className="px-2 py-1 rounded text-sm hover:bg-gray-200 text-indigo-600"
+                        title={`{${v.key}}`}
+                      >
+                        {td(v.labelKey)}
+                      </button>
+                    ))}
                   </div>
                   <div ref={bodyRef} contentEditable suppressContentEditableWarning
                     onBlur={() => { if (bodyRef.current) setBodyHtml(bodyRef.current.innerHTML); }}
@@ -287,6 +348,20 @@ export default function SendBulkLinksModal({ type, activityId, activity, orders,
           {channel === "sms" && (
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">{td("sendViaSMS")}</label>
+              {type === "registration" && (
+                <div className="flex items-center gap-1 flex-wrap mb-1">
+                  {INVITATION_VARIABLE_TOKENS.map((v) => (
+                    <button
+                      key={v.key}
+                      type="button"
+                      onClick={() => insertSmsToken(`{${v.key}}`)}
+                      className="px-2 py-0.5 rounded text-xs hover:bg-gray-200 text-indigo-600 border border-indigo-200 bg-indigo-50"
+                    >
+                      {td(v.labelKey)}
+                    </button>
+                  ))}
+                </div>
+              )}
               <textarea value={smsText} onChange={(e) => setSmsText(e.target.value)}
                 rows={4} className="w-full border rounded-lg px-3 py-2 text-sm resize-none" />
               <p className="text-xs text-gray-400 mt-1">{smsText.length} characters</p>

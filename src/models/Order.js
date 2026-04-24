@@ -103,6 +103,13 @@ const OrderSchema = new mongoose.Schema({
   // idempotency guard so we never double-send across the ON path
   // (post-OTP-verification) and the OFF path (post-payment webhook).
   waiverConfirmationSentAt: { type: Date, default: null },
+  // Set the first time the parent persists their signed waivers from step 3
+  // (OFF path: /save with consents; ON path: /save after OTP verification).
+  // Once set, the registration-info portion of the flow (steps 1–3) is
+  // considered locked: revisiting the link takes the parent straight to the
+  // Invoice step, the waiver checkboxes are read-only, and the "Back" button
+  // is hidden on step 4. Payment is the only remaining action.
+  waiversLockedAt: { type: Date, default: null },
 
   formData: { type: mongoose.Schema.Types.Mixed, default: {} },
 }, {

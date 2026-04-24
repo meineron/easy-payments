@@ -4,14 +4,20 @@ import Order from "@/models/Order";
 import { sendWaiverConfirmationPDFEmail } from "@/lib/waiver-confirmation-email";
 
 /**
- * Sends the dedicated waiver-confirmation PDF email for an order that already
+ * Sends the dedicated waiver-confirmation email for an order that already
  * has its waiver consents persisted (typically by the preceding /save call).
  *
  * The caller may also pass `waiverConsents` as a safety net — if any of them
- * aren't yet on the order we merge them in before generating the PDF.
+ * aren't yet on the order we merge them in before generating the email.
  *
- * Idempotent: the underlying helper no-ops when `order.waiverConfirmationSentAt`
- * is already set, so duplicate calls (e.g. client retries) are safe.
+ * This endpoint is ONLY called from the ON (email-confirmation) path right
+ * after a successful OTP verification, so we force the helper to resend even
+ * when `waiverConfirmationSentAt` is already set. Otherwise a parent who
+ * re-signs or returns via the same link would never see the email again,
+ * which is the user-visible symptom we're fixing here.
+ *
+ * The OFF path (post-payment) uses the same helper from inside the Stripe
+ * webhook / save route without `force`, so idempotency there is preserved.
  */
 export async function POST(request, { params }) {
   try {
@@ -52,9 +58,9 @@ export async function POST(request, { params }) {
       }
     }
 
-    await sendWaiverConfirmationPDFEmail(order);
+    const result = await sendWaiverConfirmationPDFEmail(order, { force: true });
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: !!result?.ok, sentTo: result?.sentTo || [] });
   } catch (error) {
     console.error("Waiver confirmation error:", error);
     return NextResponse.json({ error: "Failed to send waiver confirmation" }, { status: 500 });

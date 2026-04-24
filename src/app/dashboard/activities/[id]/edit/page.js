@@ -2,8 +2,14 @@
 
 import { useState, useEffect, useCallback, useRef, use } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useTranslations, useLocale } from "next-intl";
 import { activityTeamSlotKey } from "@/lib/activity-team-keys";
+import InvitationTemplateEditor from "@/components/InvitationTemplateEditor";
+import {
+  getDefaultInvitationEmailHtml,
+  getDefaultInvitationSms,
+  getDefaultInvitationSubject,
+} from "@/lib/registration-invitation";
 
 function Toast({ message, type = "success", onClose }) {
   useEffect(() => {
@@ -1252,19 +1258,79 @@ function TabWaivers({ activity, onSave, saving, tc, td }) {
 
 /* ============== TAB 5: Notifications ============== */
 function TabNotifications({ activity, onSave, saving, tc, td }) {
+  const locale = useLocale();
   const [message, setMessage] = useState("");
-  useEffect(() => { if (activity) setMessage(activity.afterRegistrationMessage || ""); }, [activity]);
-  function save() { onSave({ afterRegistrationMessage: message }); }
+  const [invSubject, setInvSubject] = useState("");
+  const [invBody, setInvBody] = useState("");
+  const [invSms, setInvSms] = useState("");
+
+  useEffect(() => {
+    if (!activity) return;
+    setMessage(activity.afterRegistrationMessage || "");
+    const inv = activity.registrationInvitation || {};
+    setInvSubject(inv.subject || getDefaultInvitationSubject(locale));
+    setInvBody(inv.bodyHtml || getDefaultInvitationEmailHtml(locale));
+    setInvSms(inv.smsText || getDefaultInvitationSms(locale));
+  }, [activity, locale]);
+
+  function resetInvitation() {
+    setInvSubject(getDefaultInvitationSubject(locale));
+    setInvBody(getDefaultInvitationEmailHtml(locale));
+    setInvSms(getDefaultInvitationSms(locale));
+  }
+
+  function saveInvitation() {
+    onSave({
+      registrationInvitation: {
+        subject: invSubject,
+        bodyHtml: invBody,
+        smsText: invSms,
+      },
+    });
+  }
+
+  function saveAfterMessage() { onSave({ afterRegistrationMessage: message }); }
+
   return (
-    <div className="space-y-6">
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">{td("afterRegistrationMessage")}</label>
-        <p className="text-xs text-gray-400 mb-2">{td("afterRegistrationDesc")}</p>
-        <div contentEditable suppressContentEditableWarning className="w-full border rounded-lg px-3 py-2 text-sm min-h-[200px] focus:outline-none focus:ring-2 focus:ring-blue-500"
-          dangerouslySetInnerHTML={{ __html: message }} onBlur={(e) => setMessage(e.target.innerHTML)} />
-      </div>
+    <div className="space-y-8">
+      {/* Registration invitation template */}
+      <section className="space-y-3">
+        <div>
+          <h3 className="text-base font-semibold text-gray-900">{td("registrationInvitation")}</h3>
+          <p className="text-xs text-gray-500 mt-1">{td("registrationInvitationDesc")}</p>
+        </div>
+        <InvitationTemplateEditor
+          subject={invSubject}
+          bodyHtml={invBody}
+          smsText={invSms}
+          onSubjectChange={setInvSubject}
+          onBodyChange={setInvBody}
+          onSmsChange={setInvSms}
+          onReset={resetInvitation}
+        />
+        <button
+          onClick={saveInvitation}
+          disabled={saving}
+          className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+        >
+          {saving ? tc("saving") : td("saveInvitationTemplate")}
+        </button>
+      </section>
+
+      <hr className="border-gray-200" />
+
+      {/* After-registration message */}
+      <section className="space-y-3">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">{td("afterRegistrationMessage")}</label>
+          <p className="text-xs text-gray-400 mb-2">{td("afterRegistrationDesc")}</p>
+          <div contentEditable suppressContentEditableWarning className="w-full border rounded-lg px-3 py-2 text-sm min-h-[200px] focus:outline-none focus:ring-2 focus:ring-blue-500"
+            dangerouslySetInnerHTML={{ __html: message }} onBlur={(e) => setMessage(e.target.innerHTML)} />
+        </div>
+        <button onClick={saveAfterMessage} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{saving ? tc("saving") : td("saveNotifications")}</button>
+      </section>
+
       <div className="bg-gray-50 rounded-lg p-4"><p className="text-sm text-gray-500">{td("moreNotificationsComingSoon")}</p></div>
-      <button onClick={save} disabled={saving} className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{saving ? tc("saving") : td("saveNotifications")}</button>
     </div>
   );
 }

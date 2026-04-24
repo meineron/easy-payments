@@ -158,6 +158,9 @@ export async function PUT(request, { params }) {
       }
 
       if (body.waiverConsents) order.waiverConsents = body.waiverConsents;
+      if (!order.waiversLockedAt && Array.isArray(body.waiverConsents) && body.waiverConsents.some((c) => c?.agreedAt)) {
+        order.waiversLockedAt = new Date();
+      }
       order.totalCostCents = computeTotal(order);
 
       if (!order.playerId && order.playerFirstName && order.playerLastName) {
@@ -257,6 +260,9 @@ export async function PUT(request, { params }) {
       }
 
       if (body.waiverConsents) existing.waiverConsents = body.waiverConsents;
+      if (!existing.waiversLockedAt && Array.isArray(body.waiverConsents) && body.waiverConsents.some((c) => c?.agreedAt)) {
+        existing.waiversLockedAt = new Date();
+      }
       if (body.couponCode !== undefined) existing.couponCode = body.couponCode;
       if (body.couponDiscountCents !== undefined) existing.couponDiscountCents = body.couponDiscountCents;
       existing.totalCostCents = computeTotal(existing);
@@ -345,6 +351,9 @@ export async function PUT(request, { params }) {
       formData: body.formData || {},
       status: "pending",
     };
+    if (Array.isArray(body.waiverConsents) && body.waiverConsents.some((c) => c?.agreedAt)) {
+      orderData.waiversLockedAt = new Date();
+    }
     orderData.totalCostCents = computeTotal(orderData);
 
     const order = await Order.create(orderData);

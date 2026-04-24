@@ -102,6 +102,12 @@ const WaiverSchema = new mongoose.Schema({
   order: { type: Number, default: 0 },
 });
 
+const RegistrationInvitationSchema = new mongoose.Schema({
+  subject: { type: String, default: "" },
+  bodyHtml: { type: String, default: "" },
+  smsText: { type: String, default: "" },
+}, { _id: false });
+
 const ActivitySchema = new mongoose.Schema({
   clubId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -143,6 +149,7 @@ const ActivitySchema = new mongoose.Schema({
 
   passStripeFeeToCustomer: { type: Boolean, default: false },
   afterRegistrationMessage: { type: String, default: "" },
+  registrationInvitation: { type: RegistrationInvitationSchema, default: () => ({}) },
 }, {
   timestamps: true,
 });

@@ -3,16 +3,22 @@
 import { useState, useEffect, useCallback, useMemo, useRef, use } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { useTranslations, useLocale } from "next-intl";
 import InvoiceSlideOver from "@/components/InvoiceSlideOver";
 import SubscriptionItemReviewModal from "@/components/SubscriptionItemReviewModal";
 import SendBulkLinksModal from "@/components/SendBulkLinksModal";
 import SendMessageModal from "@/components/SendMessageModal";
+import InvitationTemplateEditor from "@/components/InvitationTemplateEditor";
 import PhonePrefixInput from "@/components/PhonePrefixInput";
 import RichTextEditor from "@/components/RichTextEditor";
 import { activityTeamSlotKey } from "@/lib/activity-team-keys";
 import { normalizeCopyUrl } from "@/lib/copy-url";
 import { formatDob, dobToInputValue } from "@/lib/dob";
+import {
+  getDefaultInvitationEmailHtml,
+  getDefaultInvitationSms,
+  getDefaultInvitationSubject,
+} from "@/lib/registration-invitation";
 
 function centsToDisplay(c) { return ((c || 0) / 100).toFixed(2); }
 function displayToCents(v) { return Math.round(parseFloat(v || 0) * 100); }
@@ -872,9 +878,9 @@ function TabParticipants({ activityId, activity, tc, td }) {
         </div>
       </div>
 
-      {/* BULK ACTIONS BAR */}
+      {/* BULK ACTIONS BAR — sticky so it floats with the user while scrolling the participants table */}
       {selected.size > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="sticky top-2 z-30 bg-blue-50/95 backdrop-blur border border-blue-200 rounded-lg px-4 py-3 mb-4 shadow-md flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <span className="text-sm font-medium text-blue-800">{td("selected", { count: selected.size })}</span>
           <div className="flex items-center gap-2 flex-wrap">
             <button onClick={() => setBulkModal("add_item")}
@@ -913,7 +919,7 @@ function TabParticipants({ activityId, activity, tc, td }) {
 
       {/* TABLE */}
       {filteredRows.length === 0 ? (
-        <p className="text-gray-400 text-sm p-8 bg-gray-50 rounded-lg text-center">{allRows.length === 0 ? td("noParticipantsYet") : td("noResultsMatchFilters")}</p>
+        <p className="text-gray-400 text-sm p-8 bg-gray-50 rounded-lg text-center">{(orders.length + expectedPlayers.length) === 0 ? td("noParticipantsYet") : td("noResultsMatchFilters")}</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -1220,6 +1226,7 @@ function TabParticipants({ activityId, activity, tc, td }) {
           orderId={sendLinkModal.orderId}
           row={sendLinkModal.row}
           activityId={activityId}
+          activity={activity}
           onClose={() => setSendLinkModal(null)}
           onDone={(msg) => { setSendLinkModal(null); setToast({ message: msg, type: "success" }); fetchOrders(); }}
           onError={(msg) => setToast({ message: msg, type: "error" })}
@@ -1244,12 +1251,42 @@ function TabParticipants({ activityId, activity, tc, td }) {
 }
 
 /* ============== SEND LINK RECIPIENT MODAL ============== */
-function SendLinkRecipientModal({ type, orderId, row, activityId, onClose, onDone, onError, tc, td }) {
+function SendLinkRecipientModal({ type, orderId, row, activityId, activity, onClose, onDone, onError, tc, td }) {
+  const locale = useLocale();
+  const isRegistration = type === "registration";
+  const savedInvitation = activity?.registrationInvitation || null;
+
   const [selections, setSelections] = useState({});
   const [sending, setSending] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   const [linkLoading, setLinkLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+
+  // Template state — only meaningful for registration links.
+  // Seeded from the activity's saved Registration Invitation Template,
+  // falling back to locale defaults. Edits here only affect this send.
+  const [subject, setSubject] = useState(() =>
+    isRegistration
+      ? (savedInvitation?.subject || getDefaultInvitationSubject(locale))
+      : ""
+  );
+  const [bodyHtml, setBodyHtml] = useState(() =>
+    isRegistration
+      ? (savedInvitation?.bodyHtml || getDefaultInvitationEmailHtml(locale))
+      : ""
+  );
+  const [smsText, setSmsText] = useState(() =>
+    isRegistration
+      ? (savedInvitation?.smsText || getDefaultInvitationSms(locale))
+      : ""
+  );
+  const [showTemplate, setShowTemplate] = useState(false);
+
+  function resetTemplate() {
+    setSubject(savedInvitation?.subject || getDefaultInvitationSubject(locale));
+    setBodyHtml(savedInvitation?.bodyHtml || getDefaultInvitationEmailHtml(locale));
+    setSmsText(savedInvitation?.smsText || getDefaultInvitationSms(locale));
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -1333,10 +1370,13 @@ function SendLinkRecipientModal({ type, orderId, row, activityId, onClose, onDon
       const endpoint = type === "registration"
         ? `/api/activities/${activityId}/orders/${orderId}/send-registration-link`
         : `/api/activities/${activityId}/orders/${orderId}/send-payment-link`;
+      const payload = isRegistration
+        ? { recipients, subject, bodyHtml, smsText }
+        : { recipients };
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ recipients }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (data.success) {
@@ -1358,12 +1398,15 @@ function SendLinkRecipientModal({ type, orderId, row, activityId, onClose, onDon
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+      <div
+        className={`bg-white rounded-xl shadow-xl w-full ${isRegistration && showTemplate ? "max-w-3xl" : "max-w-md"} max-h-[90vh] flex flex-col`}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="px-6 py-4 border-b flex items-center justify-between">
           <h3 className="font-bold text-gray-900">{title}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg">×</button>
         </div>
-        <div className="p-6">
+        <div className="p-6 overflow-y-auto">
           <label className="block text-xs font-medium text-gray-500 mb-1.5">
             {type === "registration" ? td("registrationLink") : td("paymentLink")}
           </label>
@@ -1441,6 +1484,39 @@ function SendLinkRecipientModal({ type, orderId, row, activityId, onClose, onDon
           {targets.length === 0 && (
             <p className="text-sm text-gray-400 text-center py-4">{td("noContactInfo")}</p>
           )}
+
+          {/* TEMPLATE PREVIEW / EDIT — registration only */}
+          {isRegistration && (
+            <div className="mt-6 border-t pt-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">{td("registrationInvitation")}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{td("templatePreviewHint")}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowTemplate((v) => !v)}
+                  className="text-xs font-medium text-blue-600 hover:text-blue-800 whitespace-nowrap ml-3"
+                >
+                  {showTemplate ? td("hideTemplate") : td("previewAndEditTemplate")}
+                </button>
+              </div>
+
+              {showTemplate && (
+                <div className="mt-4">
+                  <InvitationTemplateEditor
+                    subject={subject}
+                    bodyHtml={bodyHtml}
+                    smsText={smsText}
+                    onSubjectChange={setSubject}
+                    onBodyChange={setBodyHtml}
+                    onSmsChange={setSmsText}
+                    onReset={resetTemplate}
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="px-6 py-4 border-t flex justify-end gap-3">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">{tc("cancel")}</button>
@@ -1455,20 +1531,64 @@ function SendLinkRecipientModal({ type, orderId, row, activityId, onClose, onDon
 }
 
 /* ============== BULK SEND MESSAGE MODAL ============== */
+const BULK_MESSAGE_VARIABLES = [
+  { key: "player_name", labelKey: "insertPlayerName" },
+  { key: "activity_name", labelKey: "insertActivityName" },
+  { key: "team_name", labelKey: "insertTeamName" },
+  { key: "club_name", labelKey: "insertClubName" },
+];
+
 function BulkSendMessageModal({ activityId, activity, rows, ensureOrder, onClose, onDone, onError, tc, td }) {
   const tm = useTranslations("messages");
+  const locale = useLocale();
+
+  const savedInvitation = activity?.registrationInvitation || null;
 
   const [selectedRows, setSelectedRows] = useState(rows);
   const [target, setTarget] = useState("parents");
   const [channel, setChannel] = useState("email");
+  const [template, setTemplate] = useState("custom");
   const [subject, setSubject] = useState(`${activity?.title || ""} — ${td("sendRegistrationLink")}`.trim());
-  const [bodyHtml, setBodyHtml] = useState(td("defaultRegistrationEmailBody"));
+  // Use `.raw` because the default body is literal HTML (`<p>...</p>`);
+  // next-intl otherwise treats those angle brackets as rich-text tags and
+  // throws FORMATTING_ERROR for the missing `p` handler.
+  const [bodyHtml, setBodyHtml] = useState(td.raw("defaultRegistrationEmailBody"));
   const [bodyText, setBodyText] = useState(td("defaultRegistrationSmsBody", { activity: activity?.title || "", link: "{personal_registration_link}" }));
   const [smsNotification, setSmsNotification] = useState(false);
   const [smsNotificationText, setSmsNotificationText] = useState("");
   const [sending, setSending] = useState(false);
   const [toastLocal, setToastLocal] = useState(null);
   const editorRef = useRef(null);
+
+  function applyTemplate(next) {
+    setTemplate(next);
+    if (next === "invitation") {
+      const invSubject = savedInvitation?.subject || getDefaultInvitationSubject(locale);
+      const invBody = savedInvitation?.bodyHtml || getDefaultInvitationEmailHtml(locale);
+      const invSms = savedInvitation?.smsText || getDefaultInvitationSms(locale);
+      setSubject(invSubject);
+      setBodyHtml(invBody);
+      if (editorRef.current?.setHtml) editorRef.current.setHtml(invBody);
+      setBodyText(invSms);
+    } else {
+      setSubject(`${activity?.title || ""} — ${td("sendRegistrationLink")}`.trim());
+      const defaultBody = td.raw("defaultRegistrationEmailBody");
+      setBodyHtml(defaultBody);
+      if (editorRef.current?.setHtml) editorRef.current.setHtml(defaultBody);
+      setBodyText(td("defaultRegistrationSmsBody", { activity: activity?.title || "", link: "{personal_registration_link}" }));
+    }
+  }
+
+  function insertVariableToken(token) {
+    if (channel === "email") {
+      const current = editorRef.current?.getHtml() ?? bodyHtml;
+      const next = current + ` ${token}`;
+      if (editorRef.current?.setHtml) editorRef.current.setHtml(next);
+      setBodyHtml(next);
+    } else {
+      setBodyText((prev) => (prev ? `${prev} ${token}` : token));
+    }
+  }
 
   function removeRow(rowId) {
     setSelectedRows((prev) => prev.filter((r) => r._id !== rowId));
@@ -1613,6 +1733,24 @@ function BulkSendMessageModal({ activityId, activity, rows, ensureOrder, onClose
             </div>
           </div>
 
+          {/* Template */}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1.5">{td("bulkMessageTemplate")}</label>
+            <div className="flex bg-gray-100 rounded-lg p-0.5 w-fit">
+              <button type="button" onClick={() => applyTemplate("custom")}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${template === "custom" ? "bg-white shadow text-blue-600" : "text-gray-500"}`}>
+                {td("bulkMessageTemplateCustom")}
+              </button>
+              <button type="button" onClick={() => applyTemplate("invitation")}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${template === "invitation" ? "bg-white shadow text-blue-600" : "text-gray-500"}`}>
+                {td("bulkMessageTemplateInvitation")}
+              </button>
+            </div>
+            {template === "invitation" && (
+              <p className="text-xs text-gray-400 mt-1.5">{td("bulkMessageTemplateInvitationHint")}</p>
+            )}
+          </div>
+
           {/* Channel */}
           <div className="flex items-center gap-3">
             <div className="flex bg-gray-100 rounded-lg p-0.5">
@@ -1642,12 +1780,24 @@ function BulkSendMessageModal({ activityId, activity, rows, ensureOrder, onClose
                   maxHeight={300}
                   compact
                 />
-                <div className="flex items-center justify-between mt-1.5">
+                <div className="flex items-center justify-between mt-1.5 gap-2 flex-wrap">
                   <p className="text-xs text-gray-400">{td("personalLinkBoxLine1Registration")}</p>
-                  <button type="button" onClick={insertPersonalLink}
-                    className="text-xs font-medium text-purple-600 hover:text-purple-800 whitespace-nowrap">
-                    + {td("insertPersonalLink")}
-                  </button>
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {BULK_MESSAGE_VARIABLES.map((v) => (
+                      <button
+                        key={v.key}
+                        type="button"
+                        onClick={() => insertVariableToken(`{${v.key}}`)}
+                        className="text-[11px] font-medium text-indigo-600 hover:text-indigo-800 whitespace-nowrap px-1.5 py-0.5 rounded border border-indigo-100 bg-indigo-50"
+                      >
+                        {td(v.labelKey)}
+                      </button>
+                    ))}
+                    <button type="button" onClick={insertPersonalLink}
+                      className="text-xs font-medium text-purple-600 hover:text-purple-800 whitespace-nowrap">
+                      + {td("insertPersonalLink")}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1673,12 +1823,24 @@ function BulkSendMessageModal({ activityId, activity, rows, ensureOrder, onClose
               <textarea value={bodyText} onChange={(e) => setBodyText(e.target.value)}
                 placeholder={tm("smsBodyPlaceholder")}
                 rows={5} className="w-full border rounded-lg px-3 py-2 text-sm resize-none" />
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <p className="text-xs text-gray-400">{tm("smsCharCount", { count: bodyText.length })}</p>
-                <button type="button" onClick={insertPersonalLink}
-                  className="text-xs font-medium text-purple-600 hover:text-purple-800 whitespace-nowrap">
-                  + {td("insertPersonalLink")}
-                </button>
+                <div className="flex items-center gap-1 flex-wrap">
+                  {BULK_MESSAGE_VARIABLES.map((v) => (
+                    <button
+                      key={v.key}
+                      type="button"
+                      onClick={() => insertVariableToken(`{${v.key}}`)}
+                      className="text-[11px] font-medium text-indigo-600 hover:text-indigo-800 whitespace-nowrap px-1.5 py-0.5 rounded border border-indigo-100 bg-indigo-50"
+                    >
+                      {td(v.labelKey)}
+                    </button>
+                  ))}
+                  <button type="button" onClick={insertPersonalLink}
+                    className="text-xs font-medium text-purple-600 hover:text-purple-800 whitespace-nowrap">
+                    + {td("insertPersonalLink")}
+                  </button>
+                </div>
               </div>
             </>
           )}

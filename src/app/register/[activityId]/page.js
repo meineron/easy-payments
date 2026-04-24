@@ -274,13 +274,23 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
   // waivers, etc. — not be dropped straight onto the Invoice screen.
   const hasCompletedRegistration = !!initialOrder?.registrationCompletedAt;
 
+  // Separate signal: the parent has finalized steps 1–3 (contact, player,
+  // signed waivers — and passed OTP if required) but payment is still
+  // outstanding. Once stamped, steps 1–3 are locked and revisits jump
+  // straight to the Invoice step. See Order.waiversLockedAt.
+  //
+  // We read from `liveOrder` (kept in sync after every `/save`) rather than
+  // the stale `initialOrder`, so the lock also takes effect in the same
+  // session immediately after the parent finalizes step 3.
+  const waiversLocked = !!(liveOrder?.waiversLockedAt || initialOrder?.waiversLockedAt);
+
   const hasWaivers = (activity?.waivers || []).length > 0;
   const waiversComplete = hasWaivers
-    ? hasCompletedRegistration && (initialOrder?.waiverConsents || []).length > 0
+    ? (hasCompletedRegistration || waiversLocked) && (initialOrder?.waiverConsents || []).length > 0
     : true;
 
   const autoResumeToInvoice = initialOrder && !orderPaid && initialOrder.status === "pending" &&
-    hasCompletedRegistration &&
+    (hasCompletedRegistration || waiversLocked) &&
     !!initialOrder.playerFirstName && !!initialOrder.parent1FirstName && waiversComplete;
 
   const [step, setStep] = useState(() => {
@@ -319,17 +329,18 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
 
   const [formData, setFormData] = useState(() => initialOrder?.formData || {});
 
-  // When the parent hasn't completed registration yet, don't lock previously
-  // stored waiver consents — the parent should be able to re-check them as
-  // part of a fresh start from step 1.
+  // Lock the waiver checkboxes whenever the parent has either completed the
+  // registration outright (`registrationCompletedAt`) or finalized steps 1–3
+  // via the waivers persist step (`waiversLockedAt`). In both cases the
+  // consents are already committed and must not be mutated from the client.
   const savedWaiverIds = useMemo(() => {
     const ids = new Set();
-    if (!hasCompletedRegistration) return ids;
+    if (!hasCompletedRegistration && !waiversLocked) return ids;
     (initialOrder?.waiverConsents || []).forEach((c) => {
       if (c.agreedAt) ids.add(c.waiverId);
     });
     return ids;
-  }, [initialOrder, hasCompletedRegistration]);
+  }, [initialOrder, hasCompletedRegistration, waiversLocked]);
 
   // Stages: "waivers" (list) → "otp" (enter code) → "processing" (finalizing
   // after successful verification, until the step actually advances).
@@ -343,7 +354,7 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
 
   const [waiverConsents, setWaiverConsents] = useState(() => {
     const init = {};
-    if (!hasCompletedRegistration) return init;
+    if (!hasCompletedRegistration && !waiversLocked) return init;
     (initialOrder?.waiverConsents || []).forEach((c) => {
       if (c.agreedAt) init[c.waiverId] = true;
     });
@@ -643,19 +654,23 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
     await persistStep3AndAdvance();
   }
 
-  // Fire-and-forget: ask the server to email the dedicated waiver-PDF right
-  // now. Used only on the ON (email-confirmation) path — the OFF path defers
-  // this email until payment succeeds (or registration completes for free
-  // activities), handled server-side in the Stripe webhook + save route.
+  // Fire-and-forget: ask the server to email the dedicated waiver confirmation
+  // right now. Used only on the ON (email-confirmation) path — the OFF path
+  // defers this email until payment succeeds (or registration completes for
+  // free activities), handled server-side in the Stripe webhook + save route.
+  //
+  // We always POST even when `newConsents` is empty (e.g. the parent already
+  // signed earlier and is re-verifying): the server endpoint force-resends
+  // on the ON path so the parent reliably gets a fresh confirmation email
+  // after each successful OTP verification.
   function triggerWaiverConfirmationEmail(newConsents) {
-    if (!newConsents || newConsents.length === 0) return;
     fetch(`/api/register/${activityId}/waiver-confirmation`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         token: token || undefined,
         orderId: savedOrderId || initialOrder?._id || undefined,
-        waiverConsents: newConsents,
+        waiverConsents: newConsents || [],
       }),
     }).catch(() => {});
   }
@@ -1314,11 +1329,13 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
 
               <ContactForm activityId={activityId} activity={activity} order={liveOrder} t={t} tc={tc} />
 
-              <div className="flex justify-start pt-4">
-                <button onClick={() => goToStep(hasWaivers ? waiverStepNum : 2)} className="text-sm text-gray-500 hover:text-gray-700 font-medium">
-                  {tc("back")}
-                </button>
-              </div>
+              {!waiversLocked && (
+                <div className="flex justify-start pt-4">
+                  <button onClick={() => goToStep(hasWaivers ? waiverStepNum : 2)} className="text-sm text-gray-500 hover:text-gray-700 font-medium">
+                    {tc("back")}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -1534,9 +1551,13 @@ function RegisterPageInner({ activityId, token, activity, order: initialOrder, m
                 )}
 
                 <div className="flex justify-between">
-                  <button onClick={() => goToStep(hasWaivers ? waiverStepNum : 2)} className="text-sm text-gray-500 hover:text-gray-700 font-medium">
-                    {tc("back")}
-                  </button>
+                  {waiversLocked ? (
+                    <span />
+                  ) : (
+                    <button onClick={() => goToStep(hasWaivers ? waiverStepNum : 2)} className="text-sm text-gray-500 hover:text-gray-700 font-medium">
+                      {tc("back")}
+                    </button>
+                  )}
                   <button
                     onClick={saveAndPay}
                     disabled={paying || (chosenInstallments > 1 && !agreedToTerms)}

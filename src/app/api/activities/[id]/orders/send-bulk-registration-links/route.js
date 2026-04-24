@@ -7,8 +7,14 @@ import crypto from "crypto";
 import Order from "@/models/Order";
 import Activity from "@/models/Activity";
 import Club from "@/models/Club";
+import Team from "@/models/Team";
 import { sendCustomRegistrationEmail } from "@/lib/email";
 import { sendSMS, toE164 } from "@/lib/sms";
+import { replaceInvitationVars } from "@/lib/registration-invitation";
+
+// Keep Team registered so `.populate("teamId")` works in environments where
+// the model was hot-reloaded without this route importing it first.
+void Team;
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
@@ -29,7 +35,7 @@ export async function POST(request, { params }) {
     await dbConnect();
 
     const [activity, club] = await Promise.all([
-      Activity.findById(id, "title").lean(),
+      Activity.findById(id, "title coverImage").lean(),
       Club.findById(session.user.id, "name logoUrl language").lean(),
     ]);
 
@@ -47,7 +53,7 @@ export async function POST(request, { params }) {
       teamId: { $in: teamObjectIds },
       parent1Email: { $exists: true, $ne: "" },
     };
-    const orders = await Order.find(filter);
+    const orders = await Order.find(filter).populate("teamId", "name");
 
     if (orders.length === 0) {
       return NextResponse.json({ error: "No orders with parent emails found for selected teams" }, { status: 404 });
@@ -70,16 +76,35 @@ export async function POST(request, { params }) {
 
         const orderPhoneE164 = toE164(order.parent1PhonePrefix || "+1", order.parent1Phone);
 
+        const playerName = `${order.playerFirstName} ${order.playerLastName}`.trim();
+        const teamName = order.teamId?.name || "";
+        const vars = {
+          playerName,
+          activityTitle: activity.title || "",
+          teamName,
+          clubName: club.name || "",
+          coverImage: activity.coverImage || "",
+        };
+
         if (channel === "sms") {
           if (orderPhoneE164) {
-            const text = (smsText || "").replace("{link}", registrationUrl);
-            await sendSMS({ to: orderPhoneE164, message: text });
+            const resolved = replaceInvitationVars(smsText || "", vars).replace(/\{link\}/g, registrationUrl);
+            await sendSMS({ to: orderPhoneE164, message: resolved });
           }
         } else {
+          const resolvedSubject = replaceInvitationVars(
+            subject || `${activity.title} — Registration`,
+            vars,
+          );
+          const resolvedBody = replaceInvitationVars(
+            bodyHtml || "<p>Please complete your registration.</p>",
+            vars,
+          );
+
           await sendCustomRegistrationEmail(order.parent1Email, {
-            subject: subject || `${activity.title} — Registration`,
-            bodyHtml: bodyHtml || "<p>Please complete your registration.</p>",
-            playerName: `${order.playerFirstName} ${order.playerLastName}`,
+            subject: resolvedSubject,
+            bodyHtml: resolvedBody,
+            playerName,
             clubName: club.name || "",
             activityTitle: activity.title || "",
             registrationUrl,
@@ -88,7 +113,7 @@ export async function POST(request, { params }) {
           });
 
           if (smsNotification && orderPhoneE164) {
-            const smsBody = (body.smsText || `You have received an email. Subject: ${subject}`).replace(/\{email_subject\}/g, subject);
+            const smsBody = (body.smsText || `You have received an email. Subject: ${resolvedSubject}`).replace(/\{email_subject\}/g, resolvedSubject);
             try { await sendSMS({ to: orderPhoneE164, message: smsBody }); } catch { /* best effort */ }
           }
         }

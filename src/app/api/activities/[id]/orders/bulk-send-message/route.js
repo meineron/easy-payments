@@ -6,9 +6,13 @@ import crypto from "crypto";
 import Order from "@/models/Order";
 import Activity from "@/models/Activity";
 import Club from "@/models/Club";
+import Team from "@/models/Team";
 import Message from "@/models/Message";
 import { sendCustomRegistrationEmail } from "@/lib/email";
 import { sendSMS, toE164 } from "@/lib/sms";
+import { replaceInvitationVars } from "@/lib/registration-invitation";
+
+void Team;
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
@@ -103,7 +107,7 @@ export async function POST(request, { params }) {
     await dbConnect();
 
     const [activity, club] = await Promise.all([
-      Activity.findById(id, "title").lean(),
+      Activity.findById(id, "title coverImage").lean(),
       Club.findById(session.user.id, "name logoUrl language").lean(),
     ]);
     if (!activity || !club) {
@@ -114,7 +118,7 @@ export async function POST(request, { params }) {
       _id: { $in: orderIds },
       activityId: id,
       clubId: session.user.id,
-    });
+    }).populate("teamId", "name");
 
     if (orders.length === 0) {
       return NextResponse.json({ error: "No orders found" }, { status: 404 });
@@ -137,15 +141,26 @@ export async function POST(request, { params }) {
 
       const registrationUrl = `${baseUrl}/register/${id}?token=${order.registrationToken}`;
       const contacts = contactsForOrder(order, target);
+      const playerName = `${order.playerFirstName || ""} ${order.playerLastName || ""}`.trim();
+      const invitationVars = {
+        playerName,
+        activityTitle: activity.title || "",
+        teamName: order.teamId?.name || "",
+        clubName: club.name || "",
+        coverImage: activity.coverImage || "",
+      };
+      const resolvedSubject = replaceInvitationVars(subject.trim(), invitationVars);
+      const resolvedBodyHtml = replaceInvitationVars(bodyHtml, invitationVars);
+      const resolvedBodyText = replaceInvitationVars(bodyText.trim(), invitationVars);
 
       for (const c of contacts) {
         try {
           if (channel === "email") {
             if (!c.email) { failed++; errors.push(`${c.name}: no email`); continue; }
             await sendCustomRegistrationEmail(c.email, {
-              subject: subject.trim(),
-              bodyHtml,
-              playerName: `${order.playerFirstName || ""} ${order.playerLastName || ""}`.trim(),
+              subject: resolvedSubject,
+              bodyHtml: resolvedBodyHtml,
+              playerName,
               clubName: club.name || "",
               activityTitle: activity.title || "",
               registrationUrl,
@@ -157,15 +172,15 @@ export async function POST(request, { params }) {
             if (smsNotification && c.phone) {
               const e164 = toE164(c.phonePrefix || "+1", c.phone);
               if (e164) {
-                const text = (smsText || `You have received an email. Subject: ${subject.trim()}`)
-                  .replace(/\{email_subject\}/g, subject.trim());
+                const text = (smsText || `You have received an email. Subject: ${resolvedSubject}`)
+                  .replace(/\{email_subject\}/g, resolvedSubject);
                 try { await sendSMS({ to: e164, message: text }); } catch { /* best-effort */ }
               }
             }
           } else {
             const e164 = toE164(c.phonePrefix || "+1", c.phone);
             if (!e164) { failed++; errors.push(`${c.name}: no phone`); continue; }
-            const msg = substituteTextTokens(bodyText.trim(), registrationUrl);
+            const msg = substituteTextTokens(resolvedBodyText, registrationUrl);
             await sendSMS({ to: e164, message: msg });
             sent++;
           }
