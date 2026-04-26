@@ -1,13 +1,35 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
 
 // /signup?token=...  — landing page for the one-time signup link emailed to
 // invitees who don't yet have a User account on the platform. Sets username +
 // password, then auto-signs them in and forwards to /invitations.
+//
+// Next.js requires components that read `useSearchParams()` to live inside a
+// <Suspense> boundary so the static prerender can bail out gracefully — see
+// https://nextjs.org/docs/messages/missing-suspense-with-csr-bailout. The
+// outer default export provides that boundary; the inner component holds the
+// actual page logic.
 export default function SignupPage() {
+  return (
+    <Suspense fallback={<SignupLoading />}>
+      <SignupPageInner />
+    </Suspense>
+  );
+}
+
+function SignupLoading() {
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+    </div>
+  );
+}
+
+function SignupPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
