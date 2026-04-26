@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { sendVerificationEmail } from "@/lib/email";
-import dbConnect from "@/lib/mongodb";
-import Team from "@/models/Team";
-import Parent from "@/models/Parent";
+import { resolvePublicContext, dualUpsertById } from "@/lib/club-context";
 
 const verificationCodes = new Map();
 
@@ -18,8 +16,11 @@ export async function POST(request) {
       return NextResponse.json({ error: "Email and teamId are required" }, { status: 400 });
     }
 
-    await dbConnect();
-    const team = await Team.findById(teamId);
+    const ctx = await resolvePublicContext("team", teamId);
+    if (!ctx) {
+      return NextResponse.json({ error: "Team not found" }, { status: 404 });
+    }
+    const team = await ctx.models.Team.findById(teamId);
     if (!team) {
       return NextResponse.json({ error: "Team not found" }, { status: 404 });
     }
@@ -67,22 +68,26 @@ export async function PUT(request) {
 
     verificationCodes.delete(key);
 
-    await dbConnect();
-    const team = await Team.findById(teamId);
+    const ctx = await resolvePublicContext("team", teamId);
+    if (!ctx) {
+      return NextResponse.json({ error: "Team not found" }, { status: 404 });
+    }
+    const team = await ctx.models.Team.findById(teamId);
     if (!team) {
       return NextResponse.json({ error: "Team not found" }, { status: 404 });
     }
 
     if (verifyOnly) {
-      const parent = await Parent.findOneAndUpdate(
+      const parent = await ctx.models.Parent.findOneAndUpdate(
         { clubId: team.clubId, email: key },
         { $set: { emailVerified: true, emailVerifiedAt: new Date() } },
         { new: true }
       );
+      if (parent) await dualUpsertById(ctx, "Parent", parent);
       return NextResponse.json({ success: true, parentId: parent?._id || null });
     }
 
-    const parent = await Parent.findOneAndUpdate(
+    const parent = await ctx.models.Parent.findOneAndUpdate(
       { clubId: team.clubId, email: key },
       {
         $set: {
@@ -101,6 +106,7 @@ export async function PUT(request) {
       },
       { upsert: true, new: true }
     );
+    await dualUpsertById(ctx, "Parent", parent);
 
     return NextResponse.json({ success: true, parentId: parent._id });
   } catch (error) {

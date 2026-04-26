@@ -23,6 +23,10 @@ const RegistrationRequestSchema = new mongoose.Schema({
 
 RegistrationRequestSchema.index({ activityId: 1, clubId: 1 });
 
+export function getRegistrationRequestModel(conn) {
+  return conn.models.RegistrationRequest || conn.model("RegistrationRequest", RegistrationRequestSchema);
+}
+
 if (mongoose.models.RegistrationRequest) {
   delete mongoose.models.RegistrationRequest;
 }

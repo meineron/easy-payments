@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
+import { connectMain } from "@/lib/mongodb";
 import Club from "@/models/Club";
+
+function activeClubId(session) {
+  return session?.user?.activeClubId || session?.user?.id || null;
+}
 
 export async function GET() {
   try {
@@ -10,9 +14,10 @@ export async function GET() {
     if (!session || session.user.role !== "club") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    await dbConnect();
+    await connectMain();
 
-    const club = await Club.findById(session.user.id, "name username logoUrl language supportEmail smtpHost smtpPort smtpEmail smtpPassword").lean();
+    const clubId = activeClubId(session);
+    const club = await Club.findById(clubId, "name username logoUrl language supportEmail smtpHost smtpPort smtpEmail smtpPassword").lean();
     if (!club) return NextResponse.json({ error: "Club not found" }, { status: 404 });
 
     return NextResponse.json({ club: {
@@ -33,10 +38,11 @@ export async function PUT(request) {
     if (!session || session.user.role !== "club") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    await dbConnect();
+    await connectMain();
 
     const body = await request.json();
-    const club = await Club.findById(session.user.id);
+    const clubId = activeClubId(session);
+    const club = await Club.findById(clubId);
     if (!club) return NextResponse.json({ error: "Club not found" }, { status: 404 });
 
     if (body.name !== undefined && body.name.trim()) {

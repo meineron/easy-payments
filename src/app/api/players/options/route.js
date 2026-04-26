@@ -1,22 +1,16 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Player from "@/models/Player";
+import { getClubContext } from "@/lib/club-context";
 
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    await dbConnect();
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Player } = ctx.models;
 
     const [positions, secondaryPositions, schools] = await Promise.all([
-      Player.distinct("primaryPosition", { clubId: session.user.id, primaryPosition: { $ne: "" } }),
-      Player.distinct("secondaryPosition", { clubId: session.user.id, secondaryPosition: { $ne: "" } }),
-      Player.distinct("school", { clubId: session.user.id, school: { $ne: "" } }),
+      Player.distinct("primaryPosition", { clubId: ctx.clubId, primaryPosition: { $ne: "" } }),
+      Player.distinct("secondaryPosition", { clubId: ctx.clubId, secondaryPosition: { $ne: "" } }),
+      Player.distinct("school", { clubId: ctx.clubId, school: { $ne: "" } }),
     ]);
 
     const allPositions = [...new Set([...positions, ...secondaryPositions])].sort();

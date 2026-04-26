@@ -1,13 +1,17 @@
 import { NextResponse } from "next/server";
-import dbConnect from "@/lib/mongodb";
-import Registration from "@/models/Registration";
-import Team from "@/models/Team";
+import { connectMain } from "@/lib/mongodb";
+import { resolvePublicContext } from "@/lib/club-context";
 import Club from "@/models/Club";
 
 export async function GET(request, { params }) {
   try {
     const { id } = await params;
-    await dbConnect();
+
+    const ctx = await resolvePublicContext("registration", id);
+    if (!ctx) {
+      return NextResponse.json({ error: "Registration not found" }, { status: 404 });
+    }
+    const { Registration, Team } = ctx.models;
 
     const reg = await Registration.findById(id);
     if (!reg) {
@@ -19,6 +23,7 @@ export async function GET(request, { params }) {
     }
 
     const team = await Team.findById(reg.teamId);
+    await connectMain();
     const club = await Club.findById(reg.clubId).select("name");
 
     return NextResponse.json({

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { useTranslations } from "next-intl";
 
 const PREDEFINED_ROLES = [
@@ -68,7 +69,7 @@ export default function UsersPage() {
   const [formLoading, setFormLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState(null);
   const [openActionMenu, setOpenActionMenu] = useState(null);
-  const actionMenuRef = useRef(null);
+  const [menuPosition, setMenuPosition] = useState(null);
 
   useEffect(() => {
     fetchUsers();
@@ -76,16 +77,42 @@ export default function UsersPage() {
   }, []);
 
   useEffect(() => {
+    if (!openActionMenu) return;
     function handleClickOutside(e) {
-      if (actionMenuRef.current && !actionMenuRef.current.contains(e.target)) {
+      if (!e.target.closest("[data-actions-menu]")) {
         setOpenActionMenu(null);
+        setMenuPosition(null);
       }
     }
-    if (openActionMenu) {
-      document.addEventListener("mousedown", handleClickOutside);
-      return () => document.removeEventListener("mousedown", handleClickOutside);
+    function handleScrollOrResize() {
+      setOpenActionMenu(null);
+      setMenuPosition(null);
     }
+    document.addEventListener("mousedown", handleClickOutside);
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
+    };
   }, [openActionMenu]);
+
+  function toggleActionMenu(userId, buttonEl) {
+    if (openActionMenu === userId) {
+      setOpenActionMenu(null);
+      setMenuPosition(null);
+      return;
+    }
+    const rect = buttonEl.getBoundingClientRect();
+    const menuWidth = 176;
+    const isRtl = typeof document !== "undefined" && document.documentElement.dir === "rtl";
+    setMenuPosition({
+      top: rect.bottom + 4,
+      left: isRtl ? rect.left : rect.right - menuWidth,
+    });
+    setOpenActionMenu(userId);
+  }
 
   useEffect(() => {
     if (toast) {
@@ -359,9 +386,9 @@ export default function UsersPage() {
                     </span>
                   </td>
                   <td className="py-3 px-4">
-                    <div className="relative" ref={openActionMenu === u._id ? actionMenuRef : undefined}>
+                    <div className="relative" data-actions-menu>
                       <button
-                        onClick={() => setOpenActionMenu(openActionMenu === u._id ? null : u._id)}
+                        onClick={(e) => toggleActionMenu(u._id, e.currentTarget)}
                         className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition"
                       >
                         {tc("actions")}
@@ -369,37 +396,6 @@ export default function UsersPage() {
                           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                         </svg>
                       </button>
-                      {openActionMenu === u._id && (
-                        <div className="absolute right-0 z-20 mt-1 w-44 bg-white rounded-lg border border-gray-200 shadow-lg py-1">
-                          <button
-                            onClick={() => { openEditModal(u); setOpenActionMenu(null); }}
-                            className="w-full text-start px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition"
-                          >
-                            {tc("edit")}
-                          </button>
-                          <button
-                            onClick={() => { setConfirmAction({ type: "invite", userId: u._id, name: `${u.firstName} ${u.lastName}` }); setOpenActionMenu(null); }}
-                            className="w-full text-start px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition"
-                          >
-                            {u.status === "invited" || u.status === "active" ? t("resendInvite") : t("invite")}
-                          </button>
-                          {(u.status === "invited" || u.status === "active") && (
-                            <button
-                              onClick={() => { setConfirmAction({ type: "reset", userId: u._id, name: `${u.firstName} ${u.lastName}` }); setOpenActionMenu(null); }}
-                              className="w-full text-start px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition"
-                            >
-                              {t("resetPassword")}
-                            </button>
-                          )}
-                          <div className="border-t border-gray-100 my-1" />
-                          <button
-                            onClick={() => { handleDelete(u._id); setOpenActionMenu(null); }}
-                            className="w-full text-start px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition"
-                          >
-                            {tc("delete")}
-                          </button>
-                        </div>
-                      )}
                     </div>
                   </td>
                 </tr>
@@ -408,6 +404,48 @@ export default function UsersPage() {
           </table>
         </div>
       )}
+
+      {/* Actions Dropdown (portaled to escape table overflow) */}
+      {openActionMenu && menuPosition && typeof document !== "undefined" && (() => {
+        const u = users.find((x) => x._id === openActionMenu);
+        if (!u) return null;
+        return createPortal(
+          <div
+            data-actions-menu
+            className="fixed z-50 w-44 bg-white rounded-lg border border-gray-200 shadow-lg py-1"
+            style={{ top: menuPosition.top, left: menuPosition.left }}
+          >
+            <button
+              onClick={() => { openEditModal(u); setOpenActionMenu(null); setMenuPosition(null); }}
+              className="w-full text-start px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition"
+            >
+              {tc("edit")}
+            </button>
+            <button
+              onClick={() => { setConfirmAction({ type: "invite", userId: u._id, name: `${u.firstName} ${u.lastName}` }); setOpenActionMenu(null); setMenuPosition(null); }}
+              className="w-full text-start px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition"
+            >
+              {u.status === "invited" || u.status === "active" ? t("resendInvite") : t("invite")}
+            </button>
+            {(u.status === "invited" || u.status === "active") && (
+              <button
+                onClick={() => { setConfirmAction({ type: "reset", userId: u._id, name: `${u.firstName} ${u.lastName}` }); setOpenActionMenu(null); setMenuPosition(null); }}
+                className="w-full text-start px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition"
+              >
+                {t("resetPassword")}
+              </button>
+            )}
+            <div className="border-t border-gray-100 my-1" />
+            <button
+              onClick={() => { handleDelete(u._id); setOpenActionMenu(null); setMenuPosition(null); }}
+              className="w-full text-start px-3 py-2 text-sm text-red-600 hover:bg-red-50 transition"
+            >
+              {tc("delete")}
+            </button>
+          </div>,
+          document.body,
+        );
+      })()}
 
       {/* Confirm Action Dialog */}
       {confirmAction && (

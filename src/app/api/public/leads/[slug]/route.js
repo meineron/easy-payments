@@ -1,14 +1,18 @@
 import { NextResponse } from "next/server";
-import dbConnect from "@/lib/mongodb";
-import Lead from "@/models/Lead";
+import { connectMain } from "@/lib/mongodb";
+import { resolvePublicContext } from "@/lib/club-context";
 import Club from "@/models/Club";
 
 export async function GET(request, { params }) {
   try {
     const { slug } = await params;
-    await dbConnect();
 
-    const lead = await Lead.findOne({ slug }).lean();
+    const ctx = await resolvePublicContext("leadSlug", slug);
+    if (!ctx) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    const lead = await ctx.models.Lead.findOne({ slug }).lean();
     if (!lead) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
@@ -20,6 +24,7 @@ export async function GET(request, { params }) {
       return NextResponse.json({ error: "Expired", reason: "expired" }, { status: 404 });
     }
 
+    await connectMain();
     const club = await Club.findById(lead.clubId).select("name logoUrl language").lean();
 
     const safeLead = {

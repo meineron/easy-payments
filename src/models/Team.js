@@ -50,6 +50,28 @@ const TeamSchema = new mongoose.Schema({
   timestamps: true,
 });
 
+// Mirror new teams into PublicLookup so the unauthenticated payment-link
+// route (`/api/teams/[id]/payment-link`) can resolve clubId once the owning
+// club is migrated to its own DB.
+async function mirrorTeamToLookup(doc) {
+  if (!doc?._id || !doc?.clubId) return;
+  try {
+    const { recordPublicLookup } = await import("@/lib/public-lookup.js");
+    await recordPublicLookup("team", String(doc._id), doc.clubId);
+  } catch (err) {
+    console.error("[Team] PublicLookup mirror failed:", err.message);
+  }
+}
+
+TeamSchema.post("save", function (doc) { mirrorTeamToLookup(doc); });
+TeamSchema.post("insertMany", function (docs) {
+  if (Array.isArray(docs)) docs.forEach(mirrorTeamToLookup);
+});
+
+export function getTeamModel(conn) {
+  return conn.models.Team || conn.model("Team", TeamSchema);
+}
+
 if (mongoose.models.Team) {
   delete mongoose.models.Team;
 }

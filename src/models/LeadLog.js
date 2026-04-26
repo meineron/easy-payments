@@ -15,6 +15,7 @@ const LeadLogSchema = new mongoose.Schema({
       "lead_updated",
       "status_changed",
       "staff_notified",
+      "submission_status_changed",
     ],
     required: true,
   },
@@ -31,6 +32,10 @@ const LeadLogSchema = new mongoose.Schema({
 
 LeadLogSchema.index({ leadId: 1, createdAt: -1 });
 LeadLogSchema.index({ submissionId: 1, createdAt: -1 });
+
+export function getLeadLogModel(conn) {
+  return conn.models.LeadLog || conn.model("LeadLog", LeadLogSchema);
+}
 
 if (mongoose.models.LeadLog) {
   delete mongoose.models.LeadLog;

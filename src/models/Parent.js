@@ -31,6 +31,10 @@ const ParentSchema = new mongoose.Schema({
 
 ParentSchema.index({ clubId: 1, email: 1 }, { unique: true });
 
+export function getParentModel(conn) {
+  return conn.models.Parent || conn.model("Parent", ParentSchema);
+}
+
 if (mongoose.models.Parent) {
   delete mongoose.models.Parent;
 }

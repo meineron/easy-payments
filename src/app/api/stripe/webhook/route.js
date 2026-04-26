@@ -1,12 +1,24 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { stripe } from "@/lib/stripe";
-import dbConnect from "@/lib/mongodb";
+import { connectMain } from "@/lib/mongodb";
+import { getClubContextById, dualCreate, dualSave, dualWrite } from "@/lib/club-context";
 import Club from "@/models/Club";
-import Transaction from "@/models/Transaction";
-import Registration from "@/models/Registration";
-import Order from "@/models/Order";
-import PaymentRequest from "@/models/PaymentRequest";
+
+// Webhook-local helper: resolve the tenant context but treat a deactivated
+// club as a silent no-op (returns null). Stripe will ack 200 and stop
+// retrying, while the deactivated club's collections stay untouched.
+async function resolveCtxOrSkip(clubId) {
+  try {
+    return await getClubContextById(clubId);
+  } catch (err) {
+    if (err?.code === "CLUB_DEACTIVATED") {
+      console.warn(`[stripe webhook] skipping event for deactivated club ${clubId}`);
+      return null;
+    }
+    throw err;
+  }
+}
 
 // Generating the registration PDF + sending multiple emails can easily exceed
 // the default 10s serverless timeout. 60s is the hard ceiling Vercel allows
@@ -26,7 +38,7 @@ export async function POST(request) {
       process.env.STRIPE_WEBHOOK_SECRET
     );
   } catch (err) {
-    await dbConnect();
+    await connectMain();
     const directClubs = await Club.find({
       hasDirectStripeAccess: true,
       stripeWebhookSecret: { $ne: null, $exists: true },
@@ -48,7 +60,7 @@ export async function POST(request) {
     }
   }
 
-  await dbConnect();
+  await connectMain();
 
   switch (event.type) {
     case "checkout.session.completed": {
@@ -56,13 +68,10 @@ export async function POST(request) {
       const clubId = session.metadata?.clubId;
 
       if (!clubId) break;
+      const ctx = await resolveCtxOrSkip(clubId);
+      if (!ctx) break;
+      const { Transaction, Registration, Order, PaymentRequest } = ctx.models;
 
-      // We used to `break` here on duplicate delivery, but that also skipped
-      // the email side-effects. Now we just skip the Transaction.create so
-      // Stripe's automatic retries can re-attempt any email that hasn't
-      // been recorded as sent yet. Each downstream side-effect is guarded
-      // by its own idempotency marker (paidCents via stripeSessionId check,
-      // invoiceSentAt, registrationEmailSentAt, etc.).
       const alreadyRecordedTransaction = !!(await Transaction.findOne({ stripeSessionId: session.id }));
 
       let invoiceUrl = null;
@@ -80,7 +89,7 @@ export async function POST(request) {
 
       if (!alreadyRecordedTransaction) {
         try {
-          await Transaction.create({
+          await dualCreate(ctx, "Transaction", {
             clubId,
             orderId: session.metadata?.orderId || null,
             stripeSessionId: session.id,
@@ -94,7 +103,6 @@ export async function POST(request) {
             customerEmail: session.customer_details?.email || null,
           });
         } catch (err) {
-          // Duplicate key is fine — another retry beat us to it.
           if (err.code !== 11000) {
             console.error("Failed to record transaction:", err.message);
           }
@@ -105,18 +113,18 @@ export async function POST(request) {
       if (registrationId && session.payment_status === "paid") {
         const type = session.metadata?.type;
         if (type === "single_payment") {
-          await Registration.findByIdAndUpdate(registrationId, {
+          await dualWrite(ctx, (M) => M.Registration.findByIdAndUpdate(registrationId, {
             collectedCents: session.amount_total,
             status: "completed",
             stripeSessionId: session.id,
-          });
+          }));
         } else if (type === "installment" && session.subscription) {
-          await Registration.findByIdAndUpdate(registrationId, {
+          await dualWrite(ctx, (M) => M.Registration.findByIdAndUpdate(registrationId, {
             $inc: { collectedCents: session.amount_total },
             status: "active",
             stripeSessionId: session.id,
             stripeSubscriptionId: session.subscription,
-          });
+          }));
 
           try {
             const sub = await stripe.subscriptions.retrieve(session.subscription);
@@ -138,16 +146,11 @@ export async function POST(request) {
         try {
           const order = await Order.findById(activityOrderId);
           if (order) {
-            // The parent may have been charged a pass-through Stripe processing fee
-            // on top of the order amount. Exclude that fee when tallying paidCents
-            // so the club only sees what was actually applied to the invoice.
             const procFeeInSession = parseInt(session.metadata?.processingFeeCents || "0", 10) || 0;
             const netAmountPaid = Math.max(0, (session.amount_total || 0) - procFeeInSession);
 
-            // Idempotency guard: if this exact session was already applied to this
-            // order, skip the financial mutation so retries don't double-add paidCents.
-            // Emails further below still re-attempt based on their own markers.
             const alreadyApplied = order.stripeSessionId === session.id && !!order.registrationCompletedAt;
+            const wasComplete = !!order.registrationCompletedAt;
 
             if (!alreadyApplied) {
               order.paidCents = (order.paidCents || 0) + netAmountPaid;
@@ -209,24 +212,42 @@ export async function POST(request) {
                 order.status = order.paidCents >= order.totalCostCents ? "paid" : "partial";
               }
 
-              await order.save();
+              await dualSave(ctx, order);
+
+              if (!wasComplete) {
+                try {
+                  const existingLog = await ctx.models.OrderLog.findOne({
+                    orderId: order._id,
+                    field: "registration_submitted",
+                  }).select("_id").lean();
+                  if (!existingLog) {
+                    const playerName = `${order.playerFirstName || ""} ${order.playerLastName || ""}`.trim() || order.playerEmail || "—";
+                    await dualCreate(ctx, "OrderLog", {
+                      orderId: order._id,
+                      activityId: order.activityId,
+                      clubId: order.clubId,
+                      userId: "system",
+                      userName: playerName,
+                      field: "registration_submitted",
+                      previousValue: "",
+                      newValue: "submitted",
+                      description: `Registration submitted by ${playerName}`,
+                    });
+                  }
+                } catch (e) { console.error("Write registration_submitted log (webhook):", e.message); }
+              }
 
               try {
                 const { markPlayerRegisteredForTeam } = await import("@/lib/order-sync");
-                await markPlayerRegisteredForTeam(order.playerId, order.teamId, order.registrationCompletedAt);
+                await markPlayerRegisteredForTeam(ctx, order.playerId, order.teamId, order.registrationCompletedAt);
               } catch (e) { console.error("Mark player registered (webhook):", e.message); }
             }
 
-            // --- EMAIL SIDE-EFFECTS (idempotent, retry-safe) -----------------
-            // Each email is gated by its own "sentAt" marker so that a retried
-            // webhook will only re-attempt whichever emails didn't succeed on
-            // the previous try.
-
+            // EMAIL SIDE-EFFECTS (idempotent, retry-safe)
             if (!order.invoiceSentAt && order.parent1Email) {
               try {
                 const { sendInvoiceEmail } = await import("@/lib/email");
-                const Activity = (await import("@/models/Activity")).default;
-                const activityDoc = await Activity.findById(order.activityId, "title clubId").lean();
+                const activityDoc = await ctx.models.Activity.findById(order.activityId, "title clubId").lean();
                 const clubDoc = await Club.findById(order.clubId, "name logoUrl language").lean();
                 await sendInvoiceEmail(order.parent1Email, {
                   playerName: `${order.playerFirstName} ${order.playerLastName}`,
@@ -241,7 +262,7 @@ export async function POST(request) {
                   locale: clubDoc?.language || "en",
                 });
                 order.invoiceSentAt = new Date();
-                await order.save();
+                await dualSave(ctx, order);
               } catch (emailErr) {
                 console.error("Failed to send invoice email:", emailErr.message);
               }
@@ -250,21 +271,17 @@ export async function POST(request) {
             if (!order.registrationEmailSentAt) {
               try {
                 const { sendRegistrationPDFEmail } = await import("@/lib/registration-email");
-                await sendRegistrationPDFEmail(order);
+                await sendRegistrationPDFEmail(order, ctx);
                 order.registrationEmailSentAt = new Date();
-                await order.save();
+                await dualSave(ctx, order);
               } catch (pdfErr) {
                 console.error("Failed to send registration PDF:", pdfErr.message);
               }
             }
 
-            // Deferred waiver-confirmation email (OFF-path): when the activity
-            // does NOT require email verification before payment, the dedicated
-            // waiver PDF is delivered after the payment succeeds instead.
             if (!order.waiverConfirmationSentAt) {
               try {
-                const ActivityModel = (await import("@/models/Activity")).default;
-                const activityDocForWaiver = await ActivityModel.findById(
+                const activityDocForWaiver = await ctx.models.Activity.findById(
                   order.activityId,
                   "waivers waiverEmailConfirmation",
                 ).lean();
@@ -272,7 +289,7 @@ export async function POST(request) {
                 const hasSignedConsents = (order.waiverConsents || []).some((c) => c.agreedAt);
                 if (hasWaivers && hasSignedConsents && !activityDocForWaiver?.waiverEmailConfirmation) {
                   const { sendWaiverConfirmationPDFEmail } = await import("@/lib/waiver-confirmation-email");
-                  await sendWaiverConfirmationPDFEmail(order);
+                  await sendWaiverConfirmationPDFEmail(order, { ctx });
                 }
               } catch (waiverErr) {
                 console.error("Failed to send waiver PDF (post-payment):", waiverErr.message);
@@ -297,19 +314,18 @@ export async function POST(request) {
             pr.paidAt = new Date();
             pr.stripeSessionId = session.id;
             pr.stripePaymentIntentId = session.payment_intent || "";
-            await pr.save();
+            await dualSave(ctx, pr);
 
             const prOrder = await Order.findById(pr.orderId);
             if (prOrder) {
               prOrder.paidCents = (prOrder.paidCents || 0) + pr.totalCents;
               prOrder.status = prOrder.paidCents >= prOrder.totalCostCents ? "paid" : "partial";
-              await prOrder.save();
+              await dualSave(ctx, prOrder);
             }
 
             try {
               const { sendInvoiceEmail } = await import("@/lib/email");
-              const Activity = (await import("@/models/Activity")).default;
-              const actDoc = await Activity.findById(pr.activityId, "title").lean();
+              const actDoc = await ctx.models.Activity.findById(pr.activityId, "title").lean();
               const clubDoc = await Club.findById(pr.clubId, "name logoUrl language").lean();
               const orderDoc = await Order.findById(pr.orderId).lean();
               const emailTo = pr.recipientEmail || orderDoc?.parent1Email;
@@ -358,28 +374,33 @@ export async function POST(request) {
 
     case "checkout.session.async_payment_succeeded": {
       const session = event.data.object;
-      await Transaction.findOneAndUpdate(
+      const clubId = session.metadata?.clubId;
+      if (!clubId) break;
+      const ctx = await resolveCtxOrSkip(clubId);
+      if (!ctx) break;
+      await dualWrite(ctx, (M) => M.Transaction.findOneAndUpdate(
         { stripeSessionId: session.id },
         { status: "succeeded" }
-      );
+      ));
       break;
     }
 
     case "checkout.session.async_payment_failed": {
       const session = event.data.object;
-      await Transaction.findOneAndUpdate(
+      const clubId = session.metadata?.clubId;
+      if (!clubId) break;
+      const ctx = await resolveCtxOrSkip(clubId);
+      if (!ctx) break;
+      await dualWrite(ctx, (M) => M.Transaction.findOneAndUpdate(
         { stripeSessionId: session.id },
         { status: "failed" }
-      );
+      ));
       break;
     }
 
     case "invoice.paid": {
       const invoice = event.data.object;
       if (!invoice.subscription) break;
-
-      const existing = await Transaction.findOne({ stripeSessionId: invoice.id });
-      if (existing) break;
 
       let clubId = null;
       let registrationId = null;
@@ -394,8 +415,13 @@ export async function POST(request) {
       }
 
       if (!clubId) break;
+      const ctx = await resolveCtxOrSkip(clubId);
+      if (!ctx) break;
 
-      await Transaction.create({
+      const existing = await ctx.models.Transaction.findOne({ stripeSessionId: invoice.id });
+      if (existing) break;
+
+      await dualCreate(ctx, "Transaction", {
         clubId,
         orderId: orderId || null,
         stripeSessionId: invoice.id,
@@ -410,20 +436,20 @@ export async function POST(request) {
       });
 
       if (registrationId && invoice.amount_paid > 0) {
-        const reg = await Registration.findById(registrationId);
+        const reg = await ctx.models.Registration.findById(registrationId);
         if (reg) {
           const newCollected = reg.collectedCents + invoice.amount_paid;
           const isComplete = newCollected >= reg.finalCostCents;
-          await Registration.findByIdAndUpdate(registrationId, {
+          await dualWrite(ctx, (M) => M.Registration.findByIdAndUpdate(registrationId, {
             collectedCents: newCollected,
             status: isComplete ? "completed" : "active",
-          });
+          }));
         }
       }
 
       if (orderId && invoice.amount_paid > 0) {
         try {
-          const order = await Order.findById(orderId);
+          const order = await ctx.models.Order.findById(orderId);
           if (order) {
             order.paidCents = (order.paidCents || 0) + invoice.amount_paid;
             const installment = (order.installmentSchedule || []).find(
@@ -436,7 +462,7 @@ export async function POST(request) {
               installment.paymentMethod = "card";
             }
             order.status = order.paidCents >= order.totalCostCents ? "paid" : "partial";
-            await order.save();
+            await dualSave(ctx, order);
             console.log(`Order ${orderId} installment paid: ${invoice.amount_paid} cents`);
           }
         } catch (err) {
@@ -452,20 +478,30 @@ export async function POST(request) {
       const invoice = event.data.object;
       if (!invoice.subscription) break;
 
+      let clubId = null;
       let registrationId = null;
       let orderId = null;
       try {
         const sub = await stripe.subscriptions.retrieve(invoice.subscription);
+        clubId = sub.metadata?.clubId;
         registrationId = sub.metadata?.registrationId;
         orderId = sub.metadata?.orderId;
+      } catch (err) {
+        console.error("Failed to retrieve subscription:", err.message);
+      }
+      if (!clubId) break;
+      const ctx = await resolveCtxOrSkip(clubId);
+      if (!ctx) break;
+
+      try {
         if (registrationId) {
-          await Registration.findByIdAndUpdate(registrationId, { status: "failed" });
+          await dualWrite(ctx, (M) => M.Registration.findByIdAndUpdate(registrationId, { status: "failed" }));
         }
         if (orderId) {
-          const order = await Order.findById(orderId);
+          const order = await ctx.models.Order.findById(orderId);
           if (order) {
             const failedInst = (order.installmentSchedule || []).find((i) => i.status === "pending");
-            if (failedInst) { failedInst.status = "failed"; await order.save(); }
+            if (failedInst) { failedInst.status = "failed"; await dualSave(ctx, order); }
           }
         }
       } catch (err) {
@@ -478,26 +514,30 @@ export async function POST(request) {
 
     case "customer.subscription.deleted": {
       const subscription = event.data.object;
+      const clubId = subscription.metadata?.clubId;
       const registrationId = subscription.metadata?.registrationId;
       const orderId = subscription.metadata?.orderId;
+      if (!clubId) break;
+      const ctx = await resolveCtxOrSkip(clubId);
+      if (!ctx) break;
 
       if (registrationId) {
-        const reg = await Registration.findById(registrationId);
+        const reg = await ctx.models.Registration.findById(registrationId);
         if (reg && reg.status !== "completed") {
           const isComplete = reg.collectedCents >= reg.finalCostCents;
-          await Registration.findByIdAndUpdate(registrationId, {
+          await dualWrite(ctx, (M) => M.Registration.findByIdAndUpdate(registrationId, {
             status: isComplete ? "completed" : reg.status,
-          });
+          }));
         }
       }
 
       if (orderId) {
         try {
-          const order = await Order.findById(orderId);
+          const order = await ctx.models.Order.findById(orderId);
           if (order && order.status !== "paid") {
             order.status = order.paidCents >= order.totalCostCents ? "paid" : order.status;
             order.stripeSubscriptionId = "";
-            await order.save();
+            await dualSave(ctx, order);
           }
         } catch (err) {
           console.error("Failed to update order on subscription end:", err.message);

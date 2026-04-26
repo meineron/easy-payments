@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server";
-import dbConnect from "@/lib/mongodb";
-import PaymentRequest from "@/models/PaymentRequest";
-import Order from "@/models/Order";
-import Activity from "@/models/Activity";
+import { connectMain } from "@/lib/mongodb";
+import { resolvePublicContext } from "@/lib/club-context";
 import Club from "@/models/Club";
 
 export async function GET(request, { params }) {
   try {
     const { token } = await params;
-    await dbConnect();
+
+    const ctx = await resolvePublicContext("paymentToken", token);
+    if (!ctx) {
+      return NextResponse.json({ error: "Payment link not found or expired" }, { status: 404 });
+    }
+    const { PaymentRequest, Order, Activity } = ctx.models;
 
     const pr = await PaymentRequest.findOne({ paymentToken: token }).lean();
     if (!pr) {
@@ -18,6 +21,7 @@ export async function GET(request, { params }) {
       return NextResponse.json({ error: "Already paid", paid: true }, { status: 400 });
     }
 
+    await connectMain();
     const [order, activity, club] = await Promise.all([
       Order.findById(pr.orderId, "playerFirstName playerLastName totalCostCents paidCents subscriptionTitle").lean(),
       Activity.findById(pr.activityId, "title passStripeFeeToCustomer").lean(),

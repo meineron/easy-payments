@@ -1,20 +1,15 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Activity from "@/models/Activity";
+import { getClubContext, dualSave, dualWrite } from "@/lib/club-context";
 
 export async function GET(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Activity } = ctx.models;
 
     const { id } = await params;
-    await dbConnect();
 
-    const activity = await Activity.findOne({ _id: id, clubId: session.user.id })
+    const activity = await Activity.findOne({ _id: id, clubId: ctx.clubId })
       .populate("teams.teamId", "name season gender teamType year costCents");
 
     if (!activity) {
@@ -30,16 +25,14 @@ export async function GET(request, { params }) {
 
 export async function PUT(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Activity } = ctx.models;
 
     const { id } = await params;
     const body = await request.json();
-    await dbConnect();
 
-    const activity = await Activity.findOne({ _id: id, clubId: session.user.id });
+    const activity = await Activity.findOne({ _id: id, clubId: ctx.clubId });
     if (!activity) {
       return NextResponse.json({ error: "Activity not found" }, { status: 404 });
     }
@@ -60,7 +53,7 @@ export async function PUT(request, { params }) {
       }
     }
 
-    await activity.save();
+    await dualSave(ctx, activity);
 
     const populated = await Activity.findById(activity._id)
       .populate("teams.teamId", "name season gender teamType year costCents");
@@ -74,15 +67,12 @@ export async function PUT(request, { params }) {
 
 export async function DELETE(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
 
     const { id } = await params;
-    await dbConnect();
 
-    const result = await Activity.deleteOne({ _id: id, clubId: session.user.id });
+    const result = await dualWrite(ctx, (M) => M.Activity.deleteOne({ _id: id, clubId: ctx.clubId }));
     if (result.deletedCount === 0) {
       return NextResponse.json({ error: "Activity not found" }, { status: 404 });
     }

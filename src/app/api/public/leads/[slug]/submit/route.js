@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import dbConnect from "@/lib/mongodb";
-import Lead from "@/models/Lead";
-import LeadSubmission from "@/models/LeadSubmission";
+import { connectMain } from "@/lib/mongodb";
+import { resolvePublicContext, dualCreate } from "@/lib/club-context";
 import Club from "@/models/Club";
 import ClubUser from "@/models/ClubUser";
 import { writeLeadLog } from "@/lib/lead-logs";
@@ -68,7 +67,12 @@ function buildSubmissionSummaryHtml(lead, submission, submissionUrl) {
 export async function POST(request, { params }) {
   try {
     const { slug } = await params;
-    await dbConnect();
+
+    const ctx = await resolvePublicContext("leadSlug", slug);
+    if (!ctx) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    const { Lead } = ctx.models;
 
     const lead = await Lead.findOne({ slug });
     if (!lead) {
@@ -120,7 +124,7 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: "Valid phone is required" }, { status: 400 });
     }
 
-    const submission = await LeadSubmission.create({
+    const submission = await dualCreate(ctx, "LeadSubmission", {
       leadId: lead._id,
       clubId: lead.clubId,
       name: extractNameFromResponses(responses),
@@ -144,10 +148,12 @@ export async function POST(request, { params }) {
         phonePrefix: submission.phonePrefix,
         name: submission.name,
       },
+      ctx,
     });
 
     if (Array.isArray(lead.notifyStaffIds) && lead.notifyStaffIds.length > 0) {
       try {
+        await connectMain();
         const staff = await ClubUser.find({
           _id: { $in: lead.notifyStaffIds },
           clubId: lead.clubId,
@@ -206,6 +212,7 @@ export async function POST(request, { params }) {
               smsCount: notifiedPhones.length,
               staffIds: staff.map((s) => String(s._id)),
             },
+            ctx,
           });
         }
       } catch (err) {

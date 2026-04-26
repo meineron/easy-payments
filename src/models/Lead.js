@@ -56,6 +56,10 @@ const LeadSchema = new mongoose.Schema({
   timestamps: true,
 });
 
+export function getLeadModel(conn) {
+  return conn.models.Lead || conn.model("Lead", LeadSchema);
+}
+
 if (mongoose.models.Lead) {
   delete mongoose.models.Lead;
 }

@@ -45,6 +45,23 @@ const PaymentRequestSchema = new mongoose.Schema({
 PaymentRequestSchema.index({ orderId: 1, clubId: 1 });
 PaymentRequestSchema.index({ paymentToken: 1 }, { sparse: true });
 
+async function mirrorPaymentRequestTokenToLookup(doc) {
+  if (!doc?.clubId || !doc?.paymentToken) return;
+  try {
+    const { recordPublicLookup } = await import("@/lib/public-lookup.js");
+    await recordPublicLookup("paymentToken", doc.paymentToken, doc.clubId);
+  } catch (err) {
+    console.error("[PaymentRequest] PublicLookup mirror failed:", err.message);
+  }
+}
+
+PaymentRequestSchema.post("save", function (doc) { mirrorPaymentRequestTokenToLookup(doc); });
+PaymentRequestSchema.post("findOneAndUpdate", function (doc) { mirrorPaymentRequestTokenToLookup(doc); });
+
+export function getPaymentRequestModel(conn) {
+  return conn.models.PaymentRequest || conn.model("PaymentRequest", PaymentRequestSchema);
+}
+
 if (mongoose.models.PaymentRequest) {
   delete mongoose.models.PaymentRequest;
 }

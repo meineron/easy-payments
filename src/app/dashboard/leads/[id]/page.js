@@ -13,6 +13,15 @@ const LOG_ICON = {
   lead_updated: "✎",
   status_changed: "⚑",
   staff_notified: "🔔",
+  submission_status_changed: "⚑",
+};
+
+const SUB_STATUS_OPTIONS = ["in_progress", "done", "not_relevant"];
+
+const SUB_STATUS_CLASS = {
+  in_progress: "bg-orange-50 text-orange-700 border-orange-200",
+  done: "bg-green-50 text-green-700 border-green-200",
+  not_relevant: "bg-red-50 text-red-700 border-red-200",
 };
 
 function fmtDateTime(d) {
@@ -45,6 +54,7 @@ export default function LeadDetailPage({ params }) {
   const [baseUrl, setBaseUrl] = useState("");
   const [activeTab, setActiveTab] = useState("submissions");
   const [leadLogs, setLeadLogs] = useState([]);
+  const [statusFilter, setStatusFilter] = useState("all");
 
   useEffect(() => {
     if (typeof window !== "undefined") setBaseUrl(window.location.origin);
@@ -137,6 +147,32 @@ export default function LeadDetailPage({ params }) {
     ));
     setSelectedIds(new Set());
     loadSubmissions();
+  }
+
+  async function changeSubmissionStatus(submission, nextStatus) {
+    if (!submission || submission.status === nextStatus) return;
+    setSubmissions((prev) => prev.map((s) =>
+      s._id === submission._id ? { ...s, status: nextStatus } : s,
+    ));
+    if (openSub && openSub._id === submission._id) {
+      setOpenSub({ ...openSub, status: nextStatus });
+    }
+    try {
+      const res = await fetch(`/api/leads/${id}/submissions/${submission._id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      if (!res.ok) throw new Error("failed");
+    } catch {
+      setSubmissions((prev) => prev.map((s) =>
+        s._id === submission._id ? { ...s, status: submission.status } : s,
+      ));
+      if (openSub && openSub._id === submission._id) {
+        setOpenSub({ ...openSub, status: submission.status });
+      }
+      setToast({ type: "error", message: t("saveFailed") });
+    }
   }
 
   function openSendMessage() {
@@ -245,6 +281,24 @@ export default function LeadDetailPage({ params }) {
             </div>
           ) : (
             <>
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                {[
+                  { id: "all", label: t("filterAll") },
+                  { id: "in_progress", label: t("statusInProgress") },
+                  { id: "done", label: t("statusDone") },
+                  { id: "not_relevant", label: t("statusNotRelevant") },
+                ].map((opt) => (
+                  <button key={opt.id} onClick={() => setStatusFilter(opt.id)}
+                    className={`text-xs px-3 py-1 rounded-full border font-medium transition ${
+                      statusFilter === opt.id
+                        ? "bg-blue-600 text-white border-blue-600"
+                        : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
+                    }`}>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
               {selectedIds.size > 0 && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 mb-3 flex items-center justify-between">
                   <span className="text-sm text-blue-900 font-medium">
@@ -275,31 +329,55 @@ export default function LeadDetailPage({ params }) {
                       <th className="px-3 py-3 text-start font-medium">{t("email")}</th>
                       <th className="px-3 py-3 text-start font-medium">{t("phone")}</th>
                       <th className="px-3 py-3 text-start font-medium">{t("receivedAt")}</th>
+                      <th className="px-3 py-3 text-start font-medium">{t("submissionStatus")}</th>
+                      <th className="px-3 py-3 text-end font-medium w-20">{t("actions")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {submissions.map((s) => (
-                      <tr key={s._id} className="hover:bg-gray-50">
-                        <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-                          <input type="checkbox" checked={selectedIds.has(s._id)}
-                            onChange={() => toggleSelect(s._id)} className="rounded" />
-                        </td>
-                        <td className="px-3 py-2 font-medium text-gray-900 cursor-pointer"
-                          onClick={() => setOpenSub(s)}>
-                          {s.name || "—"}
-                        </td>
-                        <td className="px-3 py-2 text-gray-600 cursor-pointer" onClick={() => setOpenSub(s)}>
-                          {s.email || "—"}
-                        </td>
-                        <td className="px-3 py-2 text-gray-600 cursor-pointer" onClick={() => setOpenSub(s)} dir="ltr">
-                          {s.phone ? `${s.phonePrefix || ""} ${s.phone}`.trim() : "—"}
-                        </td>
-                        <td className="px-3 py-2 text-gray-500 whitespace-nowrap cursor-pointer"
-                          onClick={() => setOpenSub(s)}>
-                          {fmtDateTime(s.createdAt)}
-                        </td>
-                      </tr>
-                    ))}
+                    {submissions
+                      .filter((s) => statusFilter === "all" || (s.status || "in_progress") === statusFilter)
+                      .map((s) => {
+                      const status = s.status || "in_progress";
+                      return (
+                        <tr key={s._id} className="hover:bg-gray-50">
+                          <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                            <input type="checkbox" checked={selectedIds.has(s._id)}
+                              onChange={() => toggleSelect(s._id)} className="rounded" />
+                          </td>
+                          <td className="px-3 py-2 font-medium text-gray-900 cursor-pointer"
+                            onClick={() => setOpenSub(s)}>
+                            {s.name || "—"}
+                          </td>
+                          <td className="px-3 py-2 text-gray-600 cursor-pointer" onClick={() => setOpenSub(s)}>
+                            {s.email || "—"}
+                          </td>
+                          <td className="px-3 py-2 text-gray-600 cursor-pointer" onClick={() => setOpenSub(s)} dir="ltr">
+                            {s.phone ? `${s.phonePrefix || ""} ${s.phone}`.trim() : "—"}
+                          </td>
+                          <td className="px-3 py-2 text-gray-500 whitespace-nowrap cursor-pointer"
+                            onClick={() => setOpenSub(s)}>
+                            {fmtDateTime(s.createdAt)}
+                          </td>
+                          <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                            <select value={status}
+                              onChange={(e) => changeSubmissionStatus(s, e.target.value)}
+                              className={`text-xs px-2 py-1 rounded-md border font-medium outline-none focus:ring-2 focus:ring-blue-500 ${SUB_STATUS_CLASS[status] || ""}`}>
+                              <option value="in_progress">{t("statusInProgress")}</option>
+                              <option value="done">{t("statusDone")}</option>
+                              <option value="not_relevant">{t("statusNotRelevant")}</option>
+                            </select>
+                          </td>
+                          <td className="px-3 py-2 text-end">
+                            <button onClick={() => setOpenSub(s)} title={t("viewLogs")}
+                              className="inline-flex items-center justify-center w-7 h-7 rounded-md text-gray-500 hover:text-blue-700 hover:bg-blue-50">
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -336,6 +414,7 @@ export default function LeadDetailPage({ params }) {
             setOpenSub(null);
             loadSubmissions();
           }}
+          onStatusChange={(nextStatus) => changeSubmissionStatus(openSub, nextStatus)}
           t={t}
           tc={tc}
         />
@@ -365,7 +444,7 @@ export default function LeadDetailPage({ params }) {
 }
 
 /* ========== Submission Drawer ========== */
-function SubmissionDrawer({ leadId, lead, submission, onClose, onSend, onDelete, t, tc }) {
+function SubmissionDrawer({ leadId, lead, submission, onClose, onSend, onDelete, onStatusChange, t, tc }) {
   const [logs, setLogs] = useState([]);
   const [loadingLogs, setLoadingLogs] = useState(true);
   const [comment, setComment] = useState("");
@@ -416,21 +495,33 @@ function SubmissionDrawer({ leadId, lead, submission, onClose, onSend, onDelete,
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
       <div className="w-full max-w-2xl bg-white h-full shadow-xl overflow-y-auto"
         onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10">
-          <div className="min-w-0">
-            <h3 className="text-lg font-bold text-gray-900 truncate">{submission.name || submission.email}</h3>
-            <p className="text-xs text-gray-500">{fmtDateTime(submission.createdAt)}</p>
+        <div className="flex flex-col gap-3 px-6 py-4 border-b sticky top-0 bg-white z-10">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-lg font-bold text-gray-900 truncate">{submission.name || submission.email}</h3>
+              <p className="text-xs text-gray-500">{fmtDateTime(submission.createdAt)}</p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button onClick={() => onSend(submission)}
+                className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium">
+                {t("sendMessage")}
+              </button>
+              <button onClick={onDelete}
+                className="text-xs px-3 py-1.5 bg-red-50 text-red-600 rounded hover:bg-red-100 font-medium">
+                {t("delete")}
+              </button>
+              <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl ms-1">×</button>
+            </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => onSend(submission)}
-              className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium">
-              {t("sendMessage")}
-            </button>
-            <button onClick={onDelete}
-              className="text-xs px-3 py-1.5 bg-red-50 text-red-600 rounded hover:bg-red-100 font-medium">
-              {t("delete")}
-            </button>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl ms-1">×</button>
+            <span className="text-xs font-medium text-gray-500 uppercase">{t("submissionStatus")}:</span>
+            <select value={submission.status || "in_progress"}
+              onChange={(e) => onStatusChange && onStatusChange(e.target.value)}
+              className={`text-xs px-2 py-1 rounded-md border font-medium outline-none focus:ring-2 focus:ring-blue-500 ${SUB_STATUS_CLASS[submission.status || "in_progress"] || ""}`}>
+              <option value="in_progress">{t("statusInProgress")}</option>
+              <option value="done">{t("statusDone")}</option>
+              <option value="not_relevant">{t("statusNotRelevant")}</option>
+            </select>
           </div>
         </div>
 
@@ -494,6 +585,13 @@ function LogTimeline({ logs, t }) {
     lead_updated: t("logLeadUpdated"),
     status_changed: t("logStatusChanged"),
     staff_notified: t("logStaffNotified"),
+    submission_status_changed: t("logSubmissionStatusChanged"),
+  };
+
+  const statusLabel = {
+    in_progress: t("statusInProgress"),
+    done: t("statusDone"),
+    not_relevant: t("statusNotRelevant"),
   };
 
   if (logs.length === 0) {
@@ -522,6 +620,11 @@ function LogTimeline({ logs, t }) {
               <p className="text-xs text-gray-500 mt-1">
                 {log.context.channel === "sms" ? "SMS" : "Email"}
                 {log.context.subject ? ` · ${log.context.subject}` : ""}
+              </p>
+            )}
+            {log.type === "submission_status_changed" && log.context && (
+              <p className="text-xs text-gray-600 mt-1">
+                {(statusLabel[log.context.previous] || log.context.previous || "—")} → {(statusLabel[log.context.next] || log.context.next || "—")}
               </p>
             )}
           </div>

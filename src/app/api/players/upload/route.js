@@ -1,12 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Player from "@/models/Player";
-import Parent from "@/models/Parent";
-import Team from "@/models/Team";
-import Activity from "@/models/Activity";
-import Order from "@/models/Order";
+import { getClubContext, dualCreate, dualSave } from "@/lib/club-context";
 import * as XLSX from "xlsx";
 import { toDobString } from "@/lib/dob";
 
@@ -101,7 +94,9 @@ function rangersFormSections() {
   ];
 }
 
-async function processRangersUpload(rows, headers, clubId) {
+async function processRangersUpload(rows, headers, ctx) {
+  const { Player, Parent, Activity, Order } = ctx.models;
+  const clubId = ctx.clubId;
   const errors = [];
   const stats = {
     players: { created: 0, updated: 0 },
@@ -160,7 +155,7 @@ async function processRangersUpload(rows, headers, clubId) {
 
   let activity = await Activity.findOne({ clubId, title: "2026 - 2027 Tampa Rangers" });
   if (!activity) {
-    activity = await Activity.create({
+    activity = await dualCreate(ctx, "Activity", {
       clubId,
       title: "2026 - 2027 Tampa Rangers",
       type: "Season Registration",
@@ -207,17 +202,17 @@ async function processRangersUpload(rows, headers, clubId) {
         parent.alternatePhone = normalizePhone(altPhone);
         changed = true;
       }
-      if (changed) await parent.save();
+      if (changed) await dualSave(ctx, parent);
       if (!player.parents.some((pid) => pid.toString() === parent._id.toString())) {
         player.parents.push(parent._id);
-        await player.save();
+        await dualSave(ctx, player);
       }
       stats.parents.updated++;
       return parent;
     }
 
     try {
-      parent = await Parent.create({
+      parent = await dualCreate(ctx, "Parent", {
         clubId,
         firstName,
         lastName,
@@ -230,7 +225,7 @@ async function processRangersUpload(rows, headers, clubId) {
       if (normEmail) parentsByEmail[normEmail] = parent;
       if (normPhone) parentsByPhone[normPhone] = parent;
       player.parents.push(parent._id);
-      await player.save();
+      await dualSave(ctx, player);
       stats.parents.created++;
       return parent;
     } catch (dupErr) {
@@ -239,11 +234,11 @@ async function processRangersUpload(rows, headers, clubId) {
         if (parent) {
           if (!parent.players.some((pid) => pid.toString() === player._id.toString())) {
             parent.players.push(player._id);
-            await parent.save();
+            await dualSave(ctx, parent);
           }
           if (!player.parents.some((pid) => pid.toString() === parent._id.toString())) {
             player.parents.push(parent._id);
-            await player.save();
+            await dualSave(ctx, player);
           }
           if (normEmail) parentsByEmail[normEmail] = parent;
           if (normPhone) parentsByPhone[normPhone] = parent;
@@ -321,11 +316,11 @@ async function processRangersUpload(rows, headers, clubId) {
           changed = true;
         }
         if (changed) {
-          await player.save();
+          await dualSave(ctx, player);
           stats.players.updated++;
         }
       } else {
-        player = await Player.create({
+        player = await dualCreate(ctx, "Player", {
           clubId,
           firstName,
           lastName,
@@ -376,7 +371,7 @@ async function processRangersUpload(rows, headers, clubId) {
 
       const existingOrder = await Order.findOne({ activityId: activity._id, playerId: player._id });
       if (!existingOrder) {
-        await Order.create({
+        await dualCreate(ctx, "Order", {
           activityId: activity._id,
           clubId,
           playerId: player._id,
@@ -419,10 +414,10 @@ async function processRangersUpload(rows, headers, clubId) {
 
 export async function POST(request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Player, Parent, Team } = ctx.models;
+    const clubId = ctx.clubId;
 
     const formData = await request.formData();
     const file = formData.get("file");
@@ -440,13 +435,10 @@ export async function POST(request) {
     }
 
     const headers = rows[0].map((h) => String(h).toLowerCase().trim());
-
-    await dbConnect();
-    const clubId = session.user.id;
     const uploadType = formData.get("uploadType") || "byga";
 
     if (uploadType === "rangers") {
-      const result = await processRangersUpload(rows, headers, clubId);
+      const result = await processRangersUpload(rows, headers, ctx);
       if (result.error) {
         return NextResponse.json({ error: result.error }, { status: 400 });
       }
@@ -553,7 +545,7 @@ export async function POST(request) {
             stats.teams.existing++;
           } else {
             const teamGender = detectGender(teamName);
-            team = await Team.create({
+            team = await dualCreate(ctx, "Team", {
               clubId,
               name: teamName,
               season: season || "25/26",
@@ -598,12 +590,12 @@ export async function POST(request) {
           }
 
           if (changed) {
-            await player.save();
+            await dualSave(ctx, player);
             stats.players.updated++;
           }
         } else {
           const teams = team ? [{ teamId: team._id, season: season || "25/26" }] : [];
-          player = await Player.create({
+          player = await dualCreate(ctx, "Player", {
             clubId,
             firstName,
             lastName,
@@ -642,16 +634,16 @@ export async function POST(request) {
           if (parent) {
             if (!parent.players.some((pid) => pid.toString() === player._id.toString())) {
               parent.players.push(player._id);
-              await parent.save();
+              await dualSave(ctx, parent);
             }
             if (!player.parents.some((pid) => pid.toString() === parent._id.toString())) {
               player.parents.push(parent._id);
-              await player.save();
+              await dualSave(ctx, player);
             }
             stats.parents.updated++;
           } else {
             try {
-              parent = await Parent.create({
+              parent = await dualCreate(ctx, "Parent", {
                 clubId,
                 firstName: contactFirst,
                 lastName: contactLast,
@@ -663,7 +655,7 @@ export async function POST(request) {
               if (contactEmail) parentsByEmail[contactEmail] = parent;
               if (contactPhone) parentsByPhone[contactPhone] = parent;
               player.parents.push(parent._id);
-              await player.save();
+              await dualSave(ctx, player);
               stats.parents.created++;
             } catch (dupErr) {
               if (dupErr.code === 11000) {
@@ -671,11 +663,11 @@ export async function POST(request) {
                 if (parent) {
                   if (!parent.players.some((pid) => pid.toString() === player._id.toString())) {
                     parent.players.push(player._id);
-                    await parent.save();
+                    await dualSave(ctx, parent);
                   }
                   if (!player.parents.some((pid) => pid.toString() === parent._id.toString())) {
                     player.parents.push(parent._id);
-                    await player.save();
+                    await dualSave(ctx, player);
                   }
                   if (contactEmail) parentsByEmail[contactEmail] = parent;
                   if (contactPhone) parentsByPhone[normalizePhone(parent.phone)] = parent;
@@ -701,16 +693,16 @@ export async function POST(request) {
           if (secParent) {
             if (!secParent.players.some((pid) => pid.toString() === player._id.toString())) {
               secParent.players.push(player._id);
-              await secParent.save();
+              await dualSave(ctx, secParent);
             }
             if (!player.parents.some((pid) => pid.toString() === secParent._id.toString())) {
               player.parents.push(secParent._id);
-              await player.save();
+              await dualSave(ctx, player);
             }
             stats.parents.updated++;
           } else {
             try {
-              secParent = await Parent.create({
+              secParent = await dualCreate(ctx, "Parent", {
                 clubId,
                 firstName: secFirst,
                 lastName: secLast,
@@ -722,7 +714,7 @@ export async function POST(request) {
               if (secEmail) parentsByEmail[secEmail] = secParent;
               if (secPhone) parentsByPhone[secPhone] = secParent;
               player.parents.push(secParent._id);
-              await player.save();
+              await dualSave(ctx, player);
               stats.parents.created++;
             } catch (dupErr) {
               if (dupErr.code === 11000) {
@@ -730,11 +722,11 @@ export async function POST(request) {
                 if (secParent) {
                   if (!secParent.players.some((pid) => pid.toString() === player._id.toString())) {
                     secParent.players.push(player._id);
-                    await secParent.save();
+                    await dualSave(ctx, secParent);
                   }
                   if (!player.parents.some((pid) => pid.toString() === secParent._id.toString())) {
                     player.parents.push(secParent._id);
-                    await player.save();
+                    await dualSave(ctx, player);
                   }
                   if (secEmail) parentsByEmail[secEmail] = secParent;
                   if (secPhone) parentsByPhone[normalizePhone(secParent.phone)] = secParent;

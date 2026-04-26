@@ -1,25 +1,21 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
 import mongoose from "mongoose";
 import crypto from "crypto";
-import Order from "@/models/Order";
-import Activity from "@/models/Activity";
+import { connectMain } from "@/lib/mongodb";
+import { getClubContext, dualSave } from "@/lib/club-context";
 import Club from "@/models/Club";
 import { sendCustomPaymentEmail } from "@/lib/email";
 import { sendSMS, toE164 } from "@/lib/sms";
 
 function formatCents(c) { return "$" + ((c || 0) / 100).toFixed(2); }
-
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 export async function POST(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Order, Activity } = ctx.models;
+
     const { id } = await params;
     const body = await request.json();
     const { teamIds, subject, bodyHtml, channel = "email", smsText, smsNotification } = body;
@@ -28,11 +24,10 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: "Select at least one team" }, { status: 400 });
     }
 
-    await dbConnect();
-
+    await connectMain();
     const [activity, club] = await Promise.all([
       Activity.findById(id, "title").lean(),
-      Club.findById(session.user.id, "name logoUrl language").lean(),
+      Club.findById(ctx.clubId, "name logoUrl language").lean(),
     ]);
 
     if (!activity || !club) {
@@ -44,7 +39,7 @@ export async function POST(request, { params }) {
     });
     const filter = {
       activityId: id,
-      clubId: session.user.id,
+      clubId: ctx.clubId,
       teamId: { $in: teamObjectIds },
       status: { $ne: "paid" },
       parent1Email: { $exists: true, $ne: "" },
@@ -65,7 +60,7 @@ export async function POST(request, { params }) {
           order.paymentToken = crypto.randomUUID();
         }
         order.paymentLinkSentAt = new Date();
-        await order.save();
+        await dualSave(ctx, order);
 
         const paymentUrl = `${baseUrl}/payment/${order.paymentToken}`;
         const totalDue = order.totalCostCents - (order.paidCents || 0);

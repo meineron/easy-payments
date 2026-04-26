@@ -1,22 +1,15 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
 import mongoose from "mongoose";
-import Order from "@/models/Order";
+import { getClubContext } from "@/lib/club-context";
 
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
 
-    await dbConnect();
+    const clubOid = new mongoose.Types.ObjectId(String(ctx.clubId));
 
-    const clubOid = new mongoose.Types.ObjectId(String(session.user.id));
-
-    const [result] = await Order.aggregate([
+    const [result] = await ctx.models.Order.aggregate([
       {
         $match: {
           clubId: clubOid,

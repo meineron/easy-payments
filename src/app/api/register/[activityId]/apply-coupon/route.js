@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import dbConnect from "@/lib/mongodb";
-import Activity from "@/models/Activity";
+import { resolvePublicContext } from "@/lib/club-context";
 
 export async function POST(request, { params }) {
   try {
@@ -11,8 +10,11 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: "Coupon code is required" }, { status: 400 });
     }
 
-    await dbConnect();
-    const activity = await Activity.findById(activityId, "coupons").lean();
+    const ctx = await resolvePublicContext("activity", activityId);
+    if (!ctx) {
+      return NextResponse.json({ error: "Activity not found" }, { status: 404 });
+    }
+    const activity = await ctx.models.Activity.findById(activityId, "coupons").lean();
     if (!activity) {
       return NextResponse.json({ error: "Activity not found" }, { status: 404 });
     }

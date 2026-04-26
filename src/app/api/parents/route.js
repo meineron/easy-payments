@@ -1,24 +1,17 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Parent from "@/models/Parent";
-import Player from "@/models/Player";
+import { getClubContext, dualCreate } from "@/lib/club-context";
 
 export async function GET(request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    await dbConnect();
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Parent, Player } = ctx.models;
     void Player;
 
     const { searchParams } = new URL(request.url);
     const search = searchParams.get("search")?.trim();
 
-    const query = { clubId: session.user.id };
+    const query = { clubId: ctx.clubId };
     if (search) {
       const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const re = { $regex: escaped, $options: "i" };
@@ -44,10 +37,8 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
 
     const { firstName, lastName, email, phonePrefix, phone } = await request.json();
 
@@ -55,9 +46,8 @@ export async function POST(request) {
       return NextResponse.json({ error: "First name, last name, email, and phone are required" }, { status: 400 });
     }
 
-    await dbConnect();
-    const parent = await Parent.create({
-      clubId: session.user.id,
+    const parent = await dualCreate(ctx, "Parent", {
+      clubId: ctx.clubId,
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       email: email.trim(),

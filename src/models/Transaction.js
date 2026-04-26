@@ -55,6 +55,10 @@ const TransactionSchema = new mongoose.Schema({
   timestamps: true,
 });
 
+export function getTransactionModel(conn) {
+  return conn.models.Transaction || conn.model("Transaction", TransactionSchema);
+}
+
 if (mongoose.models.Transaction) {
   delete mongoose.models.Transaction;
 }

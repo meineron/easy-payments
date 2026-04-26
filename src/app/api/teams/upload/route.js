@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Team from "@/models/Team";
+import { getClubContext, dualInsertMany } from "@/lib/club-context";
 import * as XLSX from "xlsx";
 
 function excelDateToJS(serial) {
@@ -18,10 +15,8 @@ function detectGender(name) {
 
 export async function POST(request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error: ctxError } = await getClubContext();
+    if (ctxError) return NextResponse.json(ctxError.body, { status: ctxError.status });
 
     const formData = await request.formData();
     const file = formData.get("file");
@@ -88,7 +83,7 @@ export async function POST(request) {
       const loyaltyDiscount = (discountIdx !== -1 && row[discountIdx]) ? parseFloat(row[discountIdx]) : 0;
 
       docs.push({
-        clubId: session.user.id,
+        clubId: ctx.clubId,
         name,
         season,
         gender,
@@ -106,8 +101,7 @@ export async function POST(request) {
       }, { status: 400 });
     }
 
-    await dbConnect();
-    const teams = await Team.insertMany(docs);
+    const teams = await dualInsertMany(ctx, "Team", docs);
 
     return NextResponse.json({
       teams,

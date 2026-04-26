@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Activity from "@/models/Activity";
+import { getClubContext, dualCreate } from "@/lib/club-context";
+import { recordPublicLookup } from "@/lib/public-lookup";
 
 function defaultFormSections() {
   return [
@@ -47,16 +45,12 @@ function defaultFormSections() {
   ];
 }
 
-export async function GET(request) {
+export async function GET() {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
 
-    await dbConnect();
-
-    const activities = await Activity.find({ clubId: session.user.id })
+    const activities = await ctx.models.Activity.find({ clubId: ctx.clubId })
       .select("title type season status hasPayment startDate endDate lastRegisterDate teams createdAt")
       .sort({ createdAt: -1 });
 
@@ -69,10 +63,8 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
 
     const body = await request.json();
     const { title } = body;
@@ -81,15 +73,15 @@ export async function POST(request) {
       return NextResponse.json({ error: "Title is required" }, { status: 400 });
     }
 
-    await dbConnect();
-
-    const activity = await Activity.create({
-      clubId: session.user.id,
+    const activity = await dualCreate(ctx, "Activity", {
+      clubId: ctx.clubId,
       title: title.trim(),
       type: body.type || "Season Registration",
       season: body.season || "",
       formSections: defaultFormSections(),
     });
+
+    await recordPublicLookup("activity", String(activity._id), ctx.clubId);
 
     return NextResponse.json({ activity }, { status: 201 });
   } catch (error) {

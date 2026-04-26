@@ -1,20 +1,12 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Transaction from "@/models/Transaction";
+import { getClubContext } from "@/lib/club-context";
 
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions);
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
 
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    await dbConnect();
-
-    const transactions = await Transaction.find({ clubId: session.user.id })
+    const transactions = await ctx.models.Transaction.find({ clubId: ctx.clubId })
       .sort({ createdAt: -1 })
       .lean();
 

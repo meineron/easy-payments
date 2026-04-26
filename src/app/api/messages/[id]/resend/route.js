@@ -1,25 +1,21 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Message from "@/models/Message";
+import { connectMain } from "@/lib/mongodb";
+import { getClubContext, dualSave } from "@/lib/club-context";
 import Club from "@/models/Club";
 import { sendBulkEmail } from "@/lib/email";
 
 export async function POST(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    await dbConnect();
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Message } = ctx.models;
 
     const { id } = await params;
     const message = await Message.findById(id);
     if (!message) {
       return NextResponse.json({ error: "Message not found" }, { status: 404 });
     }
-    if (String(message.clubId) !== session.user.id) {
+    if (String(message.clubId) !== String(ctx.clubId)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
@@ -33,7 +29,8 @@ export async function POST(request, { params }) {
       message.recipientCount = [...new Set(recipients.map((r) => r.email).filter(Boolean))].length;
     }
 
-    const club = await Club.findById(session.user.id, "name logoUrl smtpHost smtpPort smtpEmail smtpPassword").lean();
+    await connectMain();
+    const club = await Club.findById(ctx.clubId, "name logoUrl smtpHost smtpPort smtpEmail smtpPassword").lean();
     if (!club) {
       return NextResponse.json({ error: "Club not found" }, { status: 404 });
     }
@@ -51,7 +48,7 @@ export async function POST(request, { params }) {
       message.fromEmail = fromEmail;
       message.status = "sent";
       message.sentAt = new Date();
-      await message.save();
+      await dualSave(ctx, message);
       return NextResponse.json({ message: { _id: message._id, status: "sent" } });
     } catch (err) {
       console.error("Resend email error:", err);
@@ -59,7 +56,7 @@ export async function POST(request, { params }) {
       if (err.code === "EAUTH") errorReason = "auth";
       else if (err.code === "ECONNREFUSED" || err.code === "ESOCKET") errorReason = "connection";
       message.status = "failed";
-      await message.save();
+      await dualSave(ctx, message);
       return NextResponse.json({ message: { _id: message._id, status: "failed", errorReason } });
     }
   } catch (error) {

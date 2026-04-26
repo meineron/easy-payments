@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe";
-import dbConnect from "@/lib/mongodb";
-import Team from "@/models/Team";
+import { connectMain } from "@/lib/mongodb";
+import { resolvePublicContext, dualCreate, dualWrite } from "@/lib/club-context";
 import Club from "@/models/Club";
-import Registration from "@/models/Registration";
-import Parent from "@/models/Parent";
 import { toDobString } from "@/lib/dob";
 
 export async function POST(request, { params }) {
@@ -38,13 +36,18 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: "Player first name, last name, and full address are required" }, { status: 400 });
     }
 
-    await dbConnect();
+    const ctx = await resolvePublicContext("team", id);
+    if (!ctx) {
+      return NextResponse.json({ error: "Team not found" }, { status: 404 });
+    }
+    const { Team } = ctx.models;
 
     const team = await Team.findById(id);
     if (!team) {
       return NextResponse.json({ error: "Team not found" }, { status: 404 });
     }
 
+    await connectMain();
     const club = await Club.findById(team.clubId);
     if (!club || !club.onboardingComplete || !club.stripeAccountId) {
       return NextResponse.json({ error: "Club Stripe account not ready" }, { status: 400 });
@@ -54,7 +57,7 @@ export async function POST(request, { params }) {
     const discountCents = hasLoyaltyDiscount ? (team.loyaltyDiscountCents || 0) : 0;
     const afterDiscountCents = totalCents - discountCents;
 
-    const registration = await Registration.create({
+    const registration = await dualCreate(ctx, "Registration", {
       clubId: club._id,
       teamId: team._id,
       parentId: parentId || null,
@@ -80,7 +83,7 @@ export async function POST(request, { params }) {
 
     if (parentId) {
       try {
-        await Parent.findByIdAndUpdate(parentId, {
+        await dualWrite(ctx, (M) => M.Parent.findByIdAndUpdate(parentId, {
           $push: {
             players: {
               firstName: playerFirstName.trim(),
@@ -93,7 +96,7 @@ export async function POST(request, { params }) {
               mainTeam: team._id,
             },
           },
-        });
+        }));
       } catch (err) {
         console.error("Failed to add player to parent:", err.message);
       }
@@ -101,12 +104,12 @@ export async function POST(request, { params }) {
 
     let session;
     if (numPayments === 1) {
-      session = await createSinglePaymentSession({ team, club, afterDiscountCents, totalCents, hasLoyaltyDiscount, registration });
+      session = await createSinglePaymentSession({ team, club, afterDiscountCents, totalCents, discountCents, hasLoyaltyDiscount, registration });
     } else {
       session = await createInstallmentSession({ team, club, afterDiscountCents, totalCents, hasLoyaltyDiscount, numPayments, registration });
     }
 
-    await Registration.findByIdAndUpdate(registration._id, { stripeSessionId: session.id });
+    await dualWrite(ctx, (M) => M.Registration.findByIdAndUpdate(registration._id, { stripeSessionId: session.id }));
 
     return NextResponse.json({ url: session.url });
   } catch (error) {
@@ -115,7 +118,7 @@ export async function POST(request, { params }) {
   }
 }
 
-async function createSinglePaymentSession({ team, club, afterDiscountCents, totalCents, hasLoyaltyDiscount, registration }) {
+async function createSinglePaymentSession({ team, club, afterDiscountCents, totalCents, discountCents, hasLoyaltyDiscount, registration }) {
   const lineItems = [{
     price_data: {
       currency: "usd",

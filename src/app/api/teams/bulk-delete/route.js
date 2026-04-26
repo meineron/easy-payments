@@ -1,21 +1,14 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 import mongoose from "mongoose";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Team from "@/models/Team";
-import Player from "@/models/Player";
-import Order from "@/models/Order";
-import Activity from "@/models/Activity";
+import { getClubContext, dualWrite } from "@/lib/club-context";
 
 const MAX_IDS = 500;
 
 export async function POST(request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Team, Player, Order, Activity } = ctx.models;
 
     const body = await request.json();
     const rawIds = Array.isArray(body.teamIds) ? body.teamIds : [];
@@ -26,13 +19,11 @@ export async function POST(request) {
       return NextResponse.json({ error: `At most ${MAX_IDS} teams per request` }, { status: 400 });
     }
 
-    const clubId = session.user.id;
+    const clubId = ctx.clubId;
     const teamIds = [...new Set(rawIds.map((id) => String(id)))].filter((id) => mongoose.Types.ObjectId.isValid(id));
     if (teamIds.length === 0) {
       return NextResponse.json({ error: "No valid team ids" }, { status: 400 });
     }
-
-    await dbConnect();
 
     const owned = await Team.find({ _id: { $in: teamIds }, clubId }).select("_id").lean();
     const ownedSet = new Set(owned.map((t) => String(t._id)));
@@ -89,7 +80,7 @@ export async function POST(request) {
       });
     }
 
-    const result = await Team.deleteMany({ _id: { $in: toDelete }, clubId });
+    const result = await dualWrite(ctx, (M) => M.Team.deleteMany({ _id: { $in: toDelete }, clubId }));
 
     return NextResponse.json({
       deleted: result.deletedCount || 0,

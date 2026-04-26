@@ -1,11 +1,6 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
 import mongoose from "mongoose";
-import Activity from "@/models/Activity";
-import Order from "@/models/Order";
-import Transaction from "@/models/Transaction";
+import { getClubContext } from "@/lib/club-context";
 
 function buildSeasonFilter(clubId, seasonActivities, params) {
   const activityIds = seasonActivities.map((a) => a._id);
@@ -49,7 +44,7 @@ function buildSeasonFilter(clubId, seasonActivities, params) {
   return match;
 }
 
-async function getRegistrations(match, params) {
+async function getRegistrations(Order, match, params) {
   const statusFilter = params.get("status");
   if (statusFilter) {
     match.status = statusFilter;
@@ -110,7 +105,7 @@ async function getRegistrations(match, params) {
   };
 }
 
-async function getTransactions(clubId, seasonActivities, params) {
+async function getTransactions(Transaction, clubId, seasonActivities, params) {
   const toOid = (id) => new mongoose.Types.ObjectId(String(id));
   const page = Math.max(1, parseInt(params.get("page") || "1", 10));
   const limit = Math.min(100, Math.max(1, parseInt(params.get("limit") || "20", 10)));
@@ -197,7 +192,7 @@ async function getTransactions(clubId, seasonActivities, params) {
   };
 }
 
-async function getLateDue(match, params) {
+async function getLateDue(Order, match, params) {
   delete match.status;
 
   const search = params.get("search");
@@ -273,17 +268,14 @@ async function getLateDue(match, params) {
 
 export async function GET(request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Activity, Order, Transaction } = ctx.models;
 
-    const clubId = session.user.id;
+    const clubId = ctx.clubId;
     const { searchParams } = new URL(request.url);
     const tab = searchParams.get("tab") || "registrations";
     const seasonParam = searchParams.get("season");
-
-    await dbConnect();
 
     const allActivities = await Activity.find({ clubId }, "title season startDate endDate teams")
       .sort({ createdAt: -1 })
@@ -298,13 +290,13 @@ export async function GET(request) {
 
     let result;
     if (tab === "transactions") {
-      result = await getTransactions(clubId, seasonActivities, searchParams);
+      result = await getTransactions(Transaction, clubId, seasonActivities, searchParams);
     } else if (tab === "late_due") {
       const match = buildSeasonFilter(clubId, seasonActivities, searchParams);
-      result = await getLateDue(match, searchParams);
+      result = await getLateDue(Order, match, searchParams);
     } else {
       const match = buildSeasonFilter(clubId, seasonActivities, searchParams);
-      result = await getRegistrations(match, searchParams);
+      result = await getRegistrations(Order, match, searchParams);
     }
 
     return NextResponse.json(result);

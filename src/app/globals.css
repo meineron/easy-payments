@@ -1,8 +1,42 @@
 @import "tailwindcss";
 
+/* =========================================================================
+ * Design tokens — single source of truth for the UI.
+ * Anything visual (colors, spacing, radii, shadows, z-index) should reference
+ * a token. New components MUST use these instead of raw hex/px values.
+ * Keep additions sorted by category and update .cursor/rules/styling.md when
+ * a new token category is added.
+ * ========================================================================= */
 :root {
   --background: #f8fafc;
   --foreground: #0f172a;
+
+  /* Brand */
+  --color-brand-50: #eff6ff;
+  --color-brand-100: #dbeafe;
+  --color-brand-500: #3b82f6;
+  --color-brand-600: #2563eb;
+  --color-brand-700: #1d4ed8;
+
+  /* Status palette — mirrors the legacy STATUS_COLORS map in the activities page */
+  --color-status-pending-bg: #fef3c7;       /* yellow-100 */
+  --color-status-pending-fg: #a16207;       /* yellow-700 */
+  --color-status-partial-bg: #dbeafe;       /* blue-100 */
+  --color-status-partial-fg: #1d4ed8;       /* blue-700 */
+  --color-status-paid-bg: #d1fae5;          /* green-100 */
+  --color-status-paid-fg: #047857;          /* green-700 */
+  --color-status-refunded-bg: #ede9fe;      /* purple-100 */
+  --color-status-refunded-fg: #6d28d9;      /* purple-700 */
+  --color-status-cancelled-bg: #fee2e2;     /* red-100 */
+  --color-status-cancelled-fg: #dc2626;     /* red-600 */
+  --color-status-expected-bg: #ffedd5;      /* orange-100 */
+  --color-status-expected-fg: #c2410c;      /* orange-700 */
+
+  /* Z-index scale — keep modals above drawers above toasts above content */
+  --z-dropdown: 40;
+  --z-drawer: 50;
+  --z-modal: 60;
+  --z-toast: 100;
 }
 
 @theme inline {
@@ -10,6 +44,12 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  --color-brand-50: var(--color-brand-50);
+  --color-brand-100: var(--color-brand-100);
+  --color-brand-500: var(--color-brand-500);
+  --color-brand-600: var(--color-brand-600);
+  --color-brand-700: var(--color-brand-700);
 }
 
 body {
@@ -102,4 +142,10 @@ input[type="date"]::-webkit-date-and-time-value {
 @keyframes slideInRight {
   from { transform: translateX(100%); }
   to { transform: translateX(0); }
+}
+
+/* Toast slide-in animation used by shared/components/Toast */
+@keyframes slideIn {
+  from { transform: translateY(-8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }

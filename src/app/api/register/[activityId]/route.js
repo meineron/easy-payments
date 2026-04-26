@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import dbConnect from "@/lib/mongodb";
-import Activity from "@/models/Activity";
-import Order from "@/models/Order";
+import { connectMain } from "@/lib/mongodb";
+import { resolvePublicContext } from "@/lib/club-context";
 import Club from "@/models/Club";
 
 // Admin invoice edits must be visible to the parent immediately, so this
@@ -14,7 +13,12 @@ export async function GET(request, { params }) {
     const { activityId } = await params;
     const { searchParams } = new URL(request.url);
     const token = searchParams.get("token");
-    await dbConnect();
+
+    const ctx = await resolvePublicContext("activity", activityId);
+    if (!ctx) {
+      return NextResponse.json({ error: "Activity not found" }, { status: 404 });
+    }
+    const { Activity, Order } = ctx.models;
 
     const activity = await Activity.findById(activityId)
       .populate("teams.teamId", "name season gender")
@@ -24,6 +28,7 @@ export async function GET(request, { params }) {
       return NextResponse.json({ error: "Activity not found" }, { status: 404 });
     }
 
+    await connectMain();
     const club = await Club.findById(activity.clubId, "name logoUrl language supportEmail").lean();
 
     const safeActivity = {

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { stripe } from "@/lib/stripe";
-import dbConnect from "@/lib/mongodb";
+import { connectMain } from "@/lib/mongodb";
 import Club from "@/models/Club";
 
 export async function GET() {
@@ -13,8 +13,8 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    await dbConnect();
-    const club = await Club.findById(session.user.id);
+    await connectMain();
+    const club = await Club.findById(session.user.activeClubId || session.user.id);
 
     if (!club || !club.stripeAccountId) {
       return NextResponse.json({ onboardingComplete: false });

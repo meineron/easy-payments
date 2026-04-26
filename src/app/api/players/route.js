@@ -1,23 +1,17 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Player from "@/models/Player";
+import { getClubContext, dualCreate, dualWrite } from "@/lib/club-context";
 import { toDobString } from "@/lib/dob";
 
 export async function GET(request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    await dbConnect();
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Player } = ctx.models;
 
     const { searchParams } = new URL(request.url);
     const search = searchParams.get("search");
 
-    let query = { clubId: session.user.id };
+    let query = { clubId: ctx.clubId };
     if (search) {
       const regex = new RegExp(search, "i");
       query.$or = [
@@ -43,10 +37,9 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Player } = ctx.models;
 
     const body = await request.json();
     const {
@@ -60,10 +53,8 @@ export async function POST(request) {
       return NextResponse.json({ error: "First name and last name are required" }, { status: 400 });
     }
 
-    await dbConnect();
-
     const playerData = {
-      clubId: session.user.id,
+      clubId: ctx.clubId,
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       dateOfBirth: toDobString(dateOfBirth),
@@ -84,14 +75,13 @@ export async function POST(request) {
       parents: Array.isArray(parentIds) ? parentIds : [],
     };
 
-    const player = await Player.create(playerData);
+    const player = await dualCreate(ctx, "Player", playerData);
 
     if (playerData.parents.length > 0) {
-      const Parent = (await import("@/models/Parent")).default;
-      await Parent.updateMany(
-        { _id: { $in: playerData.parents }, clubId: session.user.id },
-        { $addToSet: { players: player._id } }
-      );
+      await dualWrite(ctx, (M) => M.Parent.updateMany(
+        { _id: { $in: playerData.parents }, clubId: ctx.clubId },
+        { $addToSet: { players: player._id } },
+      ));
     }
 
     const populated = await Player.findById(player._id)

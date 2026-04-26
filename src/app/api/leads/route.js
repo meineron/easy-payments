@@ -1,23 +1,17 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 import mongoose from "mongoose";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Lead from "@/models/Lead";
-import LeadSubmission from "@/models/LeadSubmission";
+import { getClubContext, dualCreate } from "@/lib/club-context";
 import { generateUniqueLeadSlug } from "@/lib/lead-slug";
 import { defaultLeadFormSections } from "@/lib/lead-defaults";
+import { recordPublicLookup } from "@/lib/public-lookup";
 
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Lead, LeadSubmission } = ctx.models;
 
-    await dbConnect();
-
-    const leads = await Lead.find({ clubId: session.user.id })
+    const leads = await Lead.find({ clubId: ctx.clubId })
       .select("title slug status expiresAt coverImage createdAt")
       .sort({ createdAt: -1 })
       .lean();
@@ -25,7 +19,7 @@ export async function GET() {
     const leadIds = leads.map((l) => l._id);
     const counts = leadIds.length
       ? await LeadSubmission.aggregate([
-          { $match: { leadId: { $in: leadIds }, clubId: new mongoose.Types.ObjectId(session.user.id) } },
+          { $match: { leadId: { $in: leadIds }, clubId: new mongoose.Types.ObjectId(ctx.clubId) } },
           { $group: { _id: "$leadId", count: { $sum: 1 } } },
         ]).catch(() => [])
       : [];
@@ -45,10 +39,8 @@ export async function GET() {
 
 export async function POST(request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
 
     const body = await request.json();
     const { title } = body;
@@ -57,12 +49,10 @@ export async function POST(request) {
       return NextResponse.json({ error: "Title is required" }, { status: 400 });
     }
 
-    await dbConnect();
-
     const slug = await generateUniqueLeadSlug();
 
-    const lead = await Lead.create({
-      clubId: session.user.id,
+    const lead = await dualCreate(ctx, "Lead", {
+      clubId: ctx.clubId,
       slug,
       title: title.trim(),
       description: body.description || "",
@@ -73,6 +63,8 @@ export async function POST(request) {
       notifyStaffIds: [],
       notifyChannels: { email: true, sms: false },
     });
+
+    await recordPublicLookup("leadSlug", slug, ctx.clubId);
 
     return NextResponse.json({ lead }, { status: 201 });
   } catch (error) {

@@ -57,6 +57,10 @@ const RegistrationSchema = new mongoose.Schema({
   timestamps: true,
 });
 
+export function getRegistrationModel(conn) {
+  return conn.models.Registration || conn.model("Registration", RegistrationSchema);
+}
+
 if (mongoose.models.Registration) {
   delete mongoose.models.Registration;
 }

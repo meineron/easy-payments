@@ -205,13 +205,16 @@ function buildWaiverConfirmationHtml({
  * intact for future use. For now, all waiver + registration details are
  * embedded directly in the email body — no attachments.
  */
-export async function sendWaiverConfirmationPDFEmail(order, { force = false } = {}) {
+export async function sendWaiverConfirmationPDFEmail(order, { force = false, ctx = null } = {}) {
   try {
     await dbConnect();
 
+    const OrderModel = ctx?.models?.Order || Order;
+    const ActivityModel = ctx?.models?.Activity || Activity;
+
     const orderDoc = typeof order?.save === "function"
       ? order
-      : await Order.findById(order?._id);
+      : await OrderModel.findById(order?._id);
     if (!orderDoc) return { ok: false, reason: "not_found" };
 
     if (!force && orderDoc.waiverConfirmationSentAt) {
@@ -222,7 +225,7 @@ export async function sendWaiverConfirmationPDFEmail(order, { force = false } = 
     if (signedConsents.length === 0) return { ok: false, reason: "no_signed_waivers" };
 
     const [activity, club] = await Promise.all([
-      Activity.findById(orderDoc.activityId, "title waivers formSections").lean(),
+      ActivityModel.findById(orderDoc.activityId, "title waivers formSections").lean(),
       Club.findById(orderDoc.clubId, "name logoUrl language smtpEmail smtpPassword smtpHost smtpPort").lean(),
     ]);
     if (!activity || !club) return { ok: false, reason: "missing_activity_or_club" };
@@ -268,7 +271,12 @@ export async function sendWaiverConfirmationPDFEmail(order, { force = false } = 
     if (sentAny) {
       orderDoc.waiverConfirmationSentAt = new Date();
       try {
-        await orderDoc.save();
+        if (ctx) {
+          const { dualSave } = await import("@/lib/club-context");
+          await dualSave(ctx, orderDoc);
+        } else {
+          await orderDoc.save();
+        }
       } catch (e) {
         console.error("Failed to stamp waiverConfirmationSentAt:", e.message);
       }

@@ -1,24 +1,17 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Lead from "@/models/Lead";
-import LeadSubmission from "@/models/LeadSubmission";
-import LeadLog from "@/models/LeadLog";
+import { getClubContext, dualSave, dualWrite } from "@/lib/club-context";
 import { ensureMustFields } from "@/lib/lead-defaults";
 import { writeLeadLog, getSessionAuthor } from "@/lib/lead-logs";
 
 export async function GET(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Lead } = ctx.models;
 
     const { id } = await params;
-    await dbConnect();
 
-    const lead = await Lead.findOne({ _id: id, clubId: session.user.id })
+    const lead = await Lead.findOne({ _id: id, clubId: ctx.clubId })
       .populate("notifyStaffIds", "firstName lastName email phone phonePrefix status");
 
     if (!lead) {
@@ -34,16 +27,14 @@ export async function GET(request, { params }) {
 
 export async function PUT(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { session, ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Lead } = ctx.models;
 
     const { id } = await params;
     const body = await request.json();
-    await dbConnect();
 
-    const lead = await Lead.findOne({ _id: id, clubId: session.user.id });
+    const lead = await Lead.findOne({ _id: id, clubId: ctx.clubId });
     if (!lead) {
       return NextResponse.json({ error: "Lead not found" }, { status: 404 });
     }
@@ -72,16 +63,17 @@ export async function PUT(request, { params }) {
       lead[key] = next;
     }
 
-    await lead.save();
+    await dualSave(ctx, lead);
 
     if (body.status && body.status !== prevStatus) {
       await writeLeadLog({
         leadId: lead._id,
-        clubId: session.user.id,
+        clubId: ctx.clubId,
         type: "status_changed",
         ...author,
         content: `Status changed from ${prevStatus} to ${body.status}`,
         context: { previous: prevStatus, next: body.status },
+        ctx,
       });
     }
 
@@ -90,11 +82,12 @@ export async function PUT(request, { params }) {
       if (nonStatusDiffs.length > 0) {
         await writeLeadLog({
           leadId: lead._id,
-          clubId: session.user.id,
+          clubId: ctx.clubId,
           type: "lead_updated",
           ...author,
           content: `Updated fields: ${nonStatusDiffs.map((d) => d.field).join(", ")}`,
           context: { fields: nonStatusDiffs.map((d) => d.field) },
+          ctx,
         });
       }
     }
@@ -111,22 +104,21 @@ export async function PUT(request, { params }) {
 
 export async function DELETE(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Lead } = ctx.models;
 
     const { id } = await params;
-    await dbConnect();
 
-    const lead = await Lead.findOneAndDelete({ _id: id, clubId: session.user.id });
+    const lead = await Lead.findOne({ _id: id, clubId: ctx.clubId });
     if (!lead) {
       return NextResponse.json({ error: "Lead not found" }, { status: 404 });
     }
 
+    await dualWrite(ctx, (M) => M.Lead.deleteOne({ _id: id, clubId: ctx.clubId }));
     await Promise.all([
-      LeadSubmission.deleteMany({ leadId: id, clubId: session.user.id }),
-      LeadLog.deleteMany({ leadId: id, clubId: session.user.id }),
+      dualWrite(ctx, (M) => M.LeadSubmission.deleteMany({ leadId: id, clubId: ctx.clubId })),
+      dualWrite(ctx, (M) => M.LeadLog.deleteMany({ leadId: id, clubId: ctx.clubId })),
     ]);
 
     return NextResponse.json({ message: "Lead deleted" });

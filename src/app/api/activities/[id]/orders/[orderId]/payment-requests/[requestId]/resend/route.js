@@ -1,24 +1,19 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import PaymentRequest from "@/models/PaymentRequest";
-import Activity from "@/models/Activity";
+import { connectMain } from "@/lib/mongodb";
+import { getClubContext, dualSave } from "@/lib/club-context";
 import Club from "@/models/Club";
-import Order from "@/models/Order";
 import { sendPaymentLink } from "@/lib/email";
 
 export async function POST(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { PaymentRequest, Activity, Order } = ctx.models;
+
     const { id, orderId, requestId } = await params;
-    await dbConnect();
 
     const pr = await PaymentRequest.findOne({
-      _id: requestId, orderId, activityId: id, clubId: session.user.id,
+      _id: requestId, orderId, activityId: id, clubId: ctx.clubId,
     });
     if (!pr) {
       return NextResponse.json({ error: "Payment request not found" }, { status: 404 });
@@ -30,10 +25,11 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: "No recipient email on this request" }, { status: 400 });
     }
 
+    await connectMain();
     const [order, activity, club] = await Promise.all([
       Order.findById(orderId, "playerFirstName playerLastName").lean(),
       Activity.findById(id, "title").lean(),
-      Club.findById(session.user.id, "name logoUrl language").lean(),
+      Club.findById(ctx.clubId, "name logoUrl language").lean(),
     ]);
 
     const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
@@ -52,7 +48,7 @@ export async function POST(request, { params }) {
     });
 
     pr.sentAt = new Date();
-    await pr.save();
+    await dualSave(ctx, pr);
 
     return NextResponse.json({ success: true });
   } catch (error) {

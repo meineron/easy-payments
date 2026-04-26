@@ -2,16 +2,7 @@ import LeadLog from "@/models/LeadLog";
 
 /**
  * Write a log entry for a lead / submission.
- * @param {Object} params
- * @param {string} params.leadId
- * @param {string} [params.submissionId]
- * @param {string} params.clubId
- * @param {string} params.type - one of the LeadLog enum types
- * @param {"club"|"staff"|"system"} params.authorType
- * @param {string} [params.authorId]
- * @param {string} [params.authorName]
- * @param {string} [params.content]
- * @param {Object} [params.context]
+ * Pass `ctx` (from `getClubContext`) to dual-write into the tenant database.
  */
 export async function writeLeadLog({
   leadId,
@@ -23,9 +14,10 @@ export async function writeLeadLog({
   authorName = "",
   content = "",
   context = {},
+  ctx = null,
 }) {
   try {
-    return await LeadLog.create({
+    const data = {
       leadId,
       submissionId,
       clubId,
@@ -35,7 +27,12 @@ export async function writeLeadLog({
       authorName,
       content,
       context,
-    });
+    };
+    if (ctx) {
+      const { dualCreate } = await import("@/lib/club-context");
+      return await dualCreate(ctx, "LeadLog", data);
+    }
+    return await LeadLog.create(data);
   } catch (err) {
     console.error("writeLeadLog error:", err);
     return null;
@@ -47,13 +44,13 @@ export function getSessionAuthor(session) {
   if (session.user.role === "staff") {
     return {
       authorType: "staff",
-      authorId: session.user.id || "",
+      authorId: session.user.userId || session.user.id || "",
       authorName: session.user.name || "Staff",
     };
   }
   return {
     authorType: "club",
-    authorId: session.user.id || "",
+    authorId: session.user.userId || session.user.id || "",
     authorName: session.user.name || "Club",
   };
 }

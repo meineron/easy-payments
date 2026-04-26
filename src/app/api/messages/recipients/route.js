@@ -1,31 +1,22 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Player from "@/models/Player";
-import Parent from "@/models/Parent";
-import Team from "@/models/Team";
+import { getClubContext } from "@/lib/club-context";
 
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    await dbConnect();
-
-    const clubId = session.user.id;
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Player, Parent, Team } = ctx.models;
 
     const [players, parents, teams] = await Promise.all([
-      Player.find({ clubId }, "firstName lastName email phonePrefix phoneNumber teams parents")
+      Player.find({ clubId: ctx.clubId }, "firstName lastName email phonePrefix phoneNumber teams parents")
         .populate("teams.teamId", "name season")
         .populate("parents", "firstName lastName email phonePrefix phone")
         .sort("lastName firstName")
         .lean(),
-      Parent.find({ clubId }, "firstName lastName email phonePrefix phone")
+      Parent.find({ clubId: ctx.clubId }, "firstName lastName email phonePrefix phone")
         .sort("lastName firstName")
         .lean(),
-      Team.find({ clubId }, "name season")
+      Team.find({ clubId: ctx.clubId }, "name season")
         .sort("name")
         .lean(),
     ]);

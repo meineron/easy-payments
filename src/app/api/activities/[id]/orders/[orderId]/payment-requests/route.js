@@ -1,28 +1,22 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
 import crypto from "crypto";
-import Order from "@/models/Order";
-import PaymentRequest from "@/models/PaymentRequest";
-import Activity from "@/models/Activity";
+import { connectMain } from "@/lib/mongodb";
+import { getClubContext, dualCreate } from "@/lib/club-context";
 import Club from "@/models/Club";
 import { sendPaymentLink } from "@/lib/email";
 import { sendSMS, toE164 } from "@/lib/sms";
 
 export async function GET(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const { id, orderId } = await params;
-    await dbConnect();
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
 
-    const paymentRequests = await PaymentRequest.find({
+    const { id, orderId } = await params;
+
+    const paymentRequests = await ctx.models.PaymentRequest.find({
       orderId,
       activityId: id,
-      clubId: session.user.id,
+      clubId: ctx.clubId,
     }).sort({ createdAt: -1 }).lean();
 
     return NextResponse.json({ paymentRequests });
@@ -34,10 +28,10 @@ export async function GET(request, { params }) {
 
 export async function POST(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Order, PaymentRequest, Activity } = ctx.models;
+
     const { id, orderId } = await params;
     const body = await request.json();
     const { items, sendMethod, recipientEmail, recipientName, note, allowedInstallments } = body;
@@ -46,9 +40,7 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: "Select at least one item" }, { status: 400 });
     }
 
-    await dbConnect();
-
-    const order = await Order.findOne({ _id: orderId, activityId: id, clubId: session.user.id }).lean();
+    const order = await Order.findOne({ _id: orderId, activityId: id, clubId: ctx.clubId }).lean();
     if (!order) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
@@ -59,7 +51,7 @@ export async function POST(request, { params }) {
     }
 
     const outstandingRequests = await PaymentRequest.find({
-      orderId, clubId: session.user.id, status: "pending",
+      orderId, clubId: ctx.clubId, status: "pending",
     }).lean();
     const pendingTotal = outstandingRequests.reduce((s, r) => s + r.totalCents, 0);
     const outstandingBalance = order.totalCostCents - (order.paidCents || 0) - pendingTotal;
@@ -94,9 +86,9 @@ export async function POST(request, { params }) {
       ? [...new Set(allowedInstallments.map(Number).filter((n) => n >= 1 && n <= 10))].sort((a, b) => a - b)
       : [1];
 
-    const pr = await PaymentRequest.create({
+    const pr = await dualCreate(ctx, "PaymentRequest", {
       orderId,
-      clubId: session.user.id,
+      clubId: ctx.clubId,
       activityId: id,
       items,
       totalCents,
@@ -126,9 +118,10 @@ export async function POST(request, { params }) {
       }
     } else if (sendMethod !== "copy_only" && email) {
       try {
+        await connectMain();
         const [activity, club] = await Promise.all([
           Activity.findById(id, "title").lean(),
-          Club.findById(session.user.id, "name logoUrl language").lean(),
+          Club.findById(ctx.clubId, "name logoUrl language").lean(),
         ]);
         const playerName = `${order.playerFirstName} ${order.playerLastName}`.trim();
         const totalAmount = "$" + (totalCents / 100).toFixed(2);
@@ -149,7 +142,7 @@ export async function POST(request, { params }) {
 
     return NextResponse.json({
       success: true,
-      paymentRequest: pr.toObject(),
+      paymentRequest: pr.toObject ? pr.toObject() : pr,
       paymentUrl,
     }, { status: 201 });
   } catch (error) {

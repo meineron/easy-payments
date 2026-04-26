@@ -23,10 +23,18 @@ Sports-club payment & registration platform built with Next.js 16 (App Router), 
 
 Read the relevant rule file before working on that area:
 - `project-overview.md` — full stack overview (always loaded)
+- `frontend-architecture.md` — folder layout, features vs shared, "use client" everywhere (always loaded)
+- `state-management.md` — Redux Toolkit + RTK Query, where each kind of state lives (always loaded)
+- `shared-components.md` — Modal/Tabs/Dropdown/Toast/Button/Input/Table/Pagination/RichTextEditor primitives
+- `styling.md` — Tailwind v4 design tokens, RTL conventions, when CSS modules are allowed
+- `performance.md` — lazy loading (`next/dynamic`), images, long lists, memoization
+- `dashboard-pages.md` — dashboard UI conventions (pages stay thin)
+- `mobile-design.md` — mobile-first sizing + table-to-accordion pattern
 - `api-routes.md` — API route handler patterns
-- `dashboard-pages.md` — dashboard UI conventions
+- `backend-services.md` — services-layer pattern for `lib/services/`
 - `i18n.md` — internationalization rules
 - `models.md` — Mongoose schema patterns
+- `multi-tenant.md` — per-club database boundaries
 - `self-maintenance.md` — keep rules up to date when code changes
 
 ## Token Usage

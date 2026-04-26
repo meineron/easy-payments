@@ -1,33 +1,77 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import dbConnect from "@/lib/mongodb";
 import { stripe } from "@/lib/stripe";
 import Club from "@/models/Club";
 
+const PASSWORD_MASK = "••••••••";
+
+function serializeClub(club) {
+  const obj = club.toObject ? club.toObject() : club;
+  const {
+    password: _password,
+    stripeSecretKey: _stripeSecretKey,
+    stripeWebhookSecret: _stripeWebhookSecret,
+    smtpPassword,
+    ...rest
+  } = obj;
+  return {
+    ...rest,
+    status: rest.status || "active",
+    hasStripeKey: !!_stripeSecretKey,
+    hasWebhookSecret: !!_stripeWebhookSecret,
+    smtpPassword: smtpPassword ? PASSWORD_MASK : "",
+    hasSmtpPassword: !!smtpPassword,
+  };
+}
+
+async function requireAdmin() {
+  const session = await getServerSession(authOptions);
+  if (!session || session.user?.role !== "admin") {
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
+  }
+  return { session };
+}
+
 export async function GET(request, { params }) {
+  const { error } = await requireAdmin();
+  if (error) return error;
+
   const { id } = await params;
 
   await dbConnect();
-  const club = await Club.findById(id).select("-password -stripeSecretKey -stripeWebhookSecret");
+  const club = await Club.findById(id);
 
   if (!club) {
     return NextResponse.json({ error: "Club not found" }, { status: 404 });
   }
 
-  const secrets = await Club.findById(id).select("stripeSecretKey stripeWebhookSecret");
-  const hasKey = !!secrets?.stripeSecretKey;
-  const hasWebhookSecret = !!secrets?.stripeWebhookSecret;
-
-  return NextResponse.json({
-    club: { ...club.toObject(), hasStripeKey: hasKey, hasWebhookSecret },
-  });
+  return NextResponse.json({ club: serializeClub(club) });
 }
 
 export async function PUT(request, { params }) {
+  const { error } = await requireAdmin();
+  if (error) return error;
+
   const { id } = await params;
 
   try {
     const body = await request.json();
-    const { name, hasDirectStripeAccess, stripeSecretKey, stripeWebhookSecret } = body;
+    const {
+      name,
+      hasDirectStripeAccess,
+      stripeSecretKey,
+      stripeWebhookSecret,
+      logoUrl,
+      language,
+      supportEmail,
+      smtpHost,
+      smtpPort,
+      smtpEmail,
+      smtpPassword,
+      maxPaymentRequestInstallments,
+    } = body;
 
     await dbConnect();
     const club = await Club.findById(id);
@@ -36,79 +80,107 @@ export async function PUT(request, { params }) {
       return NextResponse.json({ error: "Club not found" }, { status: 404 });
     }
 
-    if (club.onboardingComplete && !club.hasDirectStripeAccess) {
+    const stripeSectionTouched =
+      typeof hasDirectStripeAccess !== "undefined" ||
+      typeof stripeSecretKey !== "undefined" ||
+      typeof stripeWebhookSecret !== "undefined";
+
+    if (stripeSectionTouched && club.onboardingComplete && !club.hasDirectStripeAccess) {
       return NextResponse.json(
         { error: "Cannot change Stripe status — this club has already completed Connect onboarding" },
         { status: 400 }
       );
     }
 
-    if (name) club.name = name;
+    if (typeof name === "string" && name.trim()) {
+      club.name = name.trim();
+    }
 
-    const wasDirectAccess = club.hasDirectStripeAccess;
-    const wantDirectAccess = !!hasDirectStripeAccess;
-
-    if (wasDirectAccess && !wantDirectAccess) {
-      // Switching from Direct Access → Connect: create a new Express account
-      const account = await stripe.accounts.create({
-        type: "express",
-        metadata: { clubName: club.name },
-      });
-
-      club.hasDirectStripeAccess = false;
-      club.stripeSecretKey = null;
-      club.stripeWebhookSecret = null;
-      club.stripeAccountId = account.id;
-      club.onboardingComplete = false;
-    } else if (!wasDirectAccess && wantDirectAccess) {
-      // Switching from Connect → Direct Access: delete the Express account
-      if (!stripeSecretKey) {
-        return NextResponse.json(
-          { error: "Stripe secret key is required when enabling direct access" },
-          { status: 400 }
-        );
+    if (typeof logoUrl !== "undefined") {
+      club.logoUrl = logoUrl || null;
+    }
+    if (typeof language !== "undefined" && ["en", "he"].includes(language)) {
+      club.language = language;
+    }
+    if (typeof supportEmail === "string") {
+      club.supportEmail = supportEmail.trim();
+    }
+    if (typeof smtpHost === "string") {
+      club.smtpHost = smtpHost.trim();
+    }
+    if (typeof smtpPort !== "undefined") {
+      const parsed = parseInt(smtpPort, 10);
+      club.smtpPort = Number.isFinite(parsed) && parsed > 0 ? parsed : 587;
+    }
+    if (typeof smtpEmail === "string") {
+      club.smtpEmail = smtpEmail.trim();
+    }
+    if (typeof smtpPassword === "string" && smtpPassword !== PASSWORD_MASK) {
+      club.smtpPassword = smtpPassword;
+    }
+    if (typeof maxPaymentRequestInstallments !== "undefined") {
+      const parsed = parseInt(maxPaymentRequestInstallments, 10);
+      if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 10) {
+        club.maxPaymentRequestInstallments = parsed;
       }
+    }
 
-      if (club.stripeAccountId) {
-        try {
-          await stripe.accounts.del(club.stripeAccountId);
-        } catch (err) {
-          console.error("Failed to delete Stripe account (may already be gone):", err.message);
+    if (stripeSectionTouched) {
+      const wasDirectAccess = club.hasDirectStripeAccess;
+      const wantDirectAccess = !!hasDirectStripeAccess;
+
+      if (wasDirectAccess && !wantDirectAccess) {
+        // Switching from Direct Access → Connect: create a new Express account
+        const account = await stripe.accounts.create({
+          type: "express",
+          metadata: { clubName: club.name },
+        });
+
+        club.hasDirectStripeAccess = false;
+        club.stripeSecretKey = null;
+        club.stripeWebhookSecret = null;
+        club.stripeAccountId = account.id;
+        club.onboardingComplete = false;
+      } else if (!wasDirectAccess && wantDirectAccess) {
+        // Switching from Connect → Direct Access: delete the Express account
+        if (!stripeSecretKey) {
+          return NextResponse.json(
+            { error: "Stripe secret key is required when enabling direct access" },
+            { status: 400 }
+          );
         }
-      }
 
-      club.hasDirectStripeAccess = true;
-      club.stripeSecretKey = stripeSecretKey;
-      if (typeof stripeWebhookSecret === "string" && stripeWebhookSecret.trim()) {
-        club.stripeWebhookSecret = stripeWebhookSecret.trim();
-      }
-      club.stripeAccountId = null;
-      club.onboardingComplete = true;
-    } else if (wantDirectAccess && wasDirectAccess) {
-      // Staying on Direct Access — update the key/webhook secret if provided
-      if (stripeSecretKey) {
+        if (club.stripeAccountId) {
+          try {
+            await stripe.accounts.del(club.stripeAccountId);
+          } catch (err) {
+            console.error("Failed to delete Stripe account (may already be gone):", err.message);
+          }
+        }
+
+        club.hasDirectStripeAccess = true;
         club.stripeSecretKey = stripeSecretKey;
-      }
-      if (typeof stripeWebhookSecret === "string" && stripeWebhookSecret.trim()) {
-        club.stripeWebhookSecret = stripeWebhookSecret.trim();
+        if (typeof stripeWebhookSecret === "string" && stripeWebhookSecret.trim()) {
+          club.stripeWebhookSecret = stripeWebhookSecret.trim();
+        }
+        club.stripeAccountId = null;
+        club.onboardingComplete = true;
+      } else if (wantDirectAccess && wasDirectAccess) {
+        // Staying on Direct Access — update the key/webhook secret if provided
+        if (typeof stripeSecretKey === "string" && stripeSecretKey.trim()) {
+          club.stripeSecretKey = stripeSecretKey.trim();
+        }
+        if (typeof stripeWebhookSecret === "string" && stripeWebhookSecret.trim()) {
+          club.stripeWebhookSecret = stripeWebhookSecret.trim();
+        }
       }
     }
 
     await club.save();
 
-    return NextResponse.json({
-      club: {
-        _id: club._id,
-        name: club.name,
-        username: club.username,
-        stripeAccountId: club.stripeAccountId,
-        hasDirectStripeAccess: club.hasDirectStripeAccess,
-        onboardingComplete: club.onboardingComplete,
-        hasWebhookSecret: !!club.stripeWebhookSecret,
-      },
-    });
-  } catch (error) {
-    console.error("Update club error:", error);
+    return NextResponse.json({ club: serializeClub(club) });
+  } catch (err) {
+    console.error("Update club error:", err);
     return NextResponse.json({ error: "Failed to update club" }, { status: 500 });
   }
 }

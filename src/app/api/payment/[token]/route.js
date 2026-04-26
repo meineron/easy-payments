@@ -1,18 +1,20 @@
 import { NextResponse } from "next/server";
-import dbConnect from "@/lib/mongodb";
-import Order from "@/models/Order";
-import Activity from "@/models/Activity";
+import { connectMain } from "@/lib/mongodb";
+import { resolvePublicContext } from "@/lib/club-context";
 import Club from "@/models/Club";
 
-// Admin price/item edits must be visible to the parent immediately, so this
-// route must never be served from the Next.js route-handler cache.
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(request, { params }) {
   try {
     const { token } = await params;
-    await dbConnect();
+
+    const ctx = await resolvePublicContext("paymentToken", token);
+    if (!ctx) {
+      return NextResponse.json({ error: "Payment link not found or expired" }, { status: 404 });
+    }
+    const { Order, Activity } = ctx.models;
 
     const order = await Order.findOne({ paymentToken: token })
       .populate("teamId", "name season")
@@ -26,6 +28,7 @@ export async function GET(request, { params }) {
       return NextResponse.json({ error: "Already paid", paid: true }, { status: 400 });
     }
 
+    await connectMain();
     const [activity, club] = await Promise.all([
       Activity.findById(order.activityId, "title description subscriptions startDate hasPayment passStripeFeeToCustomer").lean(),
       Club.findById(order.clubId, "name logoUrl language").lean(),
@@ -33,7 +36,6 @@ export async function GET(request, { params }) {
 
     const actSub = (activity?.subscriptions || []).find((s) => String(s._id) === order.subscriptionId);
     const maxInstallments = actSub?.maxInstallments || 1;
-    // Per-order override of the due-date amount takes precedence over the subscription default.
     const overrideDue = order.dueDateAmountCents || 0;
     const dueDateAmountCents = overrideDue > 0
       ? Math.min(overrideDue, order.totalCostCents)

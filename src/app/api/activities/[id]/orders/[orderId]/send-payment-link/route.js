@@ -1,11 +1,8 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Order from "@/models/Order";
-import Activity from "@/models/Activity";
-import Club from "@/models/Club";
 import crypto from "crypto";
+import { connectMain } from "@/lib/mongodb";
+import { getClubContext, dualSave } from "@/lib/club-context";
+import Club from "@/models/Club";
 import { sendPaymentLink as sendPaymentLinkEmail } from "@/lib/email";
 import { sendSMS, toE164 } from "@/lib/sms";
 
@@ -35,14 +32,13 @@ function getContactForTarget(order, target) {
 
 export async function POST(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const { id, orderId } = await params;
-    await dbConnect();
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Order, Activity } = ctx.models;
 
-    const order = await Order.findOne({ _id: orderId, activityId: id, clubId: session.user.id });
+    const { id, orderId } = await params;
+
+    const order = await Order.findOne({ _id: orderId, activityId: id, clubId: ctx.clubId });
     if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
     if (order.status === "paid") return NextResponse.json({ error: "Already paid" }, { status: 400 });
 
@@ -59,16 +55,17 @@ export async function POST(request, { params }) {
       tokenChanged = true;
     }
     if (willSend) order.paymentLinkSentAt = new Date();
-    if (tokenChanged || willSend) await order.save();
+    if (tokenChanged || willSend) await dualSave(ctx, order);
 
     const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
     const paymentUrl = `${baseUrl}/payment/${order.paymentToken}`;
     const totalDue = order.totalCostCents - (order.paidCents || 0);
 
     if (recipients.length > 0) {
+      await connectMain();
       const [activity, club] = await Promise.all([
         Activity.findById(id, "title").lean(),
-        Club.findById(session.user.id, "name logoUrl language").lean(),
+        Club.findById(ctx.clubId, "name logoUrl language").lean(),
       ]);
       const results = { sent: 0, failed: 0, errors: [] };
 
@@ -110,9 +107,10 @@ export async function POST(request, { params }) {
     } else if (channel === "email") {
       if (!order.parent1Email) return NextResponse.json({ error: "No email address" }, { status: 400 });
 
+      await connectMain();
       const [activity, club] = await Promise.all([
         Activity.findById(id, "title").lean(),
-        Club.findById(session.user.id, "name logoUrl language").lean(),
+        Club.findById(ctx.clubId, "name logoUrl language").lean(),
       ]);
 
       await sendPaymentLinkEmail(order.parent1Email, {

@@ -1,22 +1,18 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Parent from "@/models/Parent";
+import crypto from "crypto";
+import { connectMain } from "@/lib/mongodb";
+import { getClubContext, dualSave } from "@/lib/club-context";
 import Club from "@/models/Club";
 import { sendParentInvite } from "@/lib/email";
-import crypto from "crypto";
 
 export async function POST(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const { id } = await params;
-    await dbConnect();
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Parent } = ctx.models;
 
-    const parent = await Parent.findOne({ _id: id, clubId: session.user.id });
+    const { id } = await params;
+    const parent = await Parent.findOne({ _id: id, clubId: ctx.clubId });
     if (!parent) {
       return NextResponse.json({ error: "Parent not found" }, { status: 404 });
     }
@@ -24,9 +20,10 @@ export async function POST(request, { params }) {
     const token = crypto.randomUUID();
     parent.inviteToken = token;
     parent.invitedAt = new Date();
-    await parent.save();
+    await dualSave(ctx, parent);
 
-    const club = await Club.findById(session.user.id, "name logoUrl language").lean();
+    await connectMain();
+    const club = await Club.findById(ctx.clubId, "name logoUrl language").lean();
     const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
     const inviteUrl = `${baseUrl}/parent/login?invite=${token}`;
 

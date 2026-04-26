@@ -1,18 +1,27 @@
-import dbConnect from "@/lib/mongodb";
+import { connectMain } from "@/lib/mongodb";
 import { generateRegistrationPDF } from "@/lib/pdf";
 import { sendRegistrationConfirmationEmail } from "@/lib/email";
-import Activity from "@/models/Activity";
 import Club from "@/models/Club";
+import { getClubContextById } from "@/lib/club-context";
 
 /**
  * Generates the registration PDF and sends it to parent1 and parent2.
  * Fails silently (logs errors).
+ *
+ * Accepts an optional `ctx` (tenant context). If omitted, derives it from
+ * `order.clubId` so legacy callers keep working.
  */
-export async function sendRegistrationPDFEmail(order) {
+export async function sendRegistrationPDFEmail(order, ctx = null) {
   try {
-    await dbConnect();
+    if (!ctx && order?.clubId) {
+      ctx = await getClubContextById(order.clubId);
+    }
+    const Activity = ctx?.models?.Activity;
+    await connectMain();
     const [activity, club] = await Promise.all([
-      Activity.findById(order.activityId, "title clubId waivers season").lean(),
+      Activity
+        ? Activity.findById(order.activityId, "title clubId waivers season").lean()
+        : (await import("@/models/Activity")).default.findById(order.activityId, "title clubId waivers season").lean(),
       Club.findById(order.clubId, "name logoUrl language").lean(),
     ]);
 

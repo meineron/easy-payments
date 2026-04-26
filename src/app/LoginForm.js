@@ -1,6 +1,6 @@
 "use client";
 
-import { signIn } from "next-auth/react";
+import { signIn, getSession } from "next-auth/react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -16,27 +16,32 @@ export default function LoginForm() {
     setError("");
     setLoading(true);
 
-    const result = await signIn("credentials", {
-      username,
-      password,
-      redirect: false,
-    });
+    try {
+      const result = await signIn("credentials", {
+        username,
+        password,
+        redirect: false,
+      });
 
-    if (result?.error) {
-      setError("Invalid username or password");
+      if (result?.error) {
+        setError("Invalid username or password");
+        setLoading(false);
+        return;
+      }
+
+      const session = await getSession();
+
+      if (session?.user?.role === "admin") {
+        router.push("/admin");
+      } else if (session?.user?.role === "staff") {
+        router.push(session.user.mustChangePassword ? "/set-password" : "/staff/dashboard");
+      } else {
+        router.push("/dashboard");
+      }
+    } catch (err) {
+      console.error("Login error:", err);
+      setError("Something went wrong. Please try again.");
       setLoading(false);
-      return;
-    }
-
-    const res = await fetch("/api/auth/session");
-    const session = await res.json();
-
-    if (session?.user?.role === "admin") {
-      router.push("/admin");
-    } else if (session?.user?.role === "staff") {
-      router.push(session.user.mustChangePassword ? "/set-password" : "/staff/dashboard");
-    } else {
-      router.push("/dashboard");
     }
   }
 

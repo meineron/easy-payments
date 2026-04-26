@@ -20,8 +20,14 @@ Update rules when you:
 - **Add a new dependency** → update `project-overview.md` (Tech Stack table)
 - **Change auth roles or session fields** → update `project-overview.md`
 - **Add environment variables** → update `project-overview.md` (Environment Variables list)
-- **Change project structure** → update `project-overview.md` (Project Structure tree)
-- **Add a new shared component** → update `project-overview.md` or create a `components.md` rule if the component layer grows
+- **Change project structure** → update `project-overview.md` and `frontend-architecture.md`
+- **Add a new shared primitive** → update `shared-components.md`
+- **Add a new feature folder** → update `frontend-architecture.md`
+- **Add a new RTK Query tag type or slice** → update `state-management.md`
+- **Add a new design-token category** → update `styling.md`
+- **Add a new domain service in `lib/services/`** → update `backend-services.md`
+- **Add a new heavy component or lazy-loading pattern** → update `performance.md`
+- **Add a page-local component (`src/app/<route>/_components/`)** → no rule update needed. Only update `frontend-architecture.md` when you change the convention itself, or when you promote a component from `_components/` to `features/`/`shared/`.
 
 ## How to Update
 

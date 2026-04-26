@@ -1,21 +1,15 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Lead from "@/models/Lead";
-import LeadLog from "@/models/LeadLog";
+import { getClubContext } from "@/lib/club-context";
 
 export async function GET(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Lead, LeadLog } = ctx.models;
 
     const { id } = await params;
-    await dbConnect();
 
-    const lead = await Lead.findOne({ _id: id, clubId: session.user.id }).select("_id").lean();
+    const lead = await Lead.findOne({ _id: id, clubId: ctx.clubId }).select("_id").lean();
     if (!lead) {
       return NextResponse.json({ error: "Lead not found" }, { status: 404 });
     }
@@ -23,7 +17,7 @@ export async function GET(request, { params }) {
     const { searchParams } = new URL(request.url);
     const type = searchParams.get("type");
 
-    const filter = { leadId: id, clubId: session.user.id };
+    const filter = { leadId: id, clubId: ctx.clubId };
     if (type) filter.type = type;
 
     const logs = await LeadLog.find(filter).sort({ createdAt: -1 }).limit(500).lean();

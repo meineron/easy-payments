@@ -1,20 +1,14 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Player from "@/models/Player";
+import { getClubContext, dualSave } from "@/lib/club-context";
 
 export async function POST() {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    await dbConnect();
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Player } = ctx.models;
 
     const players = await Player.find({
-      clubId: session.user.id,
+      clubId: ctx.clubId,
       $or: [
         { registrationTeamId: null },
         { registrationTeamId: { $exists: false } },
@@ -25,7 +19,7 @@ export async function POST() {
     let updated = 0;
     for (const player of players) {
       player.registrationTeamId = player.teams[0].teamId;
-      await player.save();
+      await dualSave(ctx, player);
       updated++;
     }
 
@@ -41,16 +35,13 @@ export async function POST() {
 
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Player } = ctx.models;
 
-    await dbConnect();
-
-    const total = await Player.countDocuments({ clubId: session.user.id });
+    const total = await Player.countDocuments({ clubId: ctx.clubId });
     const needsMigration = await Player.countDocuments({
-      clubId: session.user.id,
+      clubId: ctx.clubId,
       $or: [
         { registrationTeamId: null },
         { registrationTeamId: { $exists: false } },

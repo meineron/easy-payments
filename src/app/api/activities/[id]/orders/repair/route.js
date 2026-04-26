@@ -1,20 +1,15 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Order from "@/models/Order";
-import Activity from "@/models/Activity";
-import Player from "@/models/Player";
-import Parent from "@/models/Parent";
+import { getClubContext, dualCreate, dualSave, dualWrite } from "@/lib/club-context";
 import { syncOrderItemsWithSubscription, computeOrderTotalCents, isOrderSyncEligible } from "@/lib/order-sync";
 import { toDobString } from "@/lib/dob";
 
-async function findOrCreateParent(clubId, firstName, lastName, email, phone, phonePrefix) {
+async function findOrCreateParent(ctx, firstName, lastName, email, phone, phonePrefix) {
   if (!firstName || !lastName || !email) return null;
-  let parent = await Parent.findOne({ clubId, email: email.trim().toLowerCase() });
+  const { Parent } = ctx.models;
+  let parent = await Parent.findOne({ clubId: ctx.clubId, email: email.trim().toLowerCase() });
   if (parent) return parent;
-  parent = await Parent.create({
-    clubId,
+  parent = await dualCreate(ctx, "Parent", {
+    clubId: ctx.clubId,
     firstName: firstName.trim(),
     lastName: lastName.trim(),
     email: email.trim().toLowerCase(),
@@ -26,14 +21,13 @@ async function findOrCreateParent(clubId, firstName, lastName, email, phone, pho
 
 export async function POST(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const { id } = await params;
-    await dbConnect();
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Activity, Order, Player, Team } = ctx.models;
 
-    const activity = await Activity.findOne({ _id: id, clubId: session.user.id }).lean();
+    const { id } = await params;
+
+    const activity = await Activity.findOne({ _id: id, clubId: ctx.clubId }).lean();
     if (!activity) {
       return NextResponse.json({ error: "Activity not found" }, { status: 404 });
     }
@@ -42,7 +36,7 @@ export async function POST(request, { params }) {
 
     const orders = await Order.find({
       activityId: id,
-      clubId: session.user.id,
+      clubId: ctx.clubId,
     });
 
     let repaired = 0;
@@ -51,7 +45,6 @@ export async function POST(request, { params }) {
     for (const order of orders) {
       let changed = false;
 
-      // Resync subscription items/discounts into the invoice while preserving manual rows.
       if (isOrderSyncEligible(order)) {
         const sub = subscriptions.find((s) => String(s._id) === String(order.subscriptionId));
         if (sub) {
@@ -71,11 +64,10 @@ export async function POST(request, { params }) {
         }
       }
 
-      // Repair missing playerId — create Player/Parent documents
       if (!order.playerId && order.playerFirstName && order.playerLastName) {
         try {
           const playerQuery = {
-            clubId: session.user.id,
+            clubId: ctx.clubId,
             firstName: order.playerFirstName.trim(),
             lastName: order.playerLastName.trim(),
           };
@@ -86,12 +78,11 @@ export async function POST(request, { params }) {
           if (!player) {
             const teamEntries = [];
             if (order.teamId) {
-              const Team = (await import("@/models/Team")).default;
               const teamDoc = await Team.findById(order.teamId).lean();
               if (teamDoc) teamEntries.push({ teamId: order.teamId, season: teamDoc.season || "" });
             }
-            player = await Player.create({
-              clubId: session.user.id,
+            player = await dualCreate(ctx, "Player", {
+              clubId: ctx.clubId,
               firstName: order.playerFirstName.trim(),
               lastName: order.playerLastName.trim(),
               dateOfBirth: toDobString(order.playerDob),
@@ -107,17 +98,17 @@ export async function POST(request, { params }) {
           }
 
           const parentIds = [];
-          const p1 = await findOrCreateParent(session.user.id, order.parent1FirstName, order.parent1LastName, order.parent1Email, order.parent1Phone, order.parent1PhonePrefix);
+          const p1 = await findOrCreateParent(ctx, order.parent1FirstName, order.parent1LastName, order.parent1Email, order.parent1Phone, order.parent1PhonePrefix);
           if (p1) parentIds.push(p1._id);
-          const p2 = await findOrCreateParent(session.user.id, order.parent2FirstName, order.parent2LastName, order.parent2Email, order.parent2Phone, order.parent2PhonePrefix);
+          const p2 = await findOrCreateParent(ctx, order.parent2FirstName, order.parent2LastName, order.parent2Email, order.parent2Phone, order.parent2PhonePrefix);
           if (p2) parentIds.push(p2._id);
 
           if (parentIds.length > 0) {
-            const existing = player.parents.map((p) => String(p));
+            const existing = (player.parents || []).map((p) => String(p));
             const newIds = parentIds.filter((pid) => !existing.includes(String(pid)));
             if (newIds.length > 0) {
-              await Player.updateOne({ _id: player._id }, { $addToSet: { parents: { $each: newIds } } });
-              await Parent.updateMany({ _id: { $in: newIds } }, { $addToSet: { players: player._id } });
+              await dualWrite(ctx, (M) => M.Player.updateOne({ _id: player._id }, { $addToSet: { parents: { $each: newIds } } }));
+              await dualWrite(ctx, (M) => M.Parent.updateMany({ _id: { $in: newIds } }, { $addToSet: { players: player._id } }));
             }
           }
 
@@ -129,7 +120,7 @@ export async function POST(request, { params }) {
       }
 
       if (changed) {
-        await order.save();
+        await dualSave(ctx, order);
         repaired++;
       }
     }

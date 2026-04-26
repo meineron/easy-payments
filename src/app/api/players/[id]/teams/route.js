@@ -1,30 +1,23 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Player from "@/models/Player";
-import Team from "@/models/Team";
-import Registration from "@/models/Registration";
+import { getClubContext, dualSave } from "@/lib/club-context";
 
 export async function GET(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Player, Team, Registration } = ctx.models;
 
     const { id } = await params;
-    await dbConnect();
 
-    const player = await Player.findOne({ _id: id, clubId: session.user.id });
+    const player = await Player.findOne({ _id: id, clubId: ctx.clubId });
     if (!player) {
       return NextResponse.json({ error: "Player not found" }, { status: 404 });
     }
 
     const [allTeams, registrations] = await Promise.all([
-      Team.find({ clubId: session.user.id }).sort({ season: -1, teamType: 1, name: 1 }),
+      Team.find({ clubId: ctx.clubId }).sort({ season: -1, teamType: 1, name: 1 }),
       Registration.find({
-        clubId: session.user.id,
+        clubId: ctx.clubId,
         playerFirstName: { $regex: new RegExp(`^${escapeRegex(player.firstName)}$`, "i") },
         playerLastName: { $regex: new RegExp(`^${escapeRegex(player.lastName)}$`, "i") },
       }).select("teamId status"),
@@ -50,20 +43,18 @@ export async function GET(request, { params }) {
 
 export async function PUT(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Player, Team } = ctx.models;
 
     const { id } = await params;
     const { teamIds, registrationTeamId } = await request.json();
-    await dbConnect();
 
     if (!Array.isArray(teamIds)) {
       return NextResponse.json({ error: "teamIds array is required" }, { status: 400 });
     }
 
-    const player = await Player.findOne({ _id: id, clubId: session.user.id });
+    const player = await Player.findOne({ _id: id, clubId: ctx.clubId });
     if (!player) {
       return NextResponse.json({ error: "Player not found" }, { status: 404 });
     }
@@ -71,7 +62,7 @@ export async function PUT(request, { params }) {
     const allIds = new Set(teamIds);
     if (registrationTeamId) allIds.add(registrationTeamId);
 
-    const teams = await Team.find({ _id: { $in: [...allIds] }, clubId: session.user.id }).select("_id season");
+    const teams = await Team.find({ _id: { $in: [...allIds] }, clubId: ctx.clubId }).select("_id season");
     const teamMap = {};
     for (const t of teams) teamMap[t._id.toString()] = t.season;
 
@@ -81,7 +72,7 @@ export async function PUT(request, { params }) {
 
     player.teams = newTeams;
     player.registrationTeamId = registrationTeamId && teamMap[registrationTeamId] ? registrationTeamId : null;
-    await player.save();
+    await dualSave(ctx, player);
 
     return NextResponse.json({
       message: `Player updated: registration team set, ${newTeams.length} total team(s)`,

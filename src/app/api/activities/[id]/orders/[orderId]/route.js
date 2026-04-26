@@ -1,16 +1,8 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
 import Stripe from "stripe";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Order from "@/models/Order";
-import OrderLog from "@/models/OrderLog";
-import Activity from "@/models/Activity";
+import { connectMain } from "@/lib/mongodb";
+import { getClubContext, dualCreate, dualSave, dualWrite, dualInsertMany } from "@/lib/club-context";
 import Club from "@/models/Club";
-import Transaction from "@/models/Transaction";
-import PaymentRequest from "@/models/PaymentRequest";
-import Player from "@/models/Player";
-import Parent from "@/models/Parent";
 import { computeDismissedSubItemNames } from "@/lib/order-sync";
 import { toDobString } from "@/lib/dob";
 
@@ -34,6 +26,7 @@ function formatCents(c) {
 }
 
 async function getStripeClientForClub(clubId) {
+  await connectMain();
   const club = await Club.findById(clubId, "hasDirectStripeAccess stripeSecretKey stripeAccountId").lean();
   if (!club) return null;
   if (club.hasDirectStripeAccess && club.stripeSecretKey) {
@@ -42,7 +35,7 @@ async function getStripeClientForClub(clubId) {
   return new Stripe(process.env.STRIPE_SECRET_KEY);
 }
 
-async function syncInstallmentsToStripe(order) {
+async function syncInstallmentsToStripe(ctx, order) {
   try {
     const stripeClient = await getStripeClientForClub(order.clubId);
     if (!stripeClient) return { error: "No Stripe client for club" };
@@ -57,7 +50,7 @@ async function syncInstallmentsToStripe(order) {
     if (!nextPending) {
       await stripeClient.subscriptions.cancel(order.stripeSubscriptionId);
       order.stripeSubscriptionId = "";
-      await order.save();
+      await dualSave(ctx, order);
       return { cancelled: true };
     }
 
@@ -99,14 +92,13 @@ async function syncInstallmentsToStripe(order) {
 
 export async function GET(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const { id, orderId } = await params;
-    await dbConnect();
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Order, OrderLog, Transaction, PaymentRequest } = ctx.models;
 
-    const order = await Order.findOne({ _id: orderId, activityId: id, clubId: session.user.id })
+    const { id, orderId } = await params;
+
+    const order = await Order.findOne({ _id: orderId, activityId: id, clubId: ctx.clubId })
       .populate("teamId", "name season gender")
       .lean();
 
@@ -117,7 +109,7 @@ export async function GET(request, { params }) {
     const [logs, transactions, paymentRequests] = await Promise.all([
       OrderLog.find({ orderId }).sort({ createdAt: -1 }).lean(),
       Transaction.find({ orderId }).sort({ createdAt: -1 }).lean(),
-      PaymentRequest.find({ orderId, clubId: session.user.id }).sort({ createdAt: -1 }).lean(),
+      PaymentRequest.find({ orderId, clubId: ctx.clubId }).sort({ createdAt: -1 }).lean(),
     ]);
 
     return NextResponse.json({ order, logs, transactions, paymentRequests });
@@ -140,14 +132,13 @@ const TRACKED_FIELDS = [
 
 export async function PUT(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const { id, orderId } = await params;
-    await dbConnect();
+    const { session, ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Order, Activity, Parent } = ctx.models;
 
-    const order = await Order.findOne({ _id: orderId, activityId: id, clubId: session.user.id });
+    const { id, orderId } = await params;
+
+    const order = await Order.findOne({ _id: orderId, activityId: id, clubId: ctx.clubId });
     if (!order) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
@@ -155,12 +146,9 @@ export async function PUT(request, { params }) {
     const body = await request.json();
     const logs = [];
     const userName = session.user.name || session.user.username || "Admin";
+    const userId = session.user.userId || session.user.id;
     const changeReason = body._reason || "";
 
-    // Resolve the subscription's default due-date amount so due-date logs can
-    // describe the _effective_ value (a 0 override means "use sub default").
-    // We also reuse the same lookup to figure out which template items the
-    // admin just dismissed when saving `items`.
     let subDueDefaultCents = 0;
     let activitySub = null;
     const needsSubLookup =
@@ -175,10 +163,6 @@ export async function PUT(request, { params }) {
       } catch { /* best-effort lookup */ }
     }
 
-    // If the admin changed `items`, record any template lines they removed so
-    // the subscription auto-sync doesn't silently put them back on the next
-    // dashboard load. The list only grows; if the admin re-adds a dismissed
-    // item later (as a manual row, say), the sync already preserves it.
     if (body.items !== undefined) {
       const existingDismissed = Array.isArray(order.dismissedSubItemNames)
         ? order.dismissedSubItemNames.map(String)
@@ -188,7 +172,6 @@ export async function PUT(request, { params }) {
         const merged = Array.from(new Set([...existingDismissed, ...newlyDismissed]));
         body.dismissedSubItemNames = merged;
       }
-      // If the admin re-added an item that was previously dismissed, un-dismiss it.
       const submittedNames = new Set((body.items || []).map((i) => i?.name).filter(Boolean));
       const stillDismissed = (body.dismissedSubItemNames || existingDismissed).filter(
         (name) => !submittedNames.has(name),
@@ -235,8 +218,8 @@ export async function PUT(request, { params }) {
         }
         if (changeReason) desc += ` — Reason: ${changeReason}`;
         logs.push({
-          orderId, activityId: id, clubId: session.user.id,
-          userId: session.user.id, userName,
+          orderId, activityId: id, clubId: ctx.clubId,
+          userId, userName,
           field, previousValue: oldVal, newValue: newVal, description: desc,
         });
       }
@@ -261,7 +244,7 @@ export async function PUT(request, { params }) {
     }
 
     order.totalCostCents = computeTotal(order);
-    await order.save();
+    await dualSave(ctx, order);
 
     const parentFieldChanged = [
       "parent1FirstName", "parent1LastName", "parent1PhonePrefix", "parent1Phone", "parent1Email",
@@ -278,15 +261,15 @@ export async function PUT(request, { params }) {
           const phonePrefix = order[`${slot}PhonePrefix`] || "+1";
           if (!firstName || !lastName || !email) continue;
 
-          let parent = await Parent.findOne({ clubId: session.user.id, email: email.trim().toLowerCase() });
+          let parent = await Parent.findOne({ clubId: ctx.clubId, email: email.trim().toLowerCase() });
           if (parent) {
             parent.firstName = firstName.trim();
             parent.lastName = lastName.trim();
             if (phone) { parent.phone = phone.trim(); parent.phonePrefix = phonePrefix; }
-            await parent.save();
+            await dualSave(ctx, parent);
           } else {
-            parent = await Parent.create({
-              clubId: session.user.id,
+            parent = await dualCreate(ctx, "Parent", {
+              clubId: ctx.clubId,
               firstName: firstName.trim(),
               lastName: lastName.trim(),
               email: email.trim().toLowerCase(),
@@ -294,8 +277,8 @@ export async function PUT(request, { params }) {
               phone: (phone || "").trim() || "0000000000",
             });
           }
-          await Player.updateOne({ _id: order.playerId }, { $addToSet: { parents: parent._id } });
-          await Parent.updateOne({ _id: parent._id }, { $addToSet: { players: order.playerId } });
+          await dualWrite(ctx, (M) => M.Player.updateOne({ _id: order.playerId }, { $addToSet: { parents: parent._id } }));
+          await dualWrite(ctx, (M) => M.Parent.updateOne({ _id: parent._id }, { $addToSet: { players: order.playerId } }));
         }
       } catch (e) {
         console.error("Parent sync on order update:", e);
@@ -303,17 +286,17 @@ export async function PUT(request, { params }) {
     }
 
     if (logs.length > 0) {
-      await OrderLog.insertMany(logs);
+      await dualInsertMany(ctx, "OrderLog", logs);
     }
 
     let stripeSync = null;
     if (body.installmentSchedule && order.stripeSubscriptionId) {
-      stripeSync = await syncInstallmentsToStripe(order);
+      stripeSync = await syncInstallmentsToStripe(ctx, order);
     }
 
     const [populated, refreshedLogs] = await Promise.all([
       Order.findById(order._id).populate("teamId", "name season gender").lean(),
-      OrderLog.find({ orderId }).sort({ createdAt: -1 }).lean(),
+      ctx.models.OrderLog.find({ orderId }).sort({ createdAt: -1 }).lean(),
     ]);
 
     return NextResponse.json({ order: populated, logs: refreshedLogs, stripeSync });
@@ -325,19 +308,17 @@ export async function PUT(request, { params }) {
 
 export async function DELETE(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const { id, orderId } = await params;
-    await dbConnect();
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
 
-    const order = await Order.findOneAndDelete({ _id: orderId, activityId: id, clubId: session.user.id });
+    const { id, orderId } = await params;
+
+    const order = await dualWrite(ctx, (M) => M.Order.findOneAndDelete({ _id: orderId, activityId: id, clubId: ctx.clubId }));
     if (!order) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
-    await OrderLog.deleteMany({ orderId });
+    await dualWrite(ctx, (M) => M.OrderLog.deleteMany({ orderId }));
 
     return NextResponse.json({ success: true });
   } catch (error) {

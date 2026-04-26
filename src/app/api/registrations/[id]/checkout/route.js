@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe";
-import dbConnect from "@/lib/mongodb";
-import Registration from "@/models/Registration";
-import Team from "@/models/Team";
+import { connectMain } from "@/lib/mongodb";
+import { resolvePublicContext, dualWrite } from "@/lib/club-context";
 import Club from "@/models/Club";
 
 export async function POST(request, { params }) {
@@ -10,7 +9,11 @@ export async function POST(request, { params }) {
     const { id } = await params;
     const { numPayments } = await request.json();
 
-    await dbConnect();
+    const ctx = await resolvePublicContext("registration", id);
+    if (!ctx) {
+      return NextResponse.json({ error: "Registration not found" }, { status: 404 });
+    }
+    const { Registration, Team } = ctx.models;
 
     const reg = await Registration.findById(id);
     if (!reg) {
@@ -25,6 +28,7 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: "Team not found" }, { status: 404 });
     }
 
+    await connectMain();
     const club = await Club.findById(reg.clubId);
     if (!club || !club.onboardingComplete || !club.stripeAccountId) {
       return NextResponse.json({ error: "Club Stripe account not ready" }, { status: 400 });
@@ -32,7 +36,7 @@ export async function POST(request, { params }) {
 
     const payments = numPayments || reg.numPayments;
     if (payments !== reg.numPayments) {
-      await Registration.findByIdAndUpdate(id, { numPayments: payments });
+      await dualWrite(ctx, (M) => M.Registration.findByIdAndUpdate(id, { numPayments: payments }));
     }
 
     const totalCents = reg.subscriptionCostCents;
@@ -47,7 +51,7 @@ export async function POST(request, { params }) {
       session = await createInstallmentSession({ team, club, afterDiscountCents, hasLoyaltyDiscount, payments, reg });
     }
 
-    await Registration.findByIdAndUpdate(id, { stripeSessionId: session.id, status: "pending" });
+    await dualWrite(ctx, (M) => M.Registration.findByIdAndUpdate(id, { stripeSessionId: session.id, status: "pending" }));
 
     return NextResponse.json({ url: session.url });
   } catch (error) {

@@ -120,6 +120,38 @@ OrderSchema.index({ activityId: 1, clubId: 1 });
 OrderSchema.index({ teamId: 1 });
 OrderSchema.index({ registrationToken: 1 }, { sparse: true });
 
+// Mirror new/changed publicly-addressable tokens into the main-DB PublicLookup
+// table so unauthenticated routes (`/register/...`, `/payment/...`) can resolve
+// `clubId` once the owning club is migrated to its own DB. Best-effort: a
+// failure here is logged but never aborts the order save.
+//
+// Loaded lazily to avoid a model-resolution cycle (Order.js is imported by
+// the route layer, which is also where PublicLookup is registered).
+async function mirrorOrderTokensToLookup(doc) {
+  if (!doc?.clubId) return;
+  try {
+    const { recordPublicLookup } = await import("@/lib/public-lookup.js");
+    if (doc.paymentToken) {
+      await recordPublicLookup("paymentToken", doc.paymentToken, doc.clubId);
+    }
+    if (doc.registrationToken) {
+      await recordPublicLookup("registrationToken", doc.registrationToken, doc.clubId);
+    }
+  } catch (err) {
+    console.error("[Order] PublicLookup mirror failed:", err.message);
+  }
+}
+
+OrderSchema.post("save", function (doc) { mirrorOrderTokensToLookup(doc); });
+OrderSchema.post("findOneAndUpdate", function (doc) { mirrorOrderTokensToLookup(doc); });
+OrderSchema.post("insertMany", function (docs) {
+  if (Array.isArray(docs)) docs.forEach(mirrorOrderTokensToLookup);
+});
+
+export function getOrderModel(conn) {
+  return conn.models.Order || conn.model("Order", OrderSchema);
+}
+
 if (mongoose.models.Order) {
   delete mongoose.models.Order;
 }

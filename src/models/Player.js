@@ -63,6 +63,15 @@ PlayerSchema.index(
   }
 );
 
+// Factory: returns a Player model bound to a specific connection. Use this
+// from `getClubContext()` when reading/writing tenant data — the connection
+// returned by `getTenantConn()` may be the main DB (legacy) or a per-club DB
+// (migrated). The default export below stays for backward compatibility with
+// every existing import; both points at the SAME schema.
+export function getPlayerModel(conn) {
+  return conn.models.Player || conn.model("Player", PlayerSchema);
+}
+
 if (mongoose.models.Player) {
   delete mongoose.models.Player;
 }

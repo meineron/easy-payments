@@ -1,18 +1,11 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
 import crypto from "crypto";
-import Order from "@/models/Order";
-import Activity from "@/models/Activity";
+import { connectMain } from "@/lib/mongodb";
+import { getClubContext, dualSave, dualCreate } from "@/lib/club-context";
 import Club from "@/models/Club";
-import Team from "@/models/Team";
-import Message from "@/models/Message";
 import { sendCustomRegistrationEmail } from "@/lib/email";
 import { sendSMS, toE164 } from "@/lib/sms";
 import { replaceInvitationVars } from "@/lib/registration-invitation";
-
-void Team;
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
@@ -72,10 +65,10 @@ function substituteTextTokens(text, url) {
 
 export async function POST(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Order, Activity } = ctx.models;
+
     const { id } = await params;
     const body = await request.json();
     const {
@@ -104,11 +97,10 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: "Invalid channel" }, { status: 400 });
     }
 
-    await dbConnect();
-
+    await connectMain();
     const [activity, club] = await Promise.all([
       Activity.findById(id, "title coverImage").lean(),
-      Club.findById(session.user.id, "name logoUrl language").lean(),
+      Club.findById(ctx.clubId, "name logoUrl language").lean(),
     ]);
     if (!activity || !club) {
       return NextResponse.json({ error: "Activity or club not found" }, { status: 404 });
@@ -117,7 +109,7 @@ export async function POST(request, { params }) {
     const orders = await Order.find({
       _id: { $in: orderIds },
       activityId: id,
-      clubId: session.user.id,
+      clubId: ctx.clubId,
     }).populate("teamId", "name");
 
     if (orders.length === 0) {
@@ -137,7 +129,7 @@ export async function POST(request, { params }) {
         order.registrationTokenExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
       }
       order.linkSentAt = new Date();
-      await order.save();
+      await dualSave(ctx, order);
 
       const registrationUrl = `${baseUrl}/register/${id}?token=${order.registrationToken}`;
       const contacts = contactsForOrder(order, target);
@@ -205,8 +197,8 @@ export async function POST(request, { params }) {
 
     const status = sent > 0 ? "sent" : "failed";
     try {
-      await Message.create({
-        clubId: session.user.id,
+      await dualCreate(ctx, "Message", {
+        clubId: ctx.clubId,
         channel,
         subject: channel === "email" ? subject.trim() : "SMS",
         bodyHtml: channel === "email" ? bodyHtml : "",

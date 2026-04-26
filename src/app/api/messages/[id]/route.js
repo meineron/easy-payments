@@ -1,23 +1,18 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Message from "@/models/Message";
+import { getClubContext } from "@/lib/club-context";
 
 export async function GET(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    await dbConnect();
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Message } = ctx.models;
 
     const { id } = await params;
     const message = await Message.findById(id).lean();
     if (!message) {
       return NextResponse.json({ error: "Message not found" }, { status: 404 });
     }
-    if (String(message.clubId) !== session.user.id) {
+    if (String(message.clubId) !== String(ctx.clubId)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 

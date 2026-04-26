@@ -1,9 +1,5 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Order from "@/models/Order";
-import OrderLog from "@/models/OrderLog";
+import { getClubContext, dualSave, dualInsertMany } from "@/lib/club-context";
 
 function computeTotal(order) {
   let total = order.subscriptionPriceCents || 0;
@@ -21,10 +17,10 @@ function formatCents(c) { return "$" + ((c || 0) / 100).toFixed(2); }
 
 export async function POST(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { session, ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Order } = ctx.models;
+
     const { id } = await params;
     const body = await request.json();
     const { orderIds, action, item, discount } = body;
@@ -33,9 +29,9 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: "orderIds and action are required" }, { status: 400 });
     }
 
-    await dbConnect();
     const userName = session.user.name || session.user.username || "Admin";
-    const orders = await Order.find({ _id: { $in: orderIds }, activityId: id, clubId: session.user.id });
+    const userId = session.user.userId || session.user.id;
+    const orders = await Order.find({ _id: { $in: orderIds }, activityId: id, clubId: ctx.clubId });
 
     if (orders.length === 0) {
       return NextResponse.json({ error: "No matching orders found" }, { status: 404 });
@@ -56,11 +52,11 @@ export async function POST(request, { params }) {
         const oldItems = JSON.stringify(order.items || []);
         order.items = [...(order.items || []), newItem];
         order.totalCostCents = computeTotal(order);
-        await order.save();
+        await dualSave(ctx, order);
         updatedIds.push(order._id);
         logs.push({
-          orderId: order._id, activityId: id, clubId: session.user.id,
-          userId: session.user.id, userName,
+          orderId: order._id, activityId: id, clubId: ctx.clubId,
+          userId, userName,
           field: "items",
           previousValue: oldItems,
           newValue: JSON.stringify(order.items),
@@ -72,11 +68,11 @@ export async function POST(request, { params }) {
         if (filtered.length !== (order.items || []).length) {
           order.items = filtered;
           order.totalCostCents = computeTotal(order);
-          await order.save();
+          await dualSave(ctx, order);
           updatedIds.push(order._id);
           logs.push({
-            orderId: order._id, activityId: id, clubId: session.user.id,
-            userId: session.user.id, userName,
+            orderId: order._id, activityId: id, clubId: ctx.clubId,
+            userId, userName,
             field: "items",
             previousValue: oldItems,
             newValue: JSON.stringify(order.items),
@@ -89,11 +85,11 @@ export async function POST(request, { params }) {
         order.discountType = discount.type || "amount";
         order.discountValue = discount.value || 0;
         order.totalCostCents = computeTotal(order);
-        await order.save();
+        await dualSave(ctx, order);
         updatedIds.push(order._id);
         logs.push({
-          orderId: order._id, activityId: id, clubId: session.user.id,
-          userId: session.user.id, userName,
+          orderId: order._id, activityId: id, clubId: ctx.clubId,
+          userId, userName,
           field: "discountType",
           previousValue: `${oldType}:${oldValue}`,
           newValue: `${order.discountType}:${order.discountValue}`,
@@ -103,7 +99,7 @@ export async function POST(request, { params }) {
     }
 
     if (logs.length > 0) {
-      await OrderLog.insertMany(logs);
+      await dualInsertMany(ctx, "OrderLog", logs);
     }
 
     const updated = await Order.find({ _id: { $in: updatedIds } })

@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { sendVerificationEmail } from "@/lib/email";
 import { storeCode, generateCode } from "@/lib/verification-codes";
-import dbConnect from "@/lib/mongodb";
-import Order from "@/models/Order";
-import Activity from "@/models/Activity";
+import { connectMain } from "@/lib/mongodb";
+import { resolvePublicContext } from "@/lib/club-context";
 import Club from "@/models/Club";
 
 const SANDBOX_EMAILS = ["shlomi+1@easycoach.club"];
@@ -18,8 +17,13 @@ export async function POST(request, { params }) {
 
     const emailLower = email.trim().toLowerCase();
 
+    const ctx = await resolvePublicContext("activity", activityId);
+    if (!ctx) {
+      return NextResponse.json({ error: "Activity not found" }, { status: 404 });
+    }
+    const { Order, Activity } = ctx.models;
+
     if (token && !SANDBOX_EMAILS.includes(emailLower)) {
-      await dbConnect();
       const order = await Order.findOne({ registrationToken: token, activityId });
       if (!order) {
         return NextResponse.json({ error: "Invalid registration link" }, { status: 404 });
@@ -36,8 +40,8 @@ export async function POST(request, { params }) {
     const code = generateCode();
     storeCode(emailLower, code);
 
-    await dbConnect();
     const activity = await Activity.findById(activityId, "clubId").lean();
+    await connectMain();
     const club = activity ? await Club.findById(activity.clubId, "language").lean() : null;
     const locale = club?.language || "en";
 

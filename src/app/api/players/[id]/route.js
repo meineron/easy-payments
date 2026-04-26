@@ -1,22 +1,16 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Player from "@/models/Player";
-import Parent from "@/models/Parent";
+import { getClubContext, dualSave, dualWrite } from "@/lib/club-context";
 import { toDobString } from "@/lib/dob";
 
 export async function GET(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Player } = ctx.models;
 
     const { id } = await params;
-    await dbConnect();
 
-    const player = await Player.findOne({ _id: id, clubId: session.user.id })
+    const player = await Player.findOne({ _id: id, clubId: ctx.clubId })
       .populate("registrationTeamId", "name season gender teamType")
       .populate("teams.teamId", "name season gender teamType costCents")
       .populate("parents", "firstName lastName email phonePrefix phone");
@@ -34,16 +28,14 @@ export async function GET(request, { params }) {
 
 export async function PUT(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Player } = ctx.models;
 
     const { id } = await params;
     const body = await request.json();
-    await dbConnect();
 
-    const player = await Player.findOne({ _id: id, clubId: session.user.id });
+    const player = await Player.findOne({ _id: id, clubId: ctx.clubId });
     if (!player) {
       return NextResponse.json({ error: "Player not found" }, { status: 404 });
     }
@@ -72,26 +64,26 @@ export async function PUT(request, { params }) {
       const oldParentIds = player.parents.map((p) => p.toString());
       const newParentIds = body.parentIds;
 
-      const removed = oldParentIds.filter((id) => !newParentIds.includes(id));
-      const added = newParentIds.filter((id) => !oldParentIds.includes(id));
+      const removed = oldParentIds.filter((pid) => !newParentIds.includes(pid));
+      const added = newParentIds.filter((pid) => !oldParentIds.includes(pid));
 
       if (removed.length > 0) {
-        await Parent.updateMany(
-          { _id: { $in: removed }, clubId: session.user.id },
-          { $pull: { players: player._id } }
-        );
+        await dualWrite(ctx, (M) => M.Parent.updateMany(
+          { _id: { $in: removed }, clubId: ctx.clubId },
+          { $pull: { players: player._id } },
+        ));
       }
       if (added.length > 0) {
-        await Parent.updateMany(
-          { _id: { $in: added }, clubId: session.user.id },
-          { $addToSet: { players: player._id } }
-        );
+        await dualWrite(ctx, (M) => M.Parent.updateMany(
+          { _id: { $in: added }, clubId: ctx.clubId },
+          { $addToSet: { players: player._id } },
+        ));
       }
 
       player.parents = newParentIds;
     }
 
-    await player.save();
+    await dualSave(ctx, player);
 
     const populated = await Player.findById(player._id)
       .populate("registrationTeamId", "name season gender teamType")
@@ -110,23 +102,20 @@ export async function PUT(request, { params }) {
 
 export async function DELETE(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
 
     const { id } = await params;
-    await dbConnect();
 
-    const player = await Player.findOneAndDelete({ _id: id, clubId: session.user.id });
+    const player = await dualWrite(ctx, (M) => M.Player.findOneAndDelete({ _id: id, clubId: ctx.clubId }));
     if (!player) {
       return NextResponse.json({ error: "Player not found" }, { status: 404 });
     }
 
-    await Parent.updateMany(
-      { clubId: session.user.id, players: player._id },
-      { $pull: { players: player._id } }
-    );
+    await dualWrite(ctx, (M) => M.Parent.updateMany(
+      { clubId: ctx.clubId, players: player._id },
+      { $pull: { players: player._id } },
+    ));
 
     return NextResponse.json({ success: true });
   } catch (error) {

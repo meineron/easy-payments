@@ -1,7 +1,7 @@
 import Stripe from "stripe";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
+import { connectMain } from "@/lib/mongodb";
 import Club from "@/models/Club";
 
 /**
@@ -13,11 +13,14 @@ export async function getClubStripe(clubId) {
   const session = await getServerSession(authOptions);
   if (!session) return null;
 
-  const targetClubId = clubId || (session.user.role === "club" ? session.user.id : null);
+  const sessionClubId = session.user.role === "club"
+    ? (session.user.activeClubId || session.user.id)
+    : null;
+  const targetClubId = clubId || sessionClubId;
 
   if (!targetClubId) return null;
 
-  await dbConnect();
+  await connectMain();
   const club = await Club.findById(targetClubId).select("hasDirectStripeAccess stripeSecretKey");
 
   if (club?.hasDirectStripeAccess && club?.stripeSecretKey) {

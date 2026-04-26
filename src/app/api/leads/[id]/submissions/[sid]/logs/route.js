@@ -1,23 +1,16 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Lead from "@/models/Lead";
-import LeadSubmission from "@/models/LeadSubmission";
-import LeadLog from "@/models/LeadLog";
+import { getClubContext } from "@/lib/club-context";
 import { writeLeadLog, getSessionAuthor } from "@/lib/lead-logs";
 
 export async function GET(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Lead, LeadLog } = ctx.models;
 
     const { id, sid } = await params;
-    await dbConnect();
 
-    const lead = await Lead.findOne({ _id: id, clubId: session.user.id }).select("_id").lean();
+    const lead = await Lead.findOne({ _id: id, clubId: ctx.clubId }).select("_id").lean();
     if (!lead) {
       return NextResponse.json({ error: "Lead not found" }, { status: 404 });
     }
@@ -25,7 +18,7 @@ export async function GET(request, { params }) {
     const logs = await LeadLog.find({
       leadId: id,
       submissionId: sid,
-      clubId: session.user.id,
+      clubId: ctx.clubId,
     })
       .sort({ createdAt: -1 })
       .limit(500)
@@ -40,10 +33,9 @@ export async function GET(request, { params }) {
 
 export async function POST(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { session, ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Lead, LeadSubmission } = ctx.models;
 
     const { id, sid } = await params;
     const body = await request.json();
@@ -52,16 +44,14 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: "Comment is required" }, { status: 400 });
     }
 
-    await dbConnect();
-
-    const lead = await Lead.findOne({ _id: id, clubId: session.user.id }).select("_id").lean();
+    const lead = await Lead.findOne({ _id: id, clubId: ctx.clubId }).select("_id").lean();
     if (!lead) {
       return NextResponse.json({ error: "Lead not found" }, { status: 404 });
     }
     const submission = await LeadSubmission.findOne({
       _id: sid,
       leadId: id,
-      clubId: session.user.id,
+      clubId: ctx.clubId,
     }).select("_id").lean();
     if (!submission) {
       return NextResponse.json({ error: "Submission not found" }, { status: 404 });
@@ -71,11 +61,12 @@ export async function POST(request, { params }) {
     const log = await writeLeadLog({
       leadId: id,
       submissionId: sid,
-      clubId: session.user.id,
+      clubId: ctx.clubId,
       type: "comment",
       ...author,
       content,
       context: {},
+      ctx,
     });
 
     return NextResponse.json({ log }, { status: 201 });

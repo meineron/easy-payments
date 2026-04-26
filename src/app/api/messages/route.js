@@ -1,28 +1,22 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Message from "@/models/Message";
+import { connectMain } from "@/lib/mongodb";
+import { getClubContext, dualCreate } from "@/lib/club-context";
 import Club from "@/models/Club";
-import Parent from "@/models/Parent";
-import Player from "@/models/Player";
 import { sendBulkEmail } from "@/lib/email";
 import { sendBulkSMS, toE164 } from "@/lib/sms";
 
 export async function GET(request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    await dbConnect();
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Message } = ctx.models;
 
     const { searchParams } = new URL(request.url);
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
     const limit = Math.min(50, Math.max(1, parseInt(searchParams.get("limit") || "20", 10)));
     const skip = (page - 1) * limit;
 
-    const filter = { clubId: session.user.id };
+    const filter = { clubId: ctx.clubId };
 
     const [messages, total] = await Promise.all([
       Message.find(filter, "subject recipientCount sentAt status fromEmail channel bodyText")
@@ -40,8 +34,9 @@ export async function GET(request) {
   }
 }
 
-async function resolvePhoneNumbers(recipients, clubId) {
+async function resolvePhoneNumbers(ctx, recipients) {
   const phones = [];
+  const { Parent, Player } = ctx.models;
 
   for (const r of recipients) {
     if (r.phonePrefix && r.phone) {
@@ -59,17 +54,17 @@ async function resolvePhoneNumbers(recipients, clubId) {
   const unresolvedPlayerIds = recipients.filter((r) => r.type === "player" && !r.phone).map((r) => r.id);
 
   if (unresolvedParentIds.length > 0) {
-    const parents = await Parent.find({ _id: { $in: unresolvedParentIds }, clubId }, "phonePrefix phone").lean();
+    const parents = await Parent.find({ _id: { $in: unresolvedParentIds }, clubId: ctx.clubId }, "phonePrefix phone").lean();
     for (const p of parents) {
       const e164 = toE164(p.phonePrefix, p.phone);
       if (e164) phones.push(e164);
     }
   }
   if (unresolvedPlayerIds.length > 0) {
-    const players = await Player.find({ _id: { $in: unresolvedPlayerIds }, clubId }, "parents").lean();
+    const players = await Player.find({ _id: { $in: unresolvedPlayerIds }, clubId: ctx.clubId }, "parents").lean();
     const allParentIds = players.flatMap((p) => p.parents || []);
     if (allParentIds.length > 0) {
-      const parents = await Parent.find({ _id: { $in: allParentIds }, clubId }, "phonePrefix phone").lean();
+      const parents = await Parent.find({ _id: { $in: allParentIds }, clubId: ctx.clubId }, "phonePrefix phone").lean();
       for (const p of parents) {
         const e164 = toE164(p.phonePrefix, p.phone);
         if (e164) phones.push(e164);
@@ -82,11 +77,8 @@ async function resolvePhoneNumbers(recipients, clubId) {
 
 export async function POST(request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    await dbConnect();
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
 
     const body = await request.json();
     const { channel = "email", subject, bodyHtml, bodyText, recipients, smsNotification, smsText } = body;
@@ -95,7 +87,8 @@ export async function POST(request) {
       return NextResponse.json({ error: "At least one recipient is required" }, { status: 400 });
     }
 
-    const club = await Club.findById(session.user.id, "name logoUrl smtpHost smtpPort smtpEmail smtpPassword").lean();
+    await connectMain();
+    const club = await Club.findById(ctx.clubId, "name logoUrl smtpHost smtpPort smtpEmail smtpPassword").lean();
     if (!club) {
       return NextResponse.json({ error: "Club not found" }, { status: 404 });
     }
@@ -133,7 +126,7 @@ export async function POST(request) {
 
       if (smsNotification && status === "sent") {
         try {
-          const phoneNumbers = await resolvePhoneNumbers(recipients, session.user.id);
+          const phoneNumbers = await resolvePhoneNumbers(ctx, recipients);
           if (phoneNumbers.length > 0) {
             const text = (smsText || `You have received an email from us. Subject: ${subject.trim()}`).replace(/\{email_subject\}/g, subject.trim());
             await sendBulkSMS({ phoneNumbers, message: text });
@@ -143,8 +136,8 @@ export async function POST(request) {
         }
       }
 
-      const message = await Message.create({
-        clubId: session.user.id,
+      const message = await dualCreate(ctx, "Message", {
+        clubId: ctx.clubId,
         channel: "email",
         subject: subject.trim(),
         bodyHtml,
@@ -164,7 +157,7 @@ export async function POST(request) {
         return NextResponse.json({ error: "SMS message is required" }, { status: 400 });
       }
 
-      const phoneNumbers = await resolvePhoneNumbers(recipients, session.user.id);
+      const phoneNumbers = await resolvePhoneNumbers(ctx, recipients);
       console.log("SMS resolved phone numbers:", phoneNumbers);
 
       if (phoneNumbers.length === 0) {
@@ -187,8 +180,8 @@ export async function POST(request) {
         }
       }
 
-      const message = await Message.create({
-        clubId: session.user.id,
+      const message = await dualCreate(ctx, "Message", {
+        clubId: ctx.clubId,
         channel: "sms",
         subject: subject?.trim() || "SMS",
         bodyText: bodyText.trim(),

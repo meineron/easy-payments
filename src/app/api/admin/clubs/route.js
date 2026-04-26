@@ -1,16 +1,47 @@
 import { NextResponse } from "next/server";
+import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
-import dbConnect from "@/lib/mongodb";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import dbConnect, { connectMain } from "@/lib/mongodb";
 import { stripe } from "@/lib/stripe";
+import { generateClubDbName } from "@/lib/club-db-name";
 import Club from "@/models/Club";
 
-export async function GET() {
+async function requireAdmin() {
+  const session = await getServerSession(authOptions);
+  if (!session || session.user?.role !== "admin") {
+    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
+  }
+  return { session };
+}
+
+export async function GET(request) {
+  const { error } = await requireAdmin();
+  if (error) return error;
+
+  const { searchParams } = new URL(request.url);
+  const statusParam = (searchParams.get("status") || "active").toLowerCase();
+
+  const filter = {};
+  if (statusParam === "deactivated") {
+    filter.status = "deactivated";
+  } else if (statusParam === "active") {
+    // Treat clubs without an explicit status as active (pre-backfill).
+    filter.$or = [{ status: "active" }, { status: { $exists: false } }];
+  } // "all" → no filter
+
   await dbConnect();
-  const clubs = await Club.find({}).select("-password -stripeSecretKey").sort({ createdAt: -1 });
+  const clubs = await Club.find(filter)
+    .select("-password -stripeSecretKey -stripeWebhookSecret -smtpPassword")
+    .sort({ createdAt: -1 });
   return NextResponse.json({ clubs });
 }
 
 export async function POST(request) {
+  const { error } = await requireAdmin();
+  if (error) return error;
+
   try {
     const { name, username, password, hasDirectStripeAccess, stripeSecretKey, stripeWebhookSecret } = await request.json();
 
@@ -35,11 +66,19 @@ export async function POST(request) {
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
+    // Pre-allocate the _id so we can derive a slug-based `dbName` (and pass
+    // it to Stripe metadata) before persisting.
+    const _id = new mongoose.Types.ObjectId();
+    const mainConn = await connectMain();
+    const dbName = await generateClubDbName({ name, _id, mainConn });
+
     const clubData = {
+      _id,
       name,
       username: username.toLowerCase(),
       password: hashedPassword,
       hasDirectStripeAccess: !!hasDirectStripeAccess,
+      dbName,
     };
 
     if (hasDirectStripeAccess) {
@@ -65,6 +104,7 @@ export async function POST(request) {
         username: club.username,
         stripeAccountId: club.stripeAccountId,
         hasDirectStripeAccess: club.hasDirectStripeAccess,
+        dbName: club.dbName,
       },
     }, { status: 201 });
   } catch (error) {

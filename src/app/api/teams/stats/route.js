@@ -1,20 +1,14 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Registration from "@/models/Registration";
-import Player from "@/models/Player";
+import mongoose from "mongoose";
+import { getClubContext } from "@/lib/club-context";
 
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Registration, Player } = ctx.models;
 
-    await dbConnect();
-
-    const clubObjectId = (await import("mongoose")).default.Types.ObjectId.createFromHexString(session.user.id);
+    const clubObjectId = mongoose.Types.ObjectId.createFromHexString(String(ctx.clubId));
 
     const [regResults, playerResults] = await Promise.all([
       Registration.aggregate([

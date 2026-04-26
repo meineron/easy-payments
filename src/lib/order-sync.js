@@ -110,29 +110,61 @@ export function computeDismissedSubItemNames(previousItems, nextItems, subscript
  * - Creates the team entry if it doesn't exist yet.
  * - Keeps the earliest registrationDate if already set (never overwrites).
  */
-export async function markPlayerRegisteredForTeam(playerId, teamId, date = new Date()) {
+export async function markPlayerRegisteredForTeam(ctxOrPlayerId, teamId, date = new Date()) {
+  // Back-compat: legacy callers passed (playerId, teamId, date). New callers
+  // pass (ctx, playerId, teamId, date) — when the first arg looks like a tenant
+  // context object, shift positional args.
+  let ctx = null;
+  let playerId = ctxOrPlayerId;
+  let realDate = date;
+  if (ctxOrPlayerId && typeof ctxOrPlayerId === "object" && ctxOrPlayerId.models) {
+    ctx = ctxOrPlayerId;
+    playerId = teamId;
+    teamId = arguments[2];
+    realDate = arguments[3] || new Date();
+  }
+
   if (!playerId || !teamId) return;
-  const Player = (await import("@/models/Player")).default;
-  const player = await Player.findById(playerId);
-  if (!player) return;
+
+  let player;
+  let teamDoc;
+  if (ctx) {
+    player = await ctx.models.Player.findById(playerId);
+    if (!player) return;
+    teamDoc = await ctx.models.Team.findById(teamId).lean();
+  } else {
+    const Player = (await import("@/models/Player")).default;
+    player = await Player.findById(playerId);
+    if (!player) return;
+    const Team = (await import("@/models/Team")).default;
+    teamDoc = await Team.findById(teamId).lean();
+  }
 
   const existing = (player.teams || []).find((t) => String(t.teamId) === String(teamId));
   if (existing) {
     if (!existing.registrationDate) {
-      existing.registrationDate = date;
-      await player.save();
+      existing.registrationDate = realDate;
+      if (ctx) {
+        const { dualSave } = await import("@/lib/club-context");
+        await dualSave(ctx, player);
+      } else {
+        await player.save();
+      }
     }
     return;
   }
 
-  const Team = (await import("@/models/Team")).default;
-  const teamDoc = await Team.findById(teamId).lean();
   player.teams.push({
     teamId,
     season: teamDoc?.season || "",
-    registrationDate: date,
+    registrationDate: realDate,
   });
-  await player.save();
+  if (ctx) {
+    const { dualSave } = await import("@/lib/club-context");
+    await dualSave(ctx, player);
+  } else {
+    await player.save();
+  }
 }
 
 /**

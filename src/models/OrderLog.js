@@ -18,6 +18,10 @@ const OrderLogSchema = new mongoose.Schema({
 OrderLogSchema.index({ activityId: 1, createdAt: -1 });
 OrderLogSchema.index({ orderId: 1, createdAt: -1 });
 
+export function getOrderLogModel(conn) {
+  return conn.models.OrderLog || conn.model("OrderLog", OrderLogSchema);
+}
+
 if (mongoose.models.OrderLog) {
   delete mongoose.models.OrderLog;
 }

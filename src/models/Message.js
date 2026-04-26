@@ -26,6 +26,10 @@ const MessageSchema = new mongoose.Schema({
   timestamps: true,
 });
 
+export function getMessageModel(conn) {
+  return conn.models.Message || conn.model("Message", MessageSchema);
+}
+
 if (mongoose.models.Message) {
   delete mongoose.models.Message;
 }

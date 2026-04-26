@@ -1,31 +1,18 @@
 import { NextResponse } from "next/server";
-import dbConnect from "@/lib/mongodb";
-import Order from "@/models/Order";
+import { resolvePublicContext, dualSave } from "@/lib/club-context";
 import { sendWaiverConfirmationPDFEmail } from "@/lib/waiver-confirmation-email";
 
-/**
- * Sends the dedicated waiver-confirmation email for an order that already
- * has its waiver consents persisted (typically by the preceding /save call).
- *
- * The caller may also pass `waiverConsents` as a safety net — if any of them
- * aren't yet on the order we merge them in before generating the email.
- *
- * This endpoint is ONLY called from the ON (email-confirmation) path right
- * after a successful OTP verification, so we force the helper to resend even
- * when `waiverConfirmationSentAt` is already set. Otherwise a parent who
- * re-signs or returns via the same link would never see the email again,
- * which is the user-visible symptom we're fixing here.
- *
- * The OFF path (post-payment) uses the same helper from inside the Stripe
- * webhook / save route without `force`, so idempotency there is preserved.
- */
 export async function POST(request, { params }) {
   try {
     const { activityId } = await params;
     const body = await request.json();
     const { token, orderId, waiverConsents = [] } = body;
 
-    await dbConnect();
+    const ctx = await resolvePublicContext("activity", activityId);
+    if (!ctx) {
+      return NextResponse.json({ error: "Activity not found" }, { status: 404 });
+    }
+    const { Order } = ctx.models;
 
     let order;
     if (token) {
@@ -54,11 +41,11 @@ export async function POST(request, { params }) {
       }
       if (mutated) {
         order.waiverConsents = merged;
-        await order.save();
+        await dualSave(ctx, order);
       }
     }
 
-    const result = await sendWaiverConfirmationPDFEmail(order, { force: true });
+    const result = await sendWaiverConfirmationPDFEmail(order, { force: true, ctx });
 
     return NextResponse.json({ ok: !!result?.ok, sentTo: result?.sentTo || [] });
   } catch (error) {

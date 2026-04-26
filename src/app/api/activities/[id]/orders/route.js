@@ -1,34 +1,24 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Order from "@/models/Order";
-import OrderLog from "@/models/OrderLog";
-import Activity from "@/models/Activity";
-import Player from "@/models/Player";
-import Parent from "@/models/Parent";
+import { getClubContext, dualCreate, dualWrite } from "@/lib/club-context";
 import { syncOrderItemsWithSubscription, computeOrderTotalCents, isOrderSyncEligible } from "@/lib/order-sync";
 import { toDobString } from "@/lib/dob";
 
 export async function GET(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const { id } = await params;
-    await dbConnect();
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Order, Activity, Player, Team } = ctx.models;
 
-    const activity = await Activity.findOne({ _id: id, clubId: session.user.id }).lean();
+    const { id } = await params;
+
+    const activity = await Activity.findOne({ _id: id, clubId: ctx.clubId }).lean();
     if (!activity) {
       return NextResponse.json({ error: "Activity not found" }, { status: 404 });
     }
 
-    // Keep every unpaid order's invoice in sync with its subscription — the club never has
-    // to click "repair" to get discounts/items that were added to the subscription later.
     const syncCandidates = await Order.find({
       activityId: id,
-      clubId: session.user.id,
+      clubId: ctx.clubId,
       paidCents: { $lte: 0 },
       status: { $nin: ["paid", "refunded"] },
     });
@@ -49,10 +39,10 @@ export async function GET(request, { params }) {
       });
     }
     if (bulkOps.length > 0) {
-      await Order.bulkWrite(bulkOps);
+      await dualWrite(ctx, (M) => M.Order.bulkWrite(bulkOps));
     }
 
-    const orders = await Order.find({ activityId: id, clubId: session.user.id })
+    const orders = await Order.find({ activityId: id, clubId: ctx.clubId })
       .populate("teamId", "name season gender")
       .sort({ createdAt: -1 })
       .lean();
@@ -62,7 +52,7 @@ export async function GET(request, { params }) {
 
     if (teamIds.length > 0) {
       const players = await Player.find({
-        clubId: session.user.id,
+        clubId: ctx.clubId,
         "teams.teamId": { $in: teamIds },
       })
         .populate("parents", "firstName lastName phone email")
@@ -82,7 +72,7 @@ export async function GET(request, { params }) {
       for (const tid of teamIds) {
         const tidStr = String(tid);
         const matching = subscriptions.filter((s) =>
-          (s.includedTeamIds || []).some((id) => String(id) === tidStr)
+          (s.includedTeamIds || []).some((iid) => String(iid) === tidStr)
         );
         if (matching.length === 1) {
           const sub = matching[0];
@@ -168,7 +158,6 @@ export async function GET(request, { params }) {
       }
 
       if (expectedPlayers.length > 0) {
-        const Team = (await import("@/models/Team")).default;
         const teamDocs = await Team.find({ _id: { $in: teamIds } }, "name season gender").lean();
         const teamMap = {};
         teamDocs.forEach((t) => { teamMap[String(t._id)] = t; });
@@ -209,14 +198,12 @@ function computeTotal(order) {
 
 export async function POST(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const { id } = await params;
-    await dbConnect();
+    const { session, ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Activity, Player, Parent, Team } = ctx.models;
 
-    const activity = await Activity.findOne({ _id: id, clubId: session.user.id });
+    const { id } = await params;
+    const activity = await Activity.findOne({ _id: id, clubId: ctx.clubId });
     if (!activity) {
       return NextResponse.json({ error: "Activity not found" }, { status: 404 });
     }
@@ -232,19 +219,22 @@ export async function POST(request, { params }) {
     async function findOrCreateParent(firstName, lastName, email, phone, phonePrefix) {
       if (!firstName || !lastName || !email) return null;
       let parent = await Parent.findOne({
-        clubId: session.user.id,
+        clubId: ctx.clubId,
         email: email.trim().toLowerCase(),
       });
       if (parent) {
         if (phone && !parent.phone) {
           parent.phone = phone;
           parent.phonePrefix = phonePrefix || "+1";
-          await parent.save();
+          await dualWrite(ctx, (M) => M.Parent.updateOne(
+            { _id: parent._id },
+            { $set: { phone: parent.phone, phonePrefix: parent.phonePrefix } },
+          ));
         }
         return parent;
       }
-      parent = await Parent.create({
-        clubId: session.user.id,
+      parent = await dualCreate(ctx, "Parent", {
+        clubId: ctx.clubId,
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         email: email.trim().toLowerCase(),
@@ -256,7 +246,7 @@ export async function POST(request, { params }) {
 
     if (!playerId) {
       const playerQuery = {
-        clubId: session.user.id,
+        clubId: ctx.clubId,
         firstName: body.playerFirstName.trim(),
         lastName: body.playerLastName.trim(),
       };
@@ -267,15 +257,14 @@ export async function POST(request, { params }) {
       if (!player) {
         const teamEntries = [];
         if (body.teamId) {
-          const Team = (await import("@/models/Team")).default;
           const teamDoc = await Team.findById(body.teamId).lean();
           if (teamDoc) {
             teamEntries.push({ teamId: body.teamId, season: teamDoc.season || "" });
           }
         }
 
-        player = await Player.create({
-          clubId: session.user.id,
+        player = await dualCreate(ctx, "Player", {
+          clubId: ctx.clubId,
           firstName: body.playerFirstName.trim(),
           lastName: body.playerLastName.trim(),
           dateOfBirth: toDobString(body.playerDob),
@@ -306,21 +295,21 @@ export async function POST(request, { params }) {
         const existingParentIds = player.parents.map((p) => String(p));
         const newParentIds = parentIds.filter((pid) => !existingParentIds.includes(String(pid)));
         if (newParentIds.length > 0) {
-          await Player.updateOne(
+          await dualWrite(ctx, (M) => M.Player.updateOne(
             { _id: player._id },
-            { $addToSet: { parents: { $each: newParentIds } } }
-          );
-          await Parent.updateMany(
+            { $addToSet: { parents: { $each: newParentIds } } },
+          ));
+          await dualWrite(ctx, (M) => M.Parent.updateMany(
             { _id: { $in: newParentIds } },
-            { $addToSet: { players: player._id } }
-          );
+            { $addToSet: { players: player._id } },
+          ));
         }
       }
     }
 
     const orderData = {
       activityId: id,
-      clubId: session.user.id,
+      clubId: ctx.clubId,
       playerId,
       playerFirstName: body.playerFirstName,
       playerLastName: body.playerLastName,
@@ -355,13 +344,13 @@ export async function POST(request, { params }) {
     };
     orderData.totalCostCents = computeTotal(orderData);
 
-    const order = await Order.create(orderData);
+    const order = await dualCreate(ctx, "Order", orderData);
 
-    await OrderLog.create({
+    await dualCreate(ctx, "OrderLog", {
       orderId: order._id,
       activityId: id,
-      clubId: session.user.id,
-      userId: session.user.id,
+      clubId: ctx.clubId,
+      userId: session.user.userId || session.user.id,
       userName: session.user.name || session.user.username || "Admin",
       field: "order",
       previousValue: "",
@@ -369,7 +358,7 @@ export async function POST(request, { params }) {
       description: `Order created for ${body.playerFirstName} ${body.playerLastName}`,
     });
 
-    const populated = await Order.findById(order._id)
+    const populated = await ctx.models.Order.findById(order._id)
       .populate("teamId", "name season gender")
       .lean();
 

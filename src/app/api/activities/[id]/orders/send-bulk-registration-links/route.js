@@ -1,29 +1,21 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
 import mongoose from "mongoose";
 import crypto from "crypto";
-import Order from "@/models/Order";
-import Activity from "@/models/Activity";
+import { connectMain } from "@/lib/mongodb";
+import { getClubContext, dualSave } from "@/lib/club-context";
 import Club from "@/models/Club";
-import Team from "@/models/Team";
 import { sendCustomRegistrationEmail } from "@/lib/email";
 import { sendSMS, toE164 } from "@/lib/sms";
 import { replaceInvitationVars } from "@/lib/registration-invitation";
-
-// Keep Team registered so `.populate("teamId")` works in environments where
-// the model was hot-reloaded without this route importing it first.
-void Team;
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 export async function POST(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Order, Activity } = ctx.models;
+
     const { id } = await params;
     const body = await request.json();
     const { teamIds, subject, bodyHtml, channel = "email", smsText, smsNotification } = body;
@@ -32,11 +24,10 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: "Select at least one team" }, { status: 400 });
     }
 
-    await dbConnect();
-
+    await connectMain();
     const [activity, club] = await Promise.all([
       Activity.findById(id, "title coverImage").lean(),
-      Club.findById(session.user.id, "name logoUrl language").lean(),
+      Club.findById(ctx.clubId, "name logoUrl language").lean(),
     ]);
 
     if (!activity || !club) {
@@ -49,7 +40,7 @@ export async function POST(request, { params }) {
 
     const filter = {
       activityId: id,
-      clubId: session.user.id,
+      clubId: ctx.clubId,
       teamId: { $in: teamObjectIds },
       parent1Email: { $exists: true, $ne: "" },
     };
@@ -70,10 +61,9 @@ export async function POST(request, { params }) {
           order.registrationTokenExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
         }
         order.linkSentAt = new Date();
-        await order.save();
+        await dualSave(ctx, order);
 
         const registrationUrl = `${baseUrl}/register/${id}?token=${order.registrationToken}`;
-
         const orderPhoneE164 = toE164(order.parent1PhonePrefix || "+1", order.parent1Phone);
 
         const playerName = `${order.playerFirstName} ${order.playerLastName}`.trim();

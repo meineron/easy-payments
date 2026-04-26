@@ -8,32 +8,25 @@ globs:
 
 ## Page Structure
 
-All dashboard pages are **client components**:
+Dashboard pages are **thin client shells** that compose feature components and use RTK Query for data:
 
 ```js
 "use client";
 
-import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
+import { useListOrdersQuery } from "@/features/activities/services/activitiesApi";
+import ParticipantsTab from "@/features/activities/components/ParticipantsTab";
 
 export default function PageName() {
   const t = useTranslations("namespaceName");
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { data, isLoading } = useListOrdersQuery(activityId);
 
-  useEffect(() => {
-    fetch("/api/resource")
-      .then((r) => r.json())
-      .then((d) => setData(d.resource))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <p className="text-gray-500">{t("loading")}</p>;
+  if (isLoading) return <p className="text-gray-500">{t("loading")}</p>;
 
   return (
     <div>
       <h2 className="text-2xl font-bold text-gray-900 mb-6">{t("pageTitle")}</h2>
-      {/* page content */}
+      <ParticipantsTab orders={data?.orders ?? []} />
     </div>
   );
 }
@@ -41,11 +34,17 @@ export default function PageName() {
 
 ## Rules
 
-1. **Always `"use client"`** — dashboard pages rely on hooks, session, and client-side fetching
-2. **Use `useTranslations("namespace")`** from `next-intl` for all user-facing text — never hardcode strings
-3. **Fetch data from internal API routes** — `fetch("/api/...")` in `useEffect`
-4. **Use Tailwind classes** directly in JSX — no CSS modules, no styled-components
-5. **Max width**: main content is wrapped in `max-w-6xl mx-auto` by the layout
+1. **Always `"use client"`** — RSC migration is out of scope. The dashboard relies on session, locale, and client-side cache.
+2. **Pages are thin** — target < 200 lines. Extract reusable feature UI into `src/features/<name>/components/<Name>/`. Extract single-route UI into co-located `_components/` (see "Page-local components" below).
+3. **Use RTK Query for server data** — see `.cursor/rules/state-management.md`. No new inline `fetch("/api/...")` in `useEffect`.
+4. **Use shared primitives** — Modal, Tabs, Dropdown, Toast, Button, Input, Table, Pagination from `@/shared/components`. Never re-roll these inline.
+5. **Use `useTranslations("namespace")`** for all user-facing text. Never hardcode strings.
+6. **Tailwind only** — no CSS modules unless `.cursor/rules/styling.md` allows it.
+7. **Max width**: main content is wrapped in `max-w-6xl mx-auto` by the layout.
+
+## Page-local components
+
+When a component is used by exactly one route (a step view, a settings drawer specific to that page, a stats card unique to one dashboard), put it in `_components/` next to the page — not in `features/` or `shared/`. See [`frontend-architecture.md`](./frontend-architecture.md) for the full convention and promotion ladder. Page-local components always pair with `index.module.css` ([`styling.md`](./styling.md)).
 
 ## Layout Context
 

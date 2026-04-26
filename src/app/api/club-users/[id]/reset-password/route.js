@@ -4,7 +4,8 @@ import { authOptions } from "@/lib/auth";
 import dbConnect from "@/lib/mongodb";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
-import ClubUser from "@/models/ClubUser";
+import Membership from "@/models/Membership";
+import User from "@/models/User";
 import Club from "@/models/Club";
 import { sendStaffResetPasswordEmail } from "@/lib/email";
 
@@ -14,7 +15,7 @@ function generateTempPassword() {
   const digits = "0123456789";
   const special = "!@#$%&*";
   const all = upper + lower + digits + special;
-  let pass = [
+  const pass = [
     upper[crypto.randomInt(upper.length)],
     lower[crypto.randomInt(lower.length)],
     digits[crypto.randomInt(digits.length)],
@@ -30,16 +31,24 @@ function generateTempPassword() {
   return pass.join("");
 }
 
-export async function POST(request, { params }) {
+// Reset the user's password globally (it's a User-level concept now, not
+// per-club). Only members of THIS club can trigger it for THIS user, and only
+// if the user has an active or pending membership here. We never expose the
+// existence of other clubs the user might belong to.
+export async function POST(_request, { params }) {
   try {
     const session = await getServerSession(authOptions);
     if (!session || session.user.role !== "club") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const clubId = session.user.activeClubId || session.user.id;
     await dbConnect();
     const { id } = await params;
 
-    const user = await ClubUser.findOne({ _id: id, clubId: session.user.id });
+    const membership = await Membership.findOne({ _id: id, clubId });
+    if (!membership) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+    const user = await User.findById(membership.userId);
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
     const tempPassword = generateTempPassword();
@@ -47,11 +56,11 @@ export async function POST(request, { params }) {
     user.mustChangePassword = true;
     await user.save();
 
-    const club = await Club.findById(session.user.id).select("name logoUrl language").lean();
+    const club = await Club.findById(clubId).select("name logoUrl language").lean();
     const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
 
     await sendStaffResetPasswordEmail(user.email, {
-      staffName: `${user.firstName} ${user.lastName}`,
+      staffName: `${user.firstName} ${user.lastName}`.trim() || user.email,
       clubName: club?.name || "Club",
       temporaryPassword: tempPassword,
       loginUrl: baseUrl,
@@ -60,8 +69,8 @@ export async function POST(request, { params }) {
     });
 
     return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error("Reset password error:", error);
+  } catch (err) {
+    console.error("Reset password error:", err);
     return NextResponse.json({ error: "Failed to reset password" }, { status: 500 });
   }
 }

@@ -1,12 +1,8 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Order from "@/models/Order";
-import Activity from "@/models/Activity";
-import Club from "@/models/Club";
-import Team from "@/models/Team";
 import crypto from "crypto";
+import { connectMain } from "@/lib/mongodb";
+import { getClubContext, dualSave } from "@/lib/club-context";
+import Club from "@/models/Club";
 import { sendCustomRegistrationEmail } from "@/lib/email";
 import { sendSMS, toE164 } from "@/lib/sms";
 import {
@@ -15,8 +11,6 @@ import {
   getDefaultInvitationSubject,
   replaceInvitationVars,
 } from "@/lib/registration-invitation";
-
-void Team;
 
 function getContactForTarget(order, target) {
   if (target === "player") {
@@ -42,14 +36,13 @@ function getContactForTarget(order, target) {
 
 export async function POST(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const { id, orderId } = await params;
-    await dbConnect();
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Order, Activity } = ctx.models;
 
-    const order = await Order.findOne({ _id: orderId, activityId: id, clubId: session.user.id })
+    const { id, orderId } = await params;
+
+    const order = await Order.findOne({ _id: orderId, activityId: id, clubId: ctx.clubId })
       .populate("teamId", "name");
     if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
 
@@ -69,21 +62,19 @@ export async function POST(request, { params }) {
       tokenChanged = true;
     }
     if (willSend) order.linkSentAt = new Date();
-    if (tokenChanged || willSend) await order.save();
+    if (tokenChanged || willSend) await dualSave(ctx, order);
 
     const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
     const registrationUrl = `${baseUrl}/register/${id}?token=${token}`;
 
-    // Load activity + club once for any send path so we can resolve the
-    // saved Registration Invitation Template and substitute variables.
-    async function loadContext() {
+    async function loadEmailContext() {
+      await connectMain();
       const [activity, club] = await Promise.all([
         Activity.findById(id, "title coverImage registrationInvitation").lean(),
-        Club.findById(session.user.id, "name logoUrl language").lean(),
+        Club.findById(ctx.clubId, "name logoUrl language").lean(),
       ]);
       const locale = club?.language || "en";
       const invitation = activity?.registrationInvitation || {};
-      // Per-request overrides win, then the activity's saved template, then the locale defaults.
       const subject = body.subject || invitation.subject || getDefaultInvitationSubject(locale);
       const bodyHtmlTemplate = body.bodyHtml || invitation.bodyHtml || getDefaultInvitationEmailHtml(locale);
       const smsTemplate = body.smsText || invitation.smsText || getDefaultInvitationSms(locale);
@@ -104,7 +95,7 @@ export async function POST(request, { params }) {
     }
 
     if (recipients.length > 0) {
-      const ctx = await loadContext();
+      const ec = await loadEmailContext();
       const results = { sent: 0, failed: 0, errors: [] };
 
       for (const r of recipients) {
@@ -113,21 +104,21 @@ export async function POST(request, { params }) {
           if (r.channel === "sms") {
             if (!contact.phone) { results.failed++; results.errors.push(`No phone for ${r.target}`); continue; }
             const smsBody = body.bodyText
-              ? replaceInvitationVars(body.bodyText, ctx.vars).replace(/\{link\}/g, registrationUrl)
-              : ctx.resolvedSmsBody;
+              ? replaceInvitationVars(body.bodyText, ec.vars).replace(/\{link\}/g, registrationUrl)
+              : ec.resolvedSmsBody;
             await sendSMS({ to: contact.phone, message: smsBody });
             results.sent++;
           } else if (r.channel === "email") {
             if (!contact.email) { results.failed++; results.errors.push(`No email for ${r.target}`); continue; }
             await sendCustomRegistrationEmail(contact.email, {
-              subject: ctx.resolvedSubject,
-              bodyHtml: ctx.resolvedBodyHtml,
-              playerName: ctx.playerName,
-              clubName: ctx.club?.name || "",
-              activityTitle: ctx.activity?.title || "",
+              subject: ec.resolvedSubject,
+              bodyHtml: ec.resolvedBodyHtml,
+              playerName: ec.playerName,
+              clubName: ec.club?.name || "",
+              activityTitle: ec.activity?.title || "",
               registrationUrl,
-              logoUrl: ctx.club?.logoUrl || null,
-              locale: ctx.locale,
+              logoUrl: ec.club?.logoUrl || null,
+              locale: ec.locale,
             });
             results.sent++;
           }
@@ -143,24 +134,24 @@ export async function POST(request, { params }) {
     if (channel === "sms") {
       const phone = toE164(order.parent1PhonePrefix || "+1", order.parent1Phone);
       if (!phone) return NextResponse.json({ error: "No phone number" }, { status: 400 });
-      const ctx = await loadContext();
+      const ec = await loadEmailContext();
       const smsBody = body.bodyText
-        ? replaceInvitationVars(body.bodyText, ctx.vars).replace(/\{link\}/g, registrationUrl)
-        : ctx.resolvedSmsBody;
+        ? replaceInvitationVars(body.bodyText, ec.vars).replace(/\{link\}/g, registrationUrl)
+        : ec.resolvedSmsBody;
       await sendSMS({ to: phone, message: smsBody });
     } else if (channel === "email") {
       if (!order.parent1Email) return NextResponse.json({ error: "No email address" }, { status: 400 });
 
-      const ctx = await loadContext();
+      const ec = await loadEmailContext();
       await sendCustomRegistrationEmail(order.parent1Email, {
-        subject: ctx.resolvedSubject,
-        bodyHtml: ctx.resolvedBodyHtml,
-        playerName: ctx.playerName,
-        clubName: ctx.club?.name || "",
-        activityTitle: ctx.activity?.title || "",
+        subject: ec.resolvedSubject,
+        bodyHtml: ec.resolvedBodyHtml,
+        playerName: ec.playerName,
+        clubName: ec.club?.name || "",
+        activityTitle: ec.activity?.title || "",
         registrationUrl,
-        logoUrl: ctx.club?.logoUrl || null,
-        locale: ctx.locale,
+        logoUrl: ec.club?.logoUrl || null,
+        locale: ec.locale,
       });
     }
 

@@ -18,7 +18,8 @@ Sports-club payment & registration SaaS. Clubs create activities, parents regist
 | Payments | Stripe (platform key + per-club direct keys) |
 | Email | Nodemailer (SMTP) |
 | i18n | next-intl 4 — locales: `en`, `he` (RTL) |
-| Styling | Tailwind CSS v4, no component library |
+| Styling | Tailwind CSS v4 + design tokens in `globals.css` (no SCSS, no component library) |
+| State | Redux Toolkit + RTK Query (server data) + URL search params (filters/tabs/pagination) + `useState` (transient UI) |
 | Fonts | Geist Sans + Geist Mono via `next/font/google` |
 | File parsing | mammoth (Word→HTML for waivers), xlsx (spreadsheet imports) |
 
@@ -30,19 +31,33 @@ Sports-club payment & registration SaaS. Clubs create activities, parents regist
 
 ```
 src/
-├── app/
-│   ├── api/           # Route Handlers (REST-ish)
-│   ├── admin/         # Platform admin pages
-│   ├── dashboard/     # Club dashboard (authed, client-side)
-│   ├── payment/       # Public payment flow ([token])
-│   ├── register/      # Public registration flow ([activityId])
-│   ├── layout.js      # Root layout (fonts, metadata)
-│   └── page.js        # Login page (/ route)
-├── components/        # Shared UI components
-├── lib/               # Utility modules (see below)
-├── messages/          # i18n JSON files (en.json, he.json)
-└── models/            # Mongoose schemas
+├── app/                  # Next.js routes — thin shells, no business logic
+│   ├── api/              # Route Handlers (REST-ish)
+│   ├── admin/            # Platform admin pages
+│   ├── dashboard/        # Club dashboard (authed, client-side)
+│   ├── payment/          # Public payment flow ([token])
+│   ├── register/         # Public registration flow ([activityId])
+│   ├── providers.js      # Root client providers (Redux + global Toast)
+│   ├── layout.js         # Root layout (fonts, metadata)
+│   └── page.js           # Login page (/ route)
+├── features/             # Domain code, one folder per business feature
+│   └── <name>/components, hooks, services, utils, constants.js
+├── shared/               # Generic, domain-free building blocks
+│   ├── components/       # Modal, Tabs, Dropdown, Toast, Button, Input, Table, Pagination, RichTextEditor
+│   ├── hooks/            # useDisclosure, useUrlState
+│   └── utils/            # formatting helpers
+├── store/                # Redux Toolkit
+│   ├── index.js          # configureStore + makeStore
+│   ├── StoreProvider.js  # client provider
+│   ├── services/api.js   # base RTK Query api
+│   └── slices/uiSlice.js # toasts + modal stack
+├── components/           # DEPRECATED legacy — new code goes in shared/ or features/
+├── lib/                  # Utility modules (see below)
+├── messages/             # i18n JSON files (en.json, he.json)
+└── models/               # Mongoose schemas
 ```
+
+See `.cursor/rules/frontend-architecture.md` for layer rules.
 
 ## Key Lib Modules
 
@@ -103,6 +118,15 @@ Session fields for club: `id`, `name`, `username`, `stripeAccountId`, `onboardin
 ## Styling Conventions
 
 - Tailwind v4 utility classes directly in JSX
-- Global tokens in `globals.css` (`--background`, `--foreground`)
-- RTL support via `[dir="rtl"]` selectors in globals.css
-- No component library — all UI is hand-written with Tailwind
+- Design tokens in `globals.css` (`--background`, `--foreground`, `--color-brand-*`, `--color-status-*`, `--z-*`)
+- RTL support via `[dir="rtl"]` selectors in globals.css; use logical Tailwind utilities (`ps`/`pe`/`ms`/`me`/`text-start`/`text-end`)
+- No component library — all UI is hand-written. See `.cursor/rules/styling.md` and `.cursor/rules/shared-components.md`.
+
+## Frontend Conventions (read these too)
+
+- `.cursor/rules/frontend-architecture.md` — folder layout, layer rules
+- `.cursor/rules/state-management.md` — Redux Toolkit + RTK Query
+- `.cursor/rules/shared-components.md` — primitives library
+- `.cursor/rules/styling.md` — tokens, RTL, when CSS modules are allowed
+- `.cursor/rules/performance.md` — lazy loading, images, lists, memoization
+- `.cursor/rules/backend-services.md` — services-layer pattern for API routes

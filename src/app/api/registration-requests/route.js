@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import RegistrationRequest from "@/models/RegistrationRequest";
+import { connectMain } from "@/lib/mongodb";
+import { getClubContext, getClubContextById, dualCreate } from "@/lib/club-context";
 import Club from "@/models/Club";
 import { getClubTransporter } from "@/lib/email";
 import en from "@/messages/en.json";
@@ -23,9 +21,9 @@ export async function POST(request) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    await dbConnect();
+    const ctx = await getClubContextById(clubId);
 
-    const req = await RegistrationRequest.create({
+    const req = await dualCreate(ctx, "RegistrationRequest", {
       activityId,
       orderId,
       clubId,
@@ -37,6 +35,7 @@ export async function POST(request) {
       message: message.trim(),
     });
 
+    await connectMain();
     const club = await Club.findById(clubId, "name supportEmail smtpEmail smtpPassword smtpHost smtpPort language").lean();
     const targetEmail = club?.supportEmail || club?.smtpEmail;
 
@@ -68,16 +67,14 @@ export async function POST(request) {
 
 export async function GET(request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    await dbConnect();
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { RegistrationRequest } = ctx.models;
 
     const { searchParams } = new URL(request.url);
     const activityId = searchParams.get("activityId");
 
-    const filter = { clubId: session.user.id };
+    const filter = { clubId: ctx.clubId };
     if (activityId) filter.activityId = activityId;
 
     const requests = await RegistrationRequest.find(filter)

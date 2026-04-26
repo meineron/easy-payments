@@ -1,18 +1,22 @@
 import { NextResponse } from "next/server";
-import dbConnect from "@/lib/mongodb";
-import Team from "@/models/Team";
+import { connectMain } from "@/lib/mongodb";
+import { resolvePublicContext } from "@/lib/club-context";
 import Club from "@/models/Club";
 
 export async function GET(request, { params }) {
   try {
     const { id } = await params;
-    await dbConnect();
+    const ctx = await resolvePublicContext("team", id);
+    if (!ctx) {
+      return NextResponse.json({ error: "Team not found" }, { status: 404 });
+    }
 
-    const team = await Team.findById(id);
+    const team = await ctx.models.Team.findById(id);
     if (!team) {
       return NextResponse.json({ error: "Team not found" }, { status: 404 });
     }
 
+    await connectMain();
     const club = await Club.findById(team.clubId).select("name");
     if (!club) {
       return NextResponse.json({ error: "Club not found" }, { status: 404 });

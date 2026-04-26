@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import dbConnect from "@/lib/mongodb";
-import Order from "@/models/Order";
-import Activity from "@/models/Activity";
+import { connectMain } from "@/lib/mongodb";
+import { resolvePublicContext, dualSave } from "@/lib/club-context";
 import Club from "@/models/Club";
 
 function computeProcessingFee(amountCents) {
@@ -60,7 +59,11 @@ export async function POST(request, { params }) {
     const body = await request.json();
     const { orderId, token, adminReturn, chosenInstallments } = body;
 
-    await dbConnect();
+    const ctx = await resolvePublicContext("activity", activityId);
+    if (!ctx) {
+      return NextResponse.json({ error: "Activity not found" }, { status: 404 });
+    }
+    const { Order, Activity } = ctx.models;
 
     let order;
     if (token) {
@@ -81,6 +84,7 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: "Already paid" }, { status: 400 });
     }
 
+    await connectMain();
     const [activity, club] = await Promise.all([
       Activity.findById(activityId, "title clubId subscriptions passStripeFeeToCustomer").lean(),
       Club.findById(order.clubId, "name hasDirectStripeAccess stripeSecretKey stripeAccountId").lean(),
@@ -180,7 +184,7 @@ export async function POST(request, { params }) {
 
       const session = await stripeClient.checkout.sessions.create(sessionConfig);
       order.stripeSessionId = session.id;
-      await order.save();
+      await dualSave(ctx, order);
       return NextResponse.json({ url: session.url });
     }
 
@@ -227,7 +231,7 @@ export async function POST(request, { params }) {
 
     const session = await stripeClient.checkout.sessions.create(sessionConfig);
     order.stripeSessionId = session.id;
-    await order.save();
+    await dualSave(ctx, order);
     return NextResponse.json({ url: session.url });
   } catch (error) {
     console.error("Create checkout error:", error);

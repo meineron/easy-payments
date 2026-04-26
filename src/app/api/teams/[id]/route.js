@@ -1,19 +1,13 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Team from "@/models/Team";
+import { getClubContext, dualWrite } from "@/lib/club-context";
 
 export async function GET(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
 
     const { id } = await params;
-    await dbConnect();
-    const team = await Team.findOne({ _id: id, clubId: session.user.id });
+    const team = await ctx.models.Team.findOne({ _id: id, clubId: ctx.clubId });
 
     if (!team) {
       return NextResponse.json({ error: "Team not found" }, { status: 404 });
@@ -28,10 +22,8 @@ export async function GET(request, { params }) {
 
 export async function PUT(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
 
     const { id } = await params;
     const { name, season, gender, teamType, costDollars, loyaltyDiscountDollars, activityStartDate } = await request.json();
@@ -61,12 +53,11 @@ export async function PUT(request, { params }) {
       updates.activityStartDate = startDate;
     }
 
-    await dbConnect();
-    const team = await Team.findOneAndUpdate(
-      { _id: id, clubId: session.user.id },
+    const team = await dualWrite(ctx, (M) => M.Team.findOneAndUpdate(
+      { _id: id, clubId: ctx.clubId },
       updates,
-      { new: true }
-    );
+      { new: true },
+    ));
 
     if (!team) {
       return NextResponse.json({ error: "Team not found" }, { status: 404 });
@@ -81,14 +72,11 @@ export async function PUT(request, { params }) {
 
 export async function DELETE(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
 
     const { id } = await params;
-    await dbConnect();
-    const team = await Team.findOneAndDelete({ _id: id, clubId: session.user.id });
+    const team = await dualWrite(ctx, (M) => M.Team.findOneAndDelete({ _id: id, clubId: ctx.clubId }));
 
     if (!team) {
       return NextResponse.json({ error: "Team not found" }, { status: 404 });

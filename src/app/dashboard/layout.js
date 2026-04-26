@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import IntlProvider from "@/components/IntlProvider";
+import ClubSwitcher from "@/components/ClubSwitcher";
 import { getMessages, getDirection } from "@/lib/i18n";
 
 const LocaleContext = createContext({ locale: "en", setLocale: () => {} });
@@ -61,9 +62,12 @@ function DashboardLayoutInner({ children }) {
       <nav className="bg-white border-b border-gray-200 px-4 md:px-6 py-3">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4 md:gap-6">
-            <h1 className="text-lg font-bold text-gray-900 truncate max-w-[160px] md:max-w-none">
-              {session?.user?.name || "Club Dashboard"}
-            </h1>
+            <div className="flex items-center gap-1">
+              <h1 className="text-lg font-bold text-gray-900 truncate max-w-[160px] md:max-w-none">
+                {session?.user?.name || "Club Dashboard"}
+              </h1>
+              <ClubSwitcher />
+            </div>
             <div className="hidden md:flex items-center gap-6">
               {navLinks.map((link) => (
                 <NavLink key={link.href} href={link.href} active={link.active}>

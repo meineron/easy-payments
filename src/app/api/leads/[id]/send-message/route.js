@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Lead from "@/models/Lead";
-import LeadSubmission from "@/models/LeadSubmission";
-import Message from "@/models/Message";
+import { connectMain } from "@/lib/mongodb";
+import { getClubContext, dualCreate } from "@/lib/club-context";
 import Club from "@/models/Club";
 import { sendBulkEmail } from "@/lib/email";
 import { sendBulkSMS, toE164 } from "@/lib/sms";
@@ -12,10 +8,9 @@ import { writeLeadLog, getSessionAuthor } from "@/lib/lead-logs";
 
 export async function POST(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { session, ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Lead, LeadSubmission } = ctx.models;
 
     const { id } = await params;
     const body = await request.json();
@@ -33,9 +28,7 @@ export async function POST(request, { params }) {
       return NextResponse.json({ error: "At least one recipient is required" }, { status: 400 });
     }
 
-    await dbConnect();
-
-    const lead = await Lead.findOne({ _id: id, clubId: session.user.id }).select("_id title").lean();
+    const lead = await Lead.findOne({ _id: id, clubId: ctx.clubId }).select("_id title").lean();
     if (!lead) {
       return NextResponse.json({ error: "Lead not found" }, { status: 404 });
     }
@@ -43,7 +36,7 @@ export async function POST(request, { params }) {
     const submissions = await LeadSubmission.find({
       _id: { $in: submissionIds },
       leadId: id,
-      clubId: session.user.id,
+      clubId: ctx.clubId,
     }).lean();
 
     if (submissions.length === 0) {
@@ -59,7 +52,8 @@ export async function POST(request, { params }) {
       phone: s.phone || "",
     }));
 
-    const club = await Club.findById(session.user.id, "name logoUrl smtpHost smtpPort smtpEmail smtpPassword").lean();
+    await connectMain();
+    const club = await Club.findById(ctx.clubId, "name logoUrl smtpHost smtpPort smtpEmail smtpPassword").lean();
     if (!club) {
       return NextResponse.json({ error: "Club not found" }, { status: 404 });
     }
@@ -113,8 +107,8 @@ export async function POST(request, { params }) {
         }
       }
 
-      const message = await Message.create({
-        clubId: session.user.id,
+      const message = await dualCreate(ctx, "Message", {
+        clubId: ctx.clubId,
         channel: "email",
         subject: subject.trim(),
         bodyHtml,
@@ -131,7 +125,7 @@ export async function POST(request, { params }) {
         await Promise.all(submissions.map((s) => writeLeadLog({
           leadId: id,
           submissionId: s._id,
-          clubId: session.user.id,
+          clubId: ctx.clubId,
           type: "message_sent",
           ...author,
           content: `Email sent: ${subject.trim()}`,
@@ -141,6 +135,7 @@ export async function POST(request, { params }) {
             subject: subject.trim(),
             smsNotification: !!smsNotification,
           },
+          ctx,
         })));
       }
 
@@ -173,8 +168,8 @@ export async function POST(request, { params }) {
         }
       }
 
-      const message = await Message.create({
-        clubId: session.user.id,
+      const message = await dualCreate(ctx, "Message", {
+        clubId: ctx.clubId,
         channel: "sms",
         subject: subject?.trim() || "SMS",
         bodyText: bodyText.trim(),
@@ -188,7 +183,7 @@ export async function POST(request, { params }) {
         await Promise.all(submissions.map((s) => writeLeadLog({
           leadId: id,
           submissionId: s._id,
-          clubId: session.user.id,
+          clubId: ctx.clubId,
           type: "message_sent",
           ...author,
           content: `SMS sent`,
@@ -196,6 +191,7 @@ export async function POST(request, { params }) {
             messageId: String(message._id),
             channel: "sms",
           },
+          ctx,
         })));
       }
 

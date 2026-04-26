@@ -154,6 +154,10 @@ const ActivitySchema = new mongoose.Schema({
   timestamps: true,
 });
 
+export function getActivityModel(conn) {
+  return conn.models.Activity || conn.model("Activity", ActivitySchema);
+}
+
 if (mongoose.models.Activity) {
   delete mongoose.models.Activity;
 }

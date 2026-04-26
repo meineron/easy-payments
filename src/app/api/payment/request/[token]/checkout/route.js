@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import dbConnect from "@/lib/mongodb";
-import PaymentRequest from "@/models/PaymentRequest";
-import Order from "@/models/Order";
+import { connectMain } from "@/lib/mongodb";
+import { resolvePublicContext, dualSave } from "@/lib/club-context";
 import Club from "@/models/Club";
-import Activity from "@/models/Activity";
 
 function computeProcessingFee(amountCents) {
   return Math.round((amountCents + 30) / 0.971) - amountCents;
@@ -16,7 +14,11 @@ export async function POST(request, { params }) {
     const body = await request.json();
     const { chosenInstallments: rawChosen } = body;
 
-    await dbConnect();
+    const ctx = await resolvePublicContext("paymentToken", token);
+    if (!ctx) {
+      return NextResponse.json({ error: "Payment link not found" }, { status: 404 });
+    }
+    const { PaymentRequest, Order, Activity } = ctx.models;
 
     const pr = await PaymentRequest.findOne({ paymentToken: token });
     if (!pr) {
@@ -30,6 +32,7 @@ export async function POST(request, { params }) {
     const chosen = allowed.includes(Number(rawChosen)) ? Number(rawChosen) : 1;
     pr.chosenInstallments = chosen;
 
+    await connectMain();
     const [order, club, activity] = await Promise.all([
       Order.findById(pr.orderId, "playerFirstName playerLastName parent1Email activityId clubId").lean(),
       Club.findById(pr.clubId, "name hasDirectStripeAccess stripeSecretKey stripeAccountId").lean(),
@@ -104,7 +107,7 @@ export async function POST(request, { params }) {
 
       const stripeSession = await stripeClient.checkout.sessions.create(sessionConfig);
       pr.stripeSessionId = stripeSession.id;
-      await pr.save();
+      await dualSave(ctx, pr);
 
       return NextResponse.json({ url: stripeSession.url });
     }
@@ -161,7 +164,7 @@ export async function POST(request, { params }) {
 
     const stripeSession = await stripeClient.checkout.sessions.create(sessionConfig);
     pr.stripeSessionId = stripeSession.id;
-    await pr.save();
+    await dualSave(ctx, pr);
 
     return NextResponse.json({ url: stripeSession.url });
   } catch (error) {

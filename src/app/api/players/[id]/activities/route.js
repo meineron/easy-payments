@@ -1,22 +1,15 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Activity from "@/models/Activity";
-import Registration from "@/models/Registration";
-import Player from "@/models/Player";
+import { getClubContext } from "@/lib/club-context";
 
 export async function GET(request, { params }) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Activity, Registration, Player } = ctx.models;
 
     const { id: playerId } = await params;
-    await dbConnect();
 
-    const player = await Player.findOne({ _id: playerId, clubId: session.user.id }).select("teams firstName lastName").lean();
+    const player = await Player.findOne({ _id: playerId, clubId: ctx.clubId }).select("teams firstName lastName").lean();
     if (!player) {
       return NextResponse.json({ activities: [] });
     }
@@ -24,12 +17,12 @@ export async function GET(request, { params }) {
     const playerTeamIds = (player.teams || []).map((t) => t.teamId);
 
     const activities = await Activity.find({
-      clubId: session.user.id,
+      clubId: ctx.clubId,
       "teams.teamId": { $in: playerTeamIds },
     }).select("title season type status teams").lean();
 
     const registrations = await Registration.find({
-      clubId: session.user.id,
+      clubId: ctx.clubId,
       teamId: { $in: playerTeamIds },
       playerFirstName: player.firstName,
       playerLastName: player.lastName,

@@ -1,26 +1,18 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Activity from "@/models/Activity";
-import Order from "@/models/Order";
-import Team from "@/models/Team";
+import { getClubContext } from "@/lib/club-context";
 
 export async function GET(request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
+    const { Activity, Order, Team } = ctx.models;
 
-    const clubId = session.user.id;
+    const clubId = ctx.clubId;
     const { searchParams } = new URL(request.url);
     const seasonParam = searchParams.get("season");
     const paymentMethodsParam = searchParams.get("paymentMethods");
     const activityIdsParam = searchParams.get("activityIds");
     const teamIdsParam = searchParams.get("teamIds");
-
-    await dbConnect();
 
     const allActivities = await Activity.find({ clubId }, "title season startDate endDate teams")
       .sort({ createdAt: -1 })

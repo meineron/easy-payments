@@ -1,18 +1,12 @@
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import dbConnect from "@/lib/mongodb";
-import Team from "@/models/Team";
+import { getClubContext, dualInsertMany } from "@/lib/club-context";
 
 export async function GET() {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
 
-    await dbConnect();
-    const teams = await Team.find({ clubId: session.user.id }).sort({ teamType: 1, name: 1 });
+    const teams = await ctx.models.Team.find({ clubId: ctx.clubId }).sort({ teamType: 1, name: 1 });
 
     return NextResponse.json({ teams });
   } catch (error) {
@@ -23,10 +17,8 @@ export async function GET() {
 
 export async function POST(request) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "club") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { ctx, error } = await getClubContext();
+    if (error) return NextResponse.json(error.body, { status: error.status });
 
     const body = await request.json();
     const items = Array.isArray(body.teams) ? body.teams : [body];
@@ -56,7 +48,7 @@ export async function POST(request) {
       }
 
       docs.push({
-        clubId: session.user.id,
+        clubId: ctx.clubId,
         name: name.trim(),
         season,
         gender: gender || "",
@@ -67,8 +59,7 @@ export async function POST(request) {
       });
     }
 
-    await dbConnect();
-    const teams = await Team.insertMany(docs);
+    const teams = await dualInsertMany(ctx, "Team", docs);
 
     return NextResponse.json({ teams }, { status: 201 });
   } catch (error) {
