@@ -1,8 +1,6 @@
-"use client";
-
 import { useState, useEffect, useCallback } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useRouter } from "next/router";
+import { useIntl } from "react-intl";
 import Link from "next/link";
 
 const STATUS_COLORS = {
@@ -25,7 +23,8 @@ function StatusBadge({ status, t }) {
 }
 
 export default function RecordsPage() {
-  const t = useTranslations("dashboardAnalytics");
+  const intl = useIntl();
+  const t = (id, values) => intl.formatMessage({ id: `payments.dashboardAnalytics.${id}` }, values);
   const searchParams = useSearchParams();
   const router = useRouter();
 

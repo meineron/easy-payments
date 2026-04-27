@@ -1,5 +1,3 @@
-"use client";
-
 import { useState } from "react";
 import { useDispatch } from "react-redux";
 import dynamic from "next/dynamic";

@@ -1,7 +1,5 @@
-"use client";
-
 import { useEffect, useState } from "react";
-import { useLocale } from "next-intl";
+import { useIntl } from "react-intl";
 import Modal from "@/shared/components/Modal";
 import InvitationTemplateEditor from "@/components/InvitationTemplateEditor";
 import { normalizeCopyUrl } from "@/lib/copy-url";
@@ -12,7 +10,7 @@ import {
 } from "@/lib/registration-invitation";
 
 export default function SendLinkRecipientModal({ type, orderId, row, activityId, activity, onClose, onDone, onError, tc, td }) {
-  const locale = useLocale();
+  const { locale } = useIntl();
   const isRegistration = type === "registration";
   const savedInvitation = activity?.registrationInvitation || null;
 

@@ -1,11 +1,9 @@
-"use client";
-
 import { useState, useEffect, use } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter } from "next/router"; // migrated
 
 function centsToDisplay(c) { return "$" + ((c || 0) / 100).toFixed(2); }
 
-export default function RegistrationSuccessPage({ params }) {
+export default function RegistrationSuccessPage() {
   const resolvedParams = use(params);
   const activityId = resolvedParams.activityId;
   const searchParams = useSearchParams();

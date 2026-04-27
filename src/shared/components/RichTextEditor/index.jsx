@@ -1,7 +1,5 @@
-"use client";
-
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 
 /**
  * Generic rich-text (WYSIWYG) editor.
@@ -33,8 +31,9 @@ const RichTextEditor = forwardRef(function RichTextEditor(
   },
   ref
 ) {
-  const t = useTranslations("richTextEditor");
-  const tc = useTranslations("common");
+  const intl = useIntl();
+  const t = (id, values) => intl.formatMessage({ id: `payments.richTextEditor.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
 
   const bodyRef = useRef(null);
   const imgInputRef = useRef(null);

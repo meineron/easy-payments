@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect, Suspense } from "react";
-import { useParams } from "next/navigation";
+import { useRouter } from "next/router"; // migrated
 
 export default function CompletePaymentPage() {
   return (
@@ -16,7 +14,8 @@ export default function CompletePaymentPage() {
 }
 
 function CompletePaymentContent() {
-  const { registrationId } = useParams();
+  const router = useRouter();
+  const { registrationId } = router.query;
 
   const [reg, setReg] = useState(null);
   const [team, setTeam] = useState(null);

@@ -1,7 +1,5 @@
-"use client";
-
 import { useEffect, useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 import { initParent1, initParent2, initPlayer } from "../_utils/orderInit";
 import { buildPreviewSchedule, buildSteps } from "../_utils/installments";
 
@@ -13,9 +11,10 @@ import { buildPreviewSchedule, buildSteps } from "../_utils/installments";
  * page destructures it directly into the step components below.
  */
 export default function useRegistrationFlow({ activityId, token, activity, order: initialOrder }) {
-  const t = useTranslations("register");
-  const tc = useTranslations("common");
-  const tp = useTranslations("payment");
+  const intl = useIntl();
+  const t = (id, values) => intl.formatMessage({ id: `payments.register.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
+  const tp = (id, values) => intl.formatMessage({ id: `payments.payment.${id}` }, values);
 
   const [liveOrder, setLiveOrder] = useState(initialOrder);
 

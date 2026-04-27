@@ -1,5 +1,3 @@
-"use client";
-
 import PhonePrefixInput from "@/components/PhonePrefixInput";
 
 export default function ParentDetailsStep({ parent1, setParent1, parent2, setParent2, onContinue, t, tc }) {

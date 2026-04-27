@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect } from "react";
-import { useParams } from "next/navigation";
+import { useRouter } from "next/router"; // migrated
 import Link from "next/link";
 import PhonePrefixInput from "@/components/PhonePrefixInput";
 import { formatDob, dobAge } from "@/lib/dob";
@@ -24,7 +22,8 @@ const PREVIOUS_SEASON = "25/26";
 const age = dobAge;
 
 export default function TeamDetailPage() {
-  const { id } = useParams();
+  const router = useRouter();
+  const { id } = router.query;
   const [team, setTeam] = useState(null);
   const [registrations, setRegistrations] = useState([]);
   const [teamPlayers, setTeamPlayers] = useState([]);

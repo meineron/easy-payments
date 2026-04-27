@@ -1,5 +1,3 @@
-"use client";
-
 import PhonePrefixInput from "@/components/PhonePrefixInput";
 import { activityTeamSlotKey } from "@/lib/activity-team-keys";
 import { centsToDisplay } from "@/shared/utils/formatting";

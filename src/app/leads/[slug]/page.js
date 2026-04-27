@@ -1,12 +1,11 @@
-"use client";
-
 import { useState, useEffect, use } from "react";
 import IntlProvider from "@/components/IntlProvider";
 import PhonePrefixInput from "@/components/PhonePrefixInput";
 import { getMessages, getDirection } from "@/lib/i18n";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 
-export default function PublicLeadPage({ params }) {
+export default function PublicLeadPage() {
+  const intl = useIntl();
   const { slug } = use(params);
   const [locale, setLocale] = useState("en");
   const [data, setData] = useState(null);
@@ -48,7 +47,7 @@ export default function PublicLeadPage({ params }) {
 }
 
 function ExpiredScreen() {
-  const t = useTranslations("leads");
+  const t = (id, values) => intl.formatMessage({ id: `payments.leads.${id}` }, values);
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gray-50">
       <div className="bg-white rounded-xl border p-8 text-center max-w-md">
@@ -59,7 +58,7 @@ function ExpiredScreen() {
 }
 
 function LeadPageContent({ slug, lead, club, locale }) {
-  const t = useTranslations("leads");
+  const t = (id, values) => intl.formatMessage({ id: `payments.leads.${id}` }, values);
   const dir = getDirection(locale);
 
   const [responses, setResponses] = useState({});

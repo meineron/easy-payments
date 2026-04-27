@@ -1,7 +1,5 @@
-"use client";
-
 import { useRef } from "react";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 
 const VARIABLE_TOKENS = [
   { key: "player_name", labelKey: "insertPlayerName" },
@@ -26,8 +24,9 @@ export default function InvitationTemplateEditor({
   personalLinkButtonLabel,
   personalLinkButtonColor = "#2563eb",
 }) {
-  const td = useTranslations("activityDetail");
-  const te = useTranslations("email");
+  const intl = useIntl();
+  const td = (id, values) => intl.formatMessage({ id: `payments.activityDetail.${id}` }, values);
+  const te = (id, values) => intl.formatMessage({ id: `payments.email.${id}` }, values);
   const bodyRef = useRef(null);
   const smsRef = useRef(null);
   const imgInputRef = useRef(null);

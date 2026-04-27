@@ -1,9 +1,8 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 
 export default function LoadingView() {
-  const tc = useTranslations("common");
+  const intl = useIntl();
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
       <div className="flex flex-col items-center gap-3">

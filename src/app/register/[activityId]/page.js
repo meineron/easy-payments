@@ -1,7 +1,5 @@
-"use client";
-
 import { use, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter } from "next/router"; // migrated
 import IntlProvider from "@/components/IntlProvider";
 import { getMessages, getDirection } from "@/lib/i18n";
 import LoadingView from "./_components/LoadingView";
@@ -17,7 +15,7 @@ import RegisterPageInner from "./_components/RegisterPageInner";
  * in `_hooks/useRegistrationFlow.js`. Step views and small UI pieces live in
  * `_components/`. Pure helpers live in `_utils/`.
  */
-export default function RegisterPage({ params }) {
+export default function RegisterPage() {
   const resolvedParams = use(params);
   const activityId = resolvedParams.activityId;
   const searchParams = useSearchParams();

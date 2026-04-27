@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 import SubscriptionItemReviewModal from "@/components/SubscriptionItemReviewModal";
 import { activityTeamSlotKey } from "@/lib/activity-team-keys";
 import { normalizeCopyUrl } from "@/lib/copy-url";
@@ -437,9 +435,10 @@ export default function InvoiceSlideOver({
   transactions, paymentRequests, logs,
   onUpdateForm, onSave, onClose, saving, onRefresh,
 }) {
-  const t = useTranslations("paymentRequest");
-  const td = useTranslations("activityDetail");
-  const tc = useTranslations("common");
+  const intl = useIntl();
+  const t = (id, values) => intl.formatMessage({ id: `payments.paymentRequest.${id}` }, values);
+  const td = (id, values) => intl.formatMessage({ id: `payments.activityDetail.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
 
   const [activeTab, setActiveTab] = useState("invoice");
   const [reasonModal, setReasonModal] = useState(null);

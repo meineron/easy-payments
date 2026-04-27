@@ -1,8 +1,6 @@
-"use client";
-
 import { useState, useEffect, useRef, useMemo } from "react";
 import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 
 const EMPTY_TEAM = { name: "", season: "26/27", gender: "Male", teamType: "" };
 
@@ -40,8 +38,9 @@ function clearLastImportIdsFromStorage() {
 }
 
 export default function TeamsPage() {
-  const t = useTranslations("teams");
-  const tc = useTranslations("common");
+  const intl = useIntl();
+  const t = (id, values) => intl.formatMessage({ id: `payments.teams.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
   const [teams, setTeams] = useState([]);
   const [stats, setStats] = useState({ byTeam: {}, global: { totalPlayers: 0, committedPlayers: 0 } });
   const [loading, setLoading] = useState(true);

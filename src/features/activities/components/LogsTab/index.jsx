@@ -1,5 +1,3 @@
-"use client";
-
 import { useState } from "react";
 import { useGetActivityLogsQuery } from "@/features/activities/services/activitiesApi";
 import { fmtDateTime } from "@/features/activities/utils/formatting";

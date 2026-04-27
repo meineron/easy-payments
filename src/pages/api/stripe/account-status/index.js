@@ -1,0 +1,44 @@
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { stripe } from "@/lib/stripe";
+import { connectMain } from "@/lib/mongodb";
+import Club from "@/models/Club";
+
+async function _GET(req, res) {
+  try {
+    const session = await getServerSession(authOptions);
+
+    if (!session || session.user.role !== "club") {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    await connectMain();
+    const club = await Club.findById(session.user.activeClubId || session.user.id);
+
+    if (!club || !club.stripeAccountId) {
+      return res.status(200).json({ onboardingComplete: false });
+    }
+
+    const account = await stripe.accounts.retrieve(club.stripeAccountId);
+
+    const isComplete = account.details_submitted && account.charges_enabled;
+
+    if (isComplete && !club.onboardingComplete) {
+      club.onboardingComplete = true;
+      await club.save();
+    }
+
+    return res.status(200).json({
+      onboardingComplete: isComplete,
+      chargesEnabled: account.charges_enabled,
+      detailsSubmitted: account.details_submitted,
+    });
+  } catch (error) {
+    console.error("Account status error:", error);
+    return res.status(500).json({ error: "Failed to check status" });
+  }
+}
+export default async function handler(req, res) {
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+  return _GET(req, res);
+}

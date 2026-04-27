@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect, useRef } from "react";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 import SendMessageModal from "@/components/SendMessageModal";
 import PhonePrefixInput from "@/components/PhonePrefixInput";
 import { formatDob, dobAge, dobToInputValue } from "@/lib/dob";
@@ -75,8 +73,9 @@ function TeamsBySeason({ teams, regTeamId, genderBadge, t }) {
 }
 
 export default function PlayersPage() {
-  const t = useTranslations("players");
-  const tc = useTranslations("common");
+  const intl = useIntl();
+  const t = (id, values) => intl.formatMessage({ id: `payments.players.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
 
   const [players, setPlayers] = useState([]);
   const [teams, setTeams] = useState([]);

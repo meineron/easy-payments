@@ -1,8 +1,6 @@
-"use client";
-
 import { useState, useRef, useEffect } from "react";
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "next/router";
 import Link from "next/link";
 
 // Dropdown next to the club name in the dashboard nav. Only renders when the
@@ -47,7 +45,7 @@ export default function ClubSwitcher() {
       });
       await update({ activeClubId: clubId });
       setOpen(false);
-      router.refresh();
+      router.reload();
     } finally {
       setSwitching(null);
     }
@@ -108,17 +106,15 @@ export default function ClubSwitcher() {
               <div className="border-t border-gray-100 my-1" />
             </>
           )}
-          <Link
-            href="/invitations"
-            onClick={() => setOpen(false)}
-            className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition"
-          >
-            My clubs & invitations
-            {pendingCount > 0 && (
-              <span className="ms-2 bg-yellow-100 text-yellow-700 text-[10px] font-semibold px-1.5 py-0.5 rounded-full">
-                {pendingCount} new
-              </span>
-            )}
+          <Link href="/invitations">
+            <a onClick={() => setOpen(false)} className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition">
+              My clubs &amp; invitations
+              {pendingCount > 0 && (
+                <span className="ms-2 bg-yellow-100 text-yellow-700 text-[10px] font-semibold px-1.5 py-0.5 rounded-full">
+                  {pendingCount} new
+                </span>
+              )}
+            </a>
           </Link>
         </div>
       )}

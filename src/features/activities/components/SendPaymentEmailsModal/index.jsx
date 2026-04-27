@@ -1,5 +1,3 @@
-"use client";
-
 import { useRef, useState } from "react";
 import Modal from "@/shared/components/Modal";
 import RichTextEditor from "@/shared/components/RichTextEditor/lazy";

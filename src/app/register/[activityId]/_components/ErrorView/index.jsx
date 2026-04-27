@@ -1,9 +1,8 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 
 export default function ErrorView({ message }) {
-  const t = useTranslations("register");
+  const intl = useIntl();
+  const t = (id, values) => intl.formatMessage({ id: `payments.register.${id}` }, values);
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-lg max-w-md w-full p-8 text-center">

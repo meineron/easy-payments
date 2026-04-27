@@ -1,12 +1,11 @@
-"use client";
-
 import { useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 import Modal from "@/shared/components/Modal";
 import RichTextEditor from "@/shared/components/RichTextEditor/lazy";
 
 export default function RespondModal({ request, onClose, onSent, onError, tc, td }) {
-  const t = useTranslations("messages");
+  const intl = useIntl();
+  const t = (id, values) => intl.formatMessage({ id: `payments.messages.${id}` }, values);
 
   const recipients = [];
   if (request.parentEmail) {

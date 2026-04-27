@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect, useRef } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter } from "next/router";
 import Link from "next/link";
 
 const PASSWORD_MASK = "••••••••";

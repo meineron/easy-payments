@@ -1,9 +1,7 @@
-"use client";
-
 import { useSession, signOut } from "next-auth/react";
 import { SessionProvider } from "next-auth/react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useRouter } from "next/router"; // migrated
 
 function AdminLayoutInner({ children }) {
   const { data: session, status } = useSession();

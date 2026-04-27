@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect } from "react";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 
 function centsToDisplay(c) { return ((c || 0) / 100).toFixed(2); }
 
@@ -17,8 +15,9 @@ function centsToDisplay(c) { return ((c || 0) / 100).toFixed(2); }
  *  - onCancel()
  */
 export default function SubscriptionItemReviewModal({ newSub: initialNewSub, oldSub, availableSubs, currentItems, orderDiscountCents, onConfirm, onCancel }) {
-  const t = useTranslations("paymentRequest");
-  const tc = useTranslations("common");
+  const intl = useIntl();
+  const t = (id, values) => intl.formatMessage({ id: `payments.paymentRequest.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
 
   const [selectedSub, setSelectedSub] = useState(initialNewSub);
 

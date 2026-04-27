@@ -1,17 +1,15 @@
-"use client";
-
 import { useState, useEffect, createContext, useContext } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { SessionProvider } from "next-auth/react";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useRouter } from "next/router"; // migrated
 import IntlProvider from "@/components/IntlProvider";
 import ClubSwitcher from "@/components/ClubSwitcher";
 import { getMessages, getDirection } from "@/lib/i18n";
 
 const LocaleContext = createContext({ locale: "en", setLocale: () => {} });
-export function useLocale() { return useContext(LocaleContext); }
+export function useIntl().locale { return useContext(LocaleContext); }
 
 function NavLink({ href, active, children }) {
   return (
@@ -29,9 +27,9 @@ function NavLink({ href, active, children }) {
 function DashboardLayoutInner({ children }) {
   const { data: session, status } = useSession();
   const pathname = usePathname();
-  const t = useTranslations("nav");
-  const tAuth = useTranslations("auth");
-  const tc = useTranslations("common");
+  const t = (id, values) => intl.formatMessage({ id: `payments.nav.${id}` }, values);
+  const tAuth = (id, values) => intl.formatMessage({ id: `payments.auth.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -144,6 +142,7 @@ function DashboardLayoutInner({ children }) {
 }
 
 export default function DashboardLayout({ children }) {
+  const intl = useIntl();
   const [locale, setLocale] = useState("en");
   const [ready, setReady] = useState(false);
 

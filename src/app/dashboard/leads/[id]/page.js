@@ -1,8 +1,6 @@
-"use client";
-
 import { useState, useEffect, useCallback, use } from "react";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useRouter } from "next/router";
+import { useIntl } from "react-intl";
 import SendMessageModal from "@/components/SendMessageModal";
 
 const LOG_ICON = {
@@ -37,11 +35,12 @@ function fmtDate(d) {
   return new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
-export default function LeadDetailPage({ params }) {
+export default function LeadDetailPage() {
+  const intl = useIntl();
   const { id } = use(params);
   const router = useRouter();
-  const t = useTranslations("leads");
-  const tc = useTranslations("common");
+  const t = (id, values) => intl.formatMessage({ id: `payments.leads.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
 
   const [lead, setLead] = useState(null);
   const [loading, setLoading] = useState(true);

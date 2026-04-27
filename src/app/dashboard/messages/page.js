@@ -1,13 +1,12 @@
-"use client";
-
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 import RecipientPicker from "@/components/RecipientPicker";
 import RichTextEditor from "@/components/RichTextEditor";
 
 export default function MessagesPage() {
-  const t = useTranslations("messages");
-  const tc = useTranslations("common");
+  const intl = useIntl();
+  const t = (id, values) => intl.formatMessage({ id: `payments.messages.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
 
   const [view, setView] = useState("list");
   const [messages, setMessages] = useState([]);

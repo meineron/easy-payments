@@ -1,8 +1,6 @@
-"use client";
-
 import { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 
 const PREDEFINED_ROLES = [
   "Coach", "Assistant Coach", "GK Coach", "Fitness Coach", "Scout",
@@ -54,8 +52,9 @@ const EMPTY_FORM = {
 };
 
 export default function UsersPage() {
-  const t = useTranslations("users");
-  const tc = useTranslations("common");
+  const intl = useIntl();
+  const t = (id, values) => intl.formatMessage({ id: `payments.users.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
 
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);

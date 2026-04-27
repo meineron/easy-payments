@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useRef } from "react";
-import { useTranslations, useLocale } from "next-intl";
+import { useIntl } from "react-intl";
 import { activityTeamSlotKey } from "@/lib/activity-team-keys";
 import {
   getDefaultInvitationEmailHtml,
@@ -17,11 +15,12 @@ const INVITATION_VARIABLE_TOKENS = [
 ];
 
 export default function SendBulkLinksModal({ type, activityId, activity, orders, expectedPlayers, onClose, onDone, onError }) {
-  const td = useTranslations("activityDetail");
-  const tm = useTranslations("messages");
-  const tc = useTranslations("common");
-  const te = useTranslations("email");
-  const locale = useLocale();
+  const intl = useIntl();
+  const td = (id, values) => intl.formatMessage({ id: `payments.activityDetail.${id}` }, values);
+  const tm = (id, values) => intl.formatMessage({ id: `payments.messages.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
+  const te = (id, values) => intl.formatMessage({ id: `payments.email.${id}` }, values);
+  const { locale } = useIntl();
 
   const activityTeams = (activity?.teams || []).map((row, slotIndex) => ({
     slotIndex,

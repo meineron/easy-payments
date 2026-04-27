@@ -1,7 +1,5 @@
-"use client";
-
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 
 const EMPTY_CUSTOM_FIELD = {
   key: "",
@@ -13,8 +11,9 @@ const EMPTY_CUSTOM_FIELD = {
 };
 
 export default function ClubPaymentLinksPage() {
-  const t = useTranslations("paymentLinks");
-  const tc = useTranslations("common");
+  const intl = useIntl();
+  const t = (id, values) => intl.formatMessage({ id: `payments.paymentLinks.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
 
   const [view, setView] = useState("list");
   const [links, setLinks] = useState([]);

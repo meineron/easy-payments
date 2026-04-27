@@ -1,56 +1,36 @@
-"use client";
-
 import { useCallback, useMemo, useRef } from "react";
-import { useRouter, usePathname, useSearchParams } from "next/navigation";
 
 /**
- * URL-synced Tabs primitive.
+ * Fully controlled Tabs primitive — no routing dependency.
  *
- * Reads/writes `?<paramKey>=<value>` so deep-links and back/forward navigation
- * preserve the active tab. Falls back to controlled mode when `value`/`onChange`
- * are passed instead of `paramKey`.
+ * To sync tabs with the URL, manage the `value` / `onChange` in the parent
+ * page using useUrlParam from shared/hooks/useUrlState.
  *
  * tabs prop shape:
  *   [{ value: "participants", label: "Participants", icon?: ReactNode, badge?: ReactNode }]
  */
 export default function Tabs({
   tabs,
-  paramKey,
-  value: controlledValue,
-  onChange: controlledOnChange,
+  value: active,
+  onChange,
   defaultValue,
   className = "",
   tabClassName = "",
   variant = "underline",
 }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
   const listRef = useRef(null);
-
-  const urlValue = paramKey ? searchParams.get(paramKey) : null;
-  const fallback = defaultValue ?? tabs?.[0]?.value;
-  const active = controlledValue ?? urlValue ?? fallback;
+  const resolved = active ?? defaultValue ?? tabs?.[0]?.value;
 
   const setActive = useCallback(
     (next) => {
-      if (controlledOnChange) {
-        controlledOnChange(next);
-        return;
-      }
-      if (!paramKey) return;
-      const params = new URLSearchParams(searchParams.toString());
-      if (next == null || next === fallback) params.delete(paramKey);
-      else params.set(paramKey, next);
-      const qs = params.toString();
-      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+      if (onChange) onChange(next);
     },
-    [controlledOnChange, paramKey, searchParams, router, pathname, fallback]
+    [onChange]
   );
 
   const onKeyDown = useCallback(
     (e) => {
-      const idx = tabs.findIndex((t) => t.value === active);
+      const idx = tabs.findIndex((t) => t.value === resolved);
       if (idx < 0) return;
       let nextIdx = null;
       if (e.key === "ArrowRight") nextIdx = (idx + 1) % tabs.length;
@@ -59,28 +39,25 @@ export default function Tabs({
       else if (e.key === "End") nextIdx = tabs.length - 1;
       if (nextIdx == null) return;
       e.preventDefault();
-      const nextTab = tabs[nextIdx];
-      setActive(nextTab.value);
+      setActive(tabs[nextIdx].value);
       const buttons = listRef.current?.querySelectorAll("[role='tab']");
       buttons?.[nextIdx]?.focus();
     },
-    [tabs, active, setActive]
+    [tabs, resolved, setActive]
   );
 
   const styles = useMemo(() => {
     if (variant === "pill") {
       return {
         list: "inline-flex items-center gap-1 p-1 bg-gray-100 rounded-lg",
-        tabBase:
-          "px-3 py-1.5 rounded-md text-sm font-medium transition focus:outline-none focus:ring-2 focus:ring-blue-500/40",
+        tabBase: "px-3 py-1.5 rounded-md text-sm font-medium transition focus:outline-none focus:ring-2 focus:ring-blue-500/40",
         tabActive: "bg-white text-gray-900 shadow-sm",
         tabIdle: "text-gray-600 hover:text-gray-900",
       };
     }
     return {
       list: "flex items-center gap-1 border-b border-gray-200 overflow-x-auto",
-      tabBase:
-        "px-3 sm:px-4 py-2.5 -mb-px text-sm font-medium border-b-2 transition whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-blue-500/30 rounded-t",
+      tabBase: "px-3 sm:px-4 py-2.5 -mb-px text-sm font-medium border-b-2 transition whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-blue-500/30 rounded-t",
       tabActive: "border-blue-600 text-blue-600",
       tabIdle: "border-transparent text-gray-500 hover:text-gray-900",
     };
@@ -94,7 +71,7 @@ export default function Tabs({
       className={`${styles.list} ${className}`}
     >
       {tabs.map((tab) => {
-        const isActive = tab.value === active;
+        const isActive = tab.value === resolved;
         return (
           <button
             key={tab.value}

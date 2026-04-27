@@ -1,7 +1,5 @@
-"use client";
-
 import { useMemo, useRef, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 import Modal from "@/shared/components/Modal";
 import RichTextEditor from "@/shared/components/RichTextEditor/lazy";
 import {
@@ -12,8 +10,9 @@ import {
 import { BULK_MESSAGE_VARIABLES } from "@/features/activities/constants";
 
 export default function BulkSendMessageModal({ activityId, activity, rows, ensureOrder, onClose, onDone, onError, tc, td }) {
-  const tm = useTranslations("messages");
-  const locale = useLocale();
+  const intl = useIntl();
+  const locale = intl.locale;
+  const tm = (id, values) => intl.formatMessage({ id: `payments.messages.${id}` }, values);
 
   const savedInvitation = activity?.registrationInvitation || null;
 
@@ -22,7 +21,7 @@ export default function BulkSendMessageModal({ activityId, activity, rows, ensur
   const [channel, setChannel] = useState("email");
   const [template, setTemplate] = useState("custom");
   const [subject, setSubject] = useState(`${activity?.title || ""} — ${td("sendRegistrationLink")}`.trim());
-  const [bodyHtml, setBodyHtml] = useState(td.raw("defaultRegistrationEmailBody"));
+  const [bodyHtml, setBodyHtml] = useState(td("defaultRegistrationEmailBody"));
   const [bodyText, setBodyText] = useState(td("defaultRegistrationSmsBody", { activity: activity?.title || "", link: "{personal_registration_link}" }));
   const [smsNotification, setSmsNotification] = useState(false);
   const [smsNotificationText, setSmsNotificationText] = useState("");
@@ -41,7 +40,7 @@ export default function BulkSendMessageModal({ activityId, activity, rows, ensur
       setBodyText(invSms);
     } else {
       setSubject(`${activity?.title || ""} — ${td("sendRegistrationLink")}`.trim());
-      const defaultBody = td.raw("defaultRegistrationEmailBody");
+      const defaultBody = td("defaultRegistrationEmailBody");
       setBodyHtml(defaultBody);
       if (editorRef.current?.setHtml) editorRef.current.setHtml(defaultBody);
       setBodyText(td("defaultRegistrationSmsBody", { activity: activity?.title || "", link: "{personal_registration_link}" }));

@@ -1,9 +1,7 @@
-"use client";
-
 import { use } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/router";
 import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 import Tabs, { TabPanel } from "@/shared/components/Tabs";
 import { useGetActivityQuery } from "@/features/activities/services/activitiesApi";
 import ParticipantsTab from "@/features/activities/components/ParticipantsTab";
@@ -11,13 +9,14 @@ import ActivityTeamsTab from "@/features/activities/components/ActivityTeamsTab"
 import LogsTab from "@/features/activities/components/LogsTab";
 import RequestsTab from "@/features/activities/components/RequestsTab";
 
-export default function ActivityPage({ params }) {
+export default function ActivityPage() {
+  const intl = useIntl();
   const { id: activityId } = use(params);
   const router = useRouter();
   const searchParams = useSearchParams();
-  const t = useTranslations("activities");
-  const tc = useTranslations("common");
-  const td = useTranslations("activityDetail");
+  const t = (id, values) => intl.formatMessage({ id: `payments.activities.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
+  const td = (id, values) => intl.formatMessage({ id: `payments.activityDetail.${id}` }, values);
 
   const { data: activity, isLoading, isError } = useGetActivityQuery(activityId, {
     skip: !activityId,

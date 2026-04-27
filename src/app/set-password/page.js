@@ -1,10 +1,8 @@
-"use client";
-
 import { useState, useMemo } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { SessionProvider } from "next-auth/react";
-import { useRouter } from "next/navigation";
-import { IntlProvider, useTranslations } from "next-intl";
+import { useRouter } from "next/router";
+import { useIntl } from "react-intl";
 import { getMessages } from "@/lib/i18n";
 
 function EyeIcon({ open }) {
@@ -39,7 +37,7 @@ function CheckIcon({ pass }) {
 }
 
 function SetPasswordForm() {
-  const t = useTranslations("setPassword");
+  const t = (id, values) => intl.formatMessage({ id: `payments.setPassword.${id}` }, values);
   const router = useRouter();
   const { data: session } = useSession();
 
@@ -214,6 +212,7 @@ function SetPasswordForm() {
 }
 
 export default function SetPasswordPage() {
+  const intl = useIntl();
   const messages = getMessages("en");
   return (
     <SessionProvider>
