@@ -11,6 +11,12 @@ import { api } from "@/store/services/api";
  */
 export const activitiesApi = api.injectEndpoints({
   endpoints: (build) => ({
+    getActivities: build.query({
+      query: () => `/activities`,
+      transformResponse: (raw) => raw?.activities ?? [],
+      providesTags: [{ type: "Activity", id: "LIST" }],
+    }),
+
     getActivity: build.query({
       query: (activityId) => `/activities/${activityId}`,
       transformResponse: (raw) => raw?.activity ?? null,
@@ -62,6 +68,7 @@ export const activitiesApi = api.injectEndpoints({
 });
 
 export const {
+  useGetActivitiesQuery,
   useGetActivityQuery,
   useGetActivityOrdersQuery,
   useGetActivityLogsQuery,
