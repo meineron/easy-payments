@@ -1,5 +1,3 @@
-"use client";
-
 import { centsToDisplay } from "@/shared/utils/formatting";
 import { computeFee } from "../../_utils/installments";
 

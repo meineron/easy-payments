@@ -1,12 +1,11 @@
-"use client";
-
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 
 export default function StaffDashboardPage() {
+  const intl = useIntl();
   const { data: session } = useSession();
-  const t = useTranslations("staffDashboard");
+  const t = (id, values) => intl.formatMessage({ id: `payments.staffDashboard.${id}` }, values);
 
   const staffName = session?.user?.name || "";
 

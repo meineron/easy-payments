@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * Responsive Table primitive — pairs a desktop <table> with a mobile-card list,
  * codifying the pattern in `.cursor/rules/mobile-design.md`.

@@ -1,11 +1,10 @@
-"use client";
-
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 
 export default function ClubCustomerDataPage() {
-  const t = useTranslations("customerData");
-  const tc = useTranslations("common");
+  const intl = useIntl();
+  const t = (id, values) => intl.formatMessage({ id: `payments.customerData.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
   const [tab, setTab] = useState("transactions");
   const [transactions, setTransactions] = useState([]);
   const [products, setProducts] = useState([]);

@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useRef } from "react";
 import ContactForm from "../ContactForm";
 import StepIndicator from "../StepIndicator";

@@ -1,5 +1,3 @@
-"use client";
-
 import { activityTeamSlotKey } from "@/lib/activity-team-keys";
 import { useGetActivityOrdersQuery } from "@/features/activities/services/activitiesApi";
 import { centsToDisplay } from "@/features/activities/utils/formatting";

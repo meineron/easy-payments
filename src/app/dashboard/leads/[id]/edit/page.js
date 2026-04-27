@@ -1,8 +1,6 @@
-"use client";
-
 import { useState, useEffect, useCallback, useRef, use } from "react";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useRouter } from "next/router";
+import { useIntl } from "react-intl";
 import RichTextEditor from "@/components/RichTextEditor";
 
 const FIELD_TYPES = [
@@ -34,11 +32,12 @@ function Toast({ message, type = "success", onClose }) {
   );
 }
 
-export default function EditLeadPage({ params }) {
+export default function EditLeadPage() {
+  const intl = useIntl();
   const { id } = use(params);
   const router = useRouter();
-  const t = useTranslations("leads");
-  const tc = useTranslations("common");
+  const t = (id, values) => intl.formatMessage({ id: `payments.leads.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
 
   const [lead, setLead] = useState(null);
   const [loading, setLoading] = useState(true);

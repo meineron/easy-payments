@@ -1,13 +1,12 @@
-"use client";
-
 import { useState, useEffect, useRef } from "react";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 import { useLocale } from "../layout";
 
 export default function ClubProfilePage() {
-  const t = useTranslations("profile");
-  const tc = useTranslations("common");
-  const { setLocale: updateAppLocale } = useLocale();
+  const intl = useIntl();
+  const t = (id, values) => intl.formatMessage({ id: `payments.profile.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
+  const { setLocale: updateAppLocale } = useIntl().locale;
 
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);

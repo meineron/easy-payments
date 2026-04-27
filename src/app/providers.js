@@ -1,5 +1,3 @@
-"use client";
-
 import StoreProvider from "@/store/StoreProvider";
 import Toast from "@/shared/components/Toast";
 

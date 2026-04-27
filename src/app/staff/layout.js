@@ -1,15 +1,13 @@
-"use client";
-
 import { useState, useEffect } from "react";
 import { useSession, signOut, SessionProvider } from "next-auth/react";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 import IntlProvider from "@/components/IntlProvider";
 import { getMessages, getDirection } from "@/lib/i18n";
 
 function StaffLayoutInner({ children }) {
   const { data: session, status } = useSession();
-  const tAuth = useTranslations("auth");
-  const tc = useTranslations("common");
+  const tAuth = (id, values) => intl.formatMessage({ id: `payments.auth.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
 
   if (status === "loading") {
     return (
@@ -48,6 +46,7 @@ function StaffLayoutInner({ children }) {
 }
 
 export default function StaffLayout({ children }) {
+  const intl = useIntl();
   const [locale, setLocale] = useState("en");
   const [ready, setReady] = useState(false);
 

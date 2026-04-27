@@ -1,33 +1,30 @@
-"use client";
-
 import { useCallback } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePaymentsRouter } from "../context/PaymentsHostContext";
 
 /**
  * Read & write a single URL search param.
  *   const [tab, setTab] = useUrlParam("tab", "participants");
  *   setTab("teams");
  *
- * `replace: true` (default) avoids polluting browser history for filter changes.
+ * Uses the PaymentsHostContext router abstraction so this hook works
+ * in both standalone Next.js (wired to next/router) and pl-football-web
+ * (wired to react-router).
  */
 export function useUrlParam(key, defaultValue) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const { searchParams, navigate, pathname } = usePaymentsRouter();
   const value = searchParams.get(key) ?? defaultValue ?? null;
 
   const set = useCallback(
     (next, options = {}) => {
-      const { replace = true, scroll = false } = options;
+      const { replace = true } = options;
       const params = new URLSearchParams(searchParams.toString());
       if (next == null || next === defaultValue || next === "") params.delete(key);
       else params.set(key, String(next));
       const qs = params.toString();
       const url = qs ? `${pathname}?${qs}` : pathname;
-      if (replace) router.replace(url, { scroll });
-      else router.push(url, { scroll });
+      navigate(url, { replace });
     },
-    [key, defaultValue, searchParams, router, pathname]
+    [key, defaultValue, searchParams, navigate, pathname]
   );
 
   return [value, set];
@@ -38,7 +35,7 @@ export function useUrlParam(key, defaultValue) {
  *   const { page, q } = useUrlParams({ page: Number, q: String });
  */
 export function useUrlParams(schema) {
-  const searchParams = useSearchParams();
+  const { searchParams } = usePaymentsRouter();
   const out = {};
   for (const [key, parse] of Object.entries(schema)) {
     const raw = searchParams.get(key);

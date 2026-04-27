@@ -1,5 +1,3 @@
-"use client";
-
 import { useState } from "react";
 import Modal from "@/shared/components/Modal";
 import PriceInput from "@/features/activities/components/PriceInput";

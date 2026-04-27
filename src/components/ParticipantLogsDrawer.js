@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 
 function fmtDateTime(d) {
   if (!d) return "";
@@ -25,8 +23,8 @@ function fmtDateTime(d) {
  * (the default) to render the full timeline — the desktop drawer uses this.
  */
 export function ParticipantLogsContent({ order, activityId, focusComment = false, initialLimit = null }) {
-  const td = useTranslations("activityDetail");
-  const tc = useTranslations("common");
+  const td = (id, values) => intl.formatMessage({ id: `payments.activityDetail.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
 
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -166,6 +164,7 @@ export function ParticipantLogsContent({ order, activityId, focusComment = false
 }
 
 export default function ParticipantLogsDrawer({ order, activityId, onClose, focusComment = false }) {
+  const intl = useIntl();
   const firstName = order?.playerFirstName || order?.firstName || "";
   const lastName = order?.playerLastName || order?.lastName || "";
   const playerName = order

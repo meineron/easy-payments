@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { useRouter } from "next/router"; // migrated
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import LoginForm from "./LoginForm";

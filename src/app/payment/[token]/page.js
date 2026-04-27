@@ -1,8 +1,6 @@
-"use client";
-
 import { useState, useEffect, useMemo } from "react";
-import { useParams } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useRouter } from "next/router"; // migrated
+import { useIntl } from "react-intl";
 
 import IntlProvider from "@/components/IntlProvider";
 import { getMessages, getDirection, defaultLocale } from "@/lib/i18n";
@@ -53,7 +51,7 @@ function buildPreviewSchedule(totalCostCents, dueDateAmountCents, chosen, firstI
 }
 
 function LoadingView() {
-  const tc = useTranslations("common");
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
       <div className="flex flex-col items-center gap-3">
@@ -65,7 +63,7 @@ function LoadingView() {
 }
 
 function PaymentErrorView({ error }) {
-  const t = useTranslations("payment");
+  const t = (id, values) => intl.formatMessage({ id: `payments.payment.${id}` }, values);
   const isPaid = error === "Already paid";
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
@@ -93,8 +91,8 @@ function PaymentErrorView({ error }) {
 }
 
 function PaymentPageInner({ data, token }) {
-  const t = useTranslations("payment");
-  const tc = useTranslations("common");
+  const t = (id, values) => intl.formatMessage({ id: `payments.payment.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
 
   const [chosenInstallments, setChosenInstallments] = useState(
     () => (data.installmentOptions?.maxInstallments > 1 ? 1 : 1),
@@ -429,7 +427,9 @@ function PaymentPageInner({ data, token }) {
 }
 
 export default function PaymentPage() {
-  const { token } = useParams();
+  const intl = useIntl();
+  const router = useRouter();
+  const { token } = router.query;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");

@@ -1,7 +1,5 @@
-"use client";
-
 import { useState, useRef } from "react";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 import RichTextEditor from "@/components/RichTextEditor";
 
 export default function SendMessageModal({
@@ -12,8 +10,9 @@ export default function SendMessageModal({
   endpoint = "/api/messages",
   extraPayload = null,
 }) {
-  const t = useTranslations("messages");
-  const tc = useTranslations("common");
+  const intl = useIntl();
+  const t = (id, values) => intl.formatMessage({ id: `payments.messages.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
 
   const recipientsList = Array.isArray(recipientsProp) && recipientsProp.length > 0
     ? recipientsProp

@@ -1,5 +1,3 @@
-"use client";
-
 import { centsToDisplay } from "@/shared/utils/formatting";
 import ContactForm from "../ContactForm";
 

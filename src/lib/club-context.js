@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { getServerSession } from "next-auth";
+import { getServerSession as getServerSessionPages } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { connectMain, getTenantConn } from "@/lib/mongodb";
 import MigrationLog from "@/models/MigrationLog";
@@ -83,10 +84,14 @@ export async function getClubContextById(clubId, { allowDeactivated = false } = 
 // Returns the tenant context for the currently active club of the requesting
 // session. Use this from authenticated dashboard API routes.
 //
-// Returns `{ session, ctx }` on success or `{ error }` (a NextResponse) on
-// missing session / no active membership.
-export async function getClubContext() {
-  const session = await getServerSession(authOptions);
+// App Router usage: getClubContext()
+// Pages Router usage: getClubContext(req, res)
+//
+// Returns `{ session, ctx }` on success or `{ error }` on failure.
+export async function getClubContext(req, res) {
+  const session = req && res
+    ? await getServerSessionPages(req, res, authOptions)
+    : await getServerSession(authOptions);
   if (!session) {
     return { error: { status: 401, body: { error: "Unauthorized" } } };
   }

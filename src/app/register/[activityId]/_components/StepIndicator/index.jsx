@@ -1,5 +1,3 @@
-"use client";
-
 export default function StepIndicator({ current, completed, steps }) {
   return (
     <div className="flex items-center justify-center gap-0 mb-8 px-2 w-full">

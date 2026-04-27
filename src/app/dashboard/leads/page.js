@@ -1,13 +1,12 @@
-"use client";
-
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useRouter } from "next/router";
+import { useIntl } from "react-intl";
 
 export default function LeadsPage() {
+  const intl = useIntl();
   const router = useRouter();
-  const t = useTranslations("leads");
-  const tc = useTranslations("common");
+  const t = (id, values) => intl.formatMessage({ id: `payments.leads.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
 
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);

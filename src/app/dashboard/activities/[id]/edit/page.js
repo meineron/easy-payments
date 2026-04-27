@@ -1,8 +1,6 @@
-"use client";
-
 import { useState, useEffect, useCallback, useRef, use } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useTranslations, useLocale } from "next-intl";
+import { useRouter } from "next/router";
+import { useIntl } from "react-intl";
 import { activityTeamSlotKey } from "@/lib/activity-team-keys";
 import InvitationTemplateEditor from "@/components/InvitationTemplateEditor";
 import {
@@ -1258,7 +1256,7 @@ function TabWaivers({ activity, onSave, saving, tc, td }) {
 
 /* ============== TAB 5: Notifications ============== */
 function TabNotifications({ activity, onSave, saving, tc, td }) {
-  const locale = useLocale();
+  const { locale } = useIntl();
   const [message, setMessage] = useState("");
   const [invSubject, setInvSubject] = useState("");
   const [invBody, setInvBody] = useState("");
@@ -1336,14 +1334,15 @@ function TabNotifications({ activity, onSave, saving, tc, td }) {
 }
 
 /* ============== MAIN EDIT PAGE ============== */
-export default function ActivityEditPage({ params }) {
+export default function ActivityEditPage() {
+  const intl = useIntl();
   const resolvedParams = use(params);
   const activityId = resolvedParams.id;
   const router = useRouter();
   const searchParams = useSearchParams();
-  const t = useTranslations("activities");
-  const tc = useTranslations("common");
-  const td = useTranslations("activityDetail");
+  const t = (id, values) => intl.formatMessage({ id: `payments.activities.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
+  const td = (id, values) => intl.formatMessage({ id: `payments.activityDetail.${id}` }, values);
   const [activity, setActivity] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

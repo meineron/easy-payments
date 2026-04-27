@@ -1,0 +1,127 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =========================================================================
+ * Design tokens — single source of truth for the UI.
+ * ========================================================================= */
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+
+  /* Brand */
+  --color-brand-50: #eff6ff;
+  --color-brand-100: #dbeafe;
+  --color-brand-500: #3b82f6;
+  --color-brand-600: #2563eb;
+  --color-brand-700: #1d4ed8;
+
+  /* Status palette */
+  --color-status-pending-bg: #fef3c7;
+  --color-status-pending-fg: #a16207;
+  --color-status-partial-bg: #dbeafe;
+  --color-status-partial-fg: #1d4ed8;
+  --color-status-paid-bg: #d1fae5;
+  --color-status-paid-fg: #047857;
+  --color-status-refunded-bg: #ede9fe;
+  --color-status-refunded-fg: #6d28d9;
+  --color-status-cancelled-bg: #fee2e2;
+  --color-status-cancelled-fg: #dc2626;
+  --color-status-expected-bg: #ffedd5;
+  --color-status-expected-fg: #c2410c;
+
+  --z-dropdown: 40;
+  --z-drawer: 50;
+  --z-modal: 60;
+  --z-toast: 100;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+  min-height: 100vh;
+}
+
+input[type="date"],
+input[type="datetime-local"],
+input[type="time"],
+input[type="month"],
+input[type="week"] {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+input[type="date"]::-webkit-date-and-time-value {
+  text-align: start;
+}
+
+[dir="rtl"] {
+  text-align: right;
+}
+
+[dir="rtl"] input,
+[dir="rtl"] select,
+[dir="rtl"] textarea {
+  text-align: right;
+}
+
+[dir="rtl"] input[type="email"],
+[dir="rtl"] input[type="url"],
+[dir="rtl"] input[type="tel"] {
+  text-align: left;
+  direction: ltr;
+}
+
+[dir="rtl"] .phone-group {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] .phone-group select,
+[dir="rtl"] .phone-group input {
+  direction: ltr;
+  text-align: left;
+}
+
+[contenteditable] ul,
+[contenteditable] ol {
+  padding-left: 1.5em;
+  margin: 0.5em 0;
+}
+[contenteditable] ul { list-style-type: disc; }
+[contenteditable] ol { list-style-type: decimal; }
+[contenteditable] li { margin: 0.15em 0; }
+
+[contenteditable] .email-button {
+  display: inline-block;
+  padding: 12px 28px;
+  border-radius: 8px;
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 16px;
+  cursor: default;
+}
+
+[contenteditable] img {
+  cursor: pointer;
+}
+[contenteditable] img.img-selected {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes slideIn {
+  from { transform: translateY(-8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}

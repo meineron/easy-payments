@@ -1,5 +1,3 @@
-"use client";
-
 const PHONE_PREFIXES = ["+1", "+44", "+972", "+61", "+49", "+33", "+34", "+39", "+81", "+86"];
 
 export default function PhonePrefixInput({ prefix, phone, onPrefixChange, onPhoneChange, disabled, className = "", placeholder = "", required = false }) {

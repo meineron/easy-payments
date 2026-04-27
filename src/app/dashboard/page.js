@@ -1,8 +1,6 @@
-"use client";
-
 import { useSession } from "next-auth/react";
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 import Link from "next/link";
 import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
@@ -500,8 +498,9 @@ function RecordsTable({ stats, filters, t }) {
 }
 
 export default function ClubDashboard() {
+  const intl = useIntl();
   const { data: session } = useSession();
-  const t = useTranslations("dashboardAnalytics");
+  const t = (id, values) => intl.formatMessage({ id: `payments.dashboardAnalytics.${id}` }, values);
 
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);

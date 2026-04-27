@@ -1,15 +1,14 @@
-"use client";
-
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 import { formatDob } from "@/lib/dob";
 
 const PHONE_PREFIXES = ["+1", "+44", "+972", "+61", "+49", "+33", "+34", "+39", "+81", "+86"];
 
 export default function ParentsPage() {
-  const t = useTranslations("parents");
-  const tc = useTranslations("common");
+  const intl = useIntl();
+  const t = (id, values) => intl.formatMessage({ id: `payments.parents.${id}` }, values);
+  const tc = (id, values) => intl.formatMessage({ id: `payments.common.${id}` }, values);
 
   const [parents, setParents] = useState([]);
   const [loading, setLoading] = useState(true);

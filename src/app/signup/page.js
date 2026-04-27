@@ -1,7 +1,5 @@
-"use client";
-
 import { Suspense, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/router";
 import { signIn } from "next-auth/react";
 
 // /signup?token=...  — landing page for the one-time signup link emailed to

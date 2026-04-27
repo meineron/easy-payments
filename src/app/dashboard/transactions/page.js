@@ -1,10 +1,9 @@
-"use client";
-
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useIntl } from "react-intl";
 
 export default function TransactionsPage() {
-  const t = useTranslations("transactions");
+  const intl = useIntl();
+  const t = (id, values) => intl.formatMessage({ id: `payments.transactions.${id}` }, values);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
 
